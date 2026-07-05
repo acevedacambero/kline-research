@@ -133,6 +133,53 @@ def test_empty_success_and_missing_ohlcv_fail_explicitly() -> None:
 
 
 @pytest.mark.parametrize(
+    ("provider", "security", "missing_field"),
+    [
+        (EASTMONEY_PROVIDER, "600000", "open"),
+        (TENCENT_PROVIDER, "300750", "high"),
+        (SINA_PROVIDER, "600519", "close"),
+        (INDEX_PROVIDER, "000001", "volume"),
+    ],
+)
+def test_market_provider_requires_ohlcv_for_real_security_identifiers(
+    provider: str,
+    security: str,
+    missing_field: str,
+) -> None:
+    items = passing_observations()
+    target = next(index for index, item in enumerate(items) if item.provider == provider)
+    items[target] = observation(
+        provider,
+        security=security,
+        missing_fields=(missing_field,),
+    )
+
+    report = evaluate_gate(items)
+
+    assert report.passed is False
+    assert any("missing required OHLCV fields" in reason for reason in report.reasons)
+
+
+@pytest.mark.parametrize(
+    ("missing_provider", "expected_reason"),
+    [
+        (EASTMONEY_PROVIDER, "No EastMoney observations"),
+        (TENCENT_PROVIDER, "No Tencent observations"),
+    ],
+)
+def test_missing_threshold_provider_has_explicit_no_observations_reason(
+    missing_provider: str,
+    expected_reason: str,
+) -> None:
+    items = [item for item in passing_observations() if item.provider != missing_provider]
+
+    report = evaluate_gate(items)
+
+    assert report.passed is False
+    assert any(expected_reason in reason for reason in report.reasons)
+
+
+@pytest.mark.parametrize(
     ("error", "category"),
     [
         (TimeoutError("late"), "timeout"),

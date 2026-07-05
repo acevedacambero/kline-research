@@ -25,6 +25,9 @@ CANONICAL_PROVIDERS = (
     INDEX_PROVIDER,
     CALENDAR_PROVIDER,
 )
+MARKET_DATA_PROVIDERS = frozenset(
+    {EASTMONEY_PROVIDER, TENCENT_PROVIDER, SINA_PROVIDER, INDEX_PROVIDER}
+)
 OHLCV_FIELDS = frozenset({"open", "high", "low", "close", "volume"})
 
 
@@ -117,10 +120,14 @@ def evaluate_gate(observations: Iterable[ProbeObservation]) -> ProbeReport:
         reasons.append("No probe observations were provided.")
 
     eastmoney_rate = providers[EASTMONEY_PROVIDER].success_rate
+    if not grouped[EASTMONEY_PROVIDER]:
+        reasons.append("No EastMoney observations were provided.")
     if eastmoney_rate < 0.9:
         reasons.append(f"EastMoney success rate {eastmoney_rate:.1%} is below 90%.")
 
     tencent_rate = providers[TENCENT_PROVIDER].success_rate
+    if not grouped[TENCENT_PROVIDER]:
+        reasons.append("No Tencent observations were provided.")
     if tencent_rate < 0.8:
         reasons.append(f"Tencent success rate {tencent_rate:.1%} is below 80%.")
 
@@ -139,7 +146,7 @@ def evaluate_gate(observations: Iterable[ProbeObservation]) -> ProbeReport:
         item
         for item in items
         if item.success
-        and item.security in {"stock", "index"}
+        and item.provider in MARKET_DATA_PROVIDERS
         and OHLCV_FIELDS.intersection(item.missing_fields)
     ]
     if incomplete:
