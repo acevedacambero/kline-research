@@ -42,6 +42,9 @@ class ProbeObservation:
     error_type: str | None = None
     error_message: str | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "missing_fields", tuple(self.missing_fields))
+
 
 @dataclass(frozen=True)
 class ProviderReport:
@@ -54,12 +57,36 @@ class ProviderReport:
     missing_field_count: int
     error_categories: Mapping[str, int]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "error_categories", MappingProxyType(dict(self.error_categories)))
+
 
 @dataclass(frozen=True)
 class ProbeReport:
     providers: Mapping[str, ProviderReport]
     passed: bool
     reasons: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "providers", MappingProxyType(dict(self.providers)))
+        object.__setattr__(self, "reasons", tuple(self.reasons))
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a detached structure containing only JSON-compatible containers."""
+        providers = {
+            name: {
+                "observations": summary.observations,
+                "successes": summary.successes,
+                "success_rate": summary.success_rate,
+                "mean_latency_seconds": summary.mean_latency_seconds,
+                "p95_latency_seconds": summary.p95_latency_seconds,
+                "empty_response_count": summary.empty_response_count,
+                "missing_field_count": summary.missing_field_count,
+                "error_categories": dict(summary.error_categories),
+            }
+            for name, summary in self.providers.items()
+        }
+        return {"providers": providers, "passed": self.passed, "reasons": list(self.reasons)}
 
 
 def classify_error(exc: BaseException) -> str:
@@ -77,10 +104,10 @@ def classify_error(exc: BaseException) -> str:
 
 def percentile(values: Sequence[float], percent: float) -> float:
     """Calculate a percentile with linear interpolation between nearest ranks."""
-    if not values:
-        return 0.0
     if not 0 <= percent <= 100:
         raise ValueError("percent must be between 0 and 100")
+    if not values:
+        return 0.0
 
     ordered = sorted(values)
     position = (len(ordered) - 1) * percent / 100
@@ -100,7 +127,7 @@ def _summarize(items: Sequence[ProbeObservation]) -> ProviderReport:
         success_rate=successes / len(items) if items else 0.0,
         mean_latency_seconds=sum(latencies) / len(latencies) if latencies else 0.0,
         p95_latency_seconds=percentile(latencies, 95),
-        empty_response_count=sum(item.rows <= 0 for item in items),
+        empty_response_count=sum(item.success and item.rows <= 0 for item in items),
         missing_field_count=sum(len(item.missing_fields) for item in items),
         error_categories=MappingProxyType(dict(sorted(errors.items()))),
     )

@@ -1,3 +1,4 @@
+import json
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -73,7 +74,7 @@ def test_passing_gate_aggregates_rates_latency_counts_and_errors() -> None:
     assert eastmoney.success_rate == pytest.approx(0.9)
     assert eastmoney.mean_latency_seconds == pytest.approx(0.38)
     assert eastmoney.p95_latency_seconds == pytest.approx(1.55)
-    assert eastmoney.empty_response_count == 1
+    assert eastmoney.empty_response_count == 0
     assert eastmoney.missing_field_count == 0
     assert eastmoney.error_categories == {"timeout": 1}
 
@@ -126,7 +127,7 @@ def test_empty_success_and_missing_ohlcv_fail_explicitly() -> None:
     report = evaluate_gate(items)
 
     assert report.passed is False
-    assert report.providers[EASTMONEY_PROVIDER].empty_response_count == 2
+    assert report.providers[EASTMONEY_PROVIDER].empty_response_count == 1
     assert report.providers[INDEX_PROVIDER].missing_field_count == 1
     assert any("empty response" in reason for reason in report.reasons)
     assert any("missing required OHLCV fields" in reason for reason in report.reasons)
@@ -197,6 +198,82 @@ def test_percentile_uses_linear_interpolation_and_handles_empty_values() -> None
     assert percentile([4.0], 95) == 4.0
     assert percentile([1.0, 2.0, 3.0, 4.0], 50) == pytest.approx(2.5)
     assert percentile([1.0, 2.0], 95) == pytest.approx(1.95)
+
+
+@pytest.mark.parametrize("values", [[], [1.0]])
+@pytest.mark.parametrize("percent", [-0.1, 100.1])
+def test_percentile_rejects_invalid_percent_for_all_inputs(
+    values: list[float], percent: float
+) -> None:
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        percentile(values, percent)
+
+
+def test_transport_failure_is_not_an_empty_response() -> None:
+    report = evaluate_gate(
+        [observation(EASTMONEY_PROVIDER, success=False, rows=0, error_type="timeout")]
+    )
+
+    assert report.providers[EASTMONEY_PROVIDER].empty_response_count == 0
+
+
+def test_observation_normalizes_missing_fields_and_report_is_deeply_immutable() -> None:
+    item = observation(EASTMONEY_PROVIDER)
+    item = ProbeObservation(
+        provider=item.provider,
+        security=item.security,
+        success=item.success,
+        elapsed_seconds=item.elapsed_seconds,
+        rows=item.rows,
+        missing_fields=["open", "volume"],  # type: ignore[arg-type]
+    )
+    report = evaluate_gate(passing_observations())
+
+    assert item.missing_fields == ("open", "volume")
+    with pytest.raises(TypeError):
+        report.providers[EASTMONEY_PROVIDER] = report.providers[EASTMONEY_PROVIDER]  # type: ignore[index]
+    with pytest.raises(TypeError):
+        report.providers[EASTMONEY_PROVIDER].error_categories["timeout"] = 1  # type: ignore[index]
+    assert isinstance(report.reasons, tuple)
+
+
+def test_report_to_dict_is_json_serializable_and_detached() -> None:
+    report = evaluate_gate(passing_observations())
+
+    payload = report.to_dict()
+
+    assert json.loads(json.dumps(payload))["passed"] is True
+    assert isinstance(payload["reasons"], list)
+    assert isinstance(payload["providers"][EASTMONEY_PROVIDER]["error_categories"], dict)
+    payload["providers"][EASTMONEY_PROVIDER]["success_rate"] = 0.0
+    assert report.providers[EASTMONEY_PROVIDER].success_rate == pytest.approx(0.9)
+
+
+def test_tencent_exactly_eighty_percent_passes() -> None:
+    report = evaluate_gate(passing_observations())
+
+    assert report.providers[TENCENT_PROVIDER].success_rate == pytest.approx(0.8)
+    assert not any("Tencent success rate" in reason for reason in report.reasons)
+    assert report.passed is True
+
+
+def test_tencent_just_below_eighty_percent_fails_with_explicit_reason() -> None:
+    items = passing_observations()
+    removed = False
+    below_boundary = []
+    for item in items:
+        if item.provider == TENCENT_PROVIDER and item.success and not removed:
+            removed = True
+            continue
+        below_boundary.append(item)
+
+    report = evaluate_gate(below_boundary)
+
+    assert report.providers[TENCENT_PROVIDER].success_rate == pytest.approx(0.75)
+    assert any(
+        reason == "Tencent success rate 75.0% is below 80%." for reason in report.reasons
+    )
+    assert report.passed is False
 
 
 def test_canonical_provider_names_are_stable() -> None:
