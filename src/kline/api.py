@@ -1,0 +1,431 @@
+from __future__ import annotations
+
+from concurrent.futures import as_completed, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from dataclasses import asdict
+from datetime import date
+import threading
+import time
+import uuid
+
+import pandas as pd
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from .config import Settings, VERSIONS
+from .data.akshare_source import AkShareSource
+from .data.download_source import HybridDownloadSource
+from .data.eastmoney_source import EastMoneyHttpSource
+from .data.pipeline import DatasetPipeline
+from .p1 import (
+    compute_drawdown_label,
+    compute_forward_labels,
+    compute_label_maturity_date,
+    compute_path_label,
+    resolve_executable_entry,
+    sample_eligibility,
+)
+from .p1.batch import BatchLabelBuilder, LabelDatasetStore
+from .p1.market_rules import status_from_name
+
+
+class ImportRequest(BaseModel):
+    scope: str = "representative"
+    refresh: bool = False
+
+
+class AuditRequest(BaseModel):
+    exchange: str
+    code: str
+    signal_date: date
+
+
+class TaskStore:
+    def __init__(self, workers: int = 8):
+        self.items: dict[str, dict] = {}
+        self.lock = threading.Lock()
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="akshare-import")
+        self.fetch_executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="market-fetch")
+
+    def active(self) -> dict | None:
+        return next(
+            (item for item in self.items.values() if item["status"] in {"queued", "running"}),
+            None,
+        )
+
+    def submit(
+        self,
+        pipeline: DatasetPipeline,
+        source: HybridDownloadSource,
+        securities: list[dict[str, str]],
+        start_date: date,
+        end_date: date,
+        timeout_seconds: int,
+    ) -> str:
+        task_id = uuid.uuid4().hex
+        self.items[task_id] = {
+            "id": task_id, "status": "queued", "total": len(securities), "done": 0,
+            "errors": [], "currentSecurity": None, "stage": "queued", "speed": 0.0,
+            "etaSeconds": None, "directAvailable": source.direct_available,
+        }
+
+        def run():
+            self.items[task_id]["status"] = "running"
+            self.items[task_id]["stage"] = "parallel-download"
+            started = time.monotonic()
+
+            def fetch(security):
+                return security, source.fetch_bundle(
+                    security["exchange"], security["code"], start_date, end_date
+                )
+
+            futures = {
+                self.fetch_executor.submit(fetch, security): security for security in securities
+            }
+            for future in as_completed(futures):
+                security = futures[future]
+                security_key = f'{security["exchange"]}{security["code"]}'
+                self.items[task_id]["currentSecurity"] = security_key
+                try:
+                    self.items[task_id]["stage"] = "writing-snapshot"
+                    _, (raw, factors) = future.result(timeout=timeout_seconds)
+                    self.items[task_id]["stage"] = "writing-snapshot"
+                    with self.lock:
+                        pipeline.import_security(
+                            security["exchange"], security["code"], raw, factors
+                        )
+                except FutureTimeoutError:
+                    future.cancel()
+                    self.items[task_id]["errors"].append(
+                        {"security": security_key, "message": f"fetch timed out after {timeout_seconds}s"}
+                    )
+                except Exception as exc:
+                    self.items[task_id]["errors"].append(
+                        {"security": security_key, "message": str(exc)}
+                    )
+                finally:
+                    self.items[task_id]["done"] += 1
+                    elapsed = max(time.monotonic() - started, 0.001)
+                    speed = self.items[task_id]["done"] / elapsed
+                    remaining = self.items[task_id]["total"] - self.items[task_id]["done"]
+                    self.items[task_id]["speed"] = round(speed, 3)
+                    self.items[task_id]["etaSeconds"] = round(remaining / speed) if speed else None
+                    self.items[task_id]["directAvailable"] = source.direct_available
+            self.items[task_id]["status"] = (
+                "completed_with_errors" if self.items[task_id]["errors"] else "completed"
+            )
+            self.items[task_id]["currentSecurity"] = None
+            self.items[task_id]["stage"] = "finished"
+
+        self.executor.submit(run)
+        return task_id
+
+
+class LabelTaskStore:
+    def __init__(self):
+        self.items: dict[str, dict] = {}
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="label-build")
+
+    def submit(
+        self,
+        pipeline: DatasetPipeline,
+        source: AkShareSource,
+        securities: list[dict[str, str]],
+        names: dict[str, str],
+        output_root,
+    ) -> str:
+        task_id = uuid.uuid4().hex
+        self.items[task_id] = {
+            "id": task_id, "status": "queued", "total": len(securities), "done": 0,
+            "rows": 0, "errors": [],
+        }
+
+        def run():
+            self.items[task_id]["status"] = "running"
+            benchmarks: dict[str, list[dict]] = {}
+            builder = BatchLabelBuilder()
+            store = LabelDatasetStore(output_root)
+            for security in securities:
+                key = f'{security["exchange"]}{security["code"]}'
+                try:
+                    if security["exchange"] not in benchmarks:
+                        symbol = "000001" if security["exchange"] == "sh" else "399001"
+                        frame = source.index_history(symbol, date(1990, 1, 1), date.today())
+                        for column in ("open", "high", "low", "close"):
+                            frame[f"{column}_qfq"] = frame[column]
+                            frame[f"{column}_total_return"] = frame[column]
+                        benchmarks[security["exchange"]] = frame.to_dict("records")
+                    bars = pd.read_parquet(security["derived_path"]).to_dict("records")
+                    status = status_from_name(names.get(key, ""))
+                    rows = builder.build(
+                        security["exchange"], security["code"], bars,
+                        benchmarks[security["exchange"]], security["snapshot_version"],
+                        st_status=status.is_st,
+                    )
+                    report = store.write(security["exchange"], security["code"], rows)
+                    self.items[task_id]["rows"] += report.rows
+                except Exception as exc:
+                    self.items[task_id]["errors"].append({"security": key, "message": str(exc)})
+                finally:
+                    self.items[task_id]["done"] += 1
+            self.items[task_id]["status"] = (
+                "completed_with_errors" if self.items[task_id]["errors"] else "completed"
+            )
+
+        self.executor.submit(run)
+        return task_id
+
+
+def _market_counts(securities: list[dict[str, str]]) -> dict[str, int]:
+    return {market: sum(item["exchange"] == market for item in securities) for market in ("sh", "sz", "bj")}
+
+
+def dataframe_records(frame: pd.DataFrame) -> list[dict]:
+    return frame.astype(object).where(pd.notna(frame), None).to_dict("records")
+
+
+def create_app(settings: Settings | None = None, source: AkShareSource | None = None) -> FastAPI:
+    settings = settings or Settings()
+    source = source or AkShareSource(retries=settings.request_retries)
+    app = FastAPI(title="K-line Research API", version="0.2.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    pipeline = DatasetPipeline(settings.data_path)
+    pipeline.initialize_catalog()
+    tasks = TaskStore(settings.download_workers)
+    download_source = HybridDownloadSource(
+        EastMoneyHttpSource(retries=1), source
+    )
+    label_tasks = LabelTaskStore()
+    security_cache: list[dict[str, str]] | None = None
+
+    def securities_list(refresh: bool = False) -> list[dict[str, str]]:
+        nonlocal security_cache
+        if security_cache is None and not refresh:
+            security_cache = pipeline.load_security_master() or None
+        if security_cache is None or refresh:
+            security_cache = source.list_securities()
+            pipeline.save_security_master(security_cache)
+        return security_cache
+
+    @app.get("/api/system/health")
+    def health():
+        return {
+            "status": "ok",
+            "dataSource": "AkShare",
+            "cachePath": str(settings.data_path),
+            "versions": VERSIONS,
+        }
+
+    @app.post("/api/datasets/validate")
+    def validate_dataset():
+        try:
+            securities = securities_list(refresh=True)
+        except Exception as exc:
+            raise HTTPException(
+                503,
+                detail={"code": "AKSHARE_UNAVAILABLE", "message": f"AkShare 数据源不可用：{exc}"},
+            ) from exc
+        return {
+            "valid": bool(securities),
+            "source": "AkShare",
+            "markets": _market_counts(securities),
+            "securityCount": len(securities),
+        }
+
+    @app.post("/api/datasets/import", status_code=202)
+    def start_import(request: ImportRequest):
+        active = tasks.active()
+        if active:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "IMPORT_ALREADY_RUNNING",
+                    "message": f'已有导入任务运行中：{active["id"]}',
+                    "taskId": active["id"],
+                },
+            )
+        if request.scope == "representative":
+            securities = [
+                {"exchange": "sh", "code": "600000", "name": "浦发银行"},
+                {"exchange": "sz", "code": "000001", "name": "平安银行"},
+                {"exchange": "bj", "code": "920001", "name": "纬达光电"},
+            ]
+        elif request.scope == "all":
+            try:
+                securities = securities_list()
+            except Exception as exc:
+                raise HTTPException(
+                    503, detail={"code": "AKSHARE_UNAVAILABLE", "message": str(exc)}
+                ) from exc
+        else:
+            raise HTTPException(
+                422,
+                detail={"code": "INVALID_IMPORT_SCOPE", "message": "scope must be representative or all"},
+            )
+        requested_total = len(securities)
+        if not request.refresh:
+            cached_keys = {
+                f'{item["exchange"]}{item["code"]}'
+                for item in pipeline.cached_securities()
+            }
+            securities = [
+                item
+                for item in securities
+                if f'{item["exchange"]}{item["code"]}' not in cached_keys
+            ]
+        skipped = requested_total - len(securities)
+        start = date.fromisoformat(f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-{settings.history_start_date[6:]}")
+        task_id = tasks.submit(
+            pipeline, download_source, securities, start, date.today(),
+            settings.security_fetch_timeout_seconds,
+        )
+        return {
+            "taskId": task_id, "total": len(securities),
+            "requested": requested_total, "skipped": skipped,
+        }
+
+    @app.get("/api/datasets/tasks/{task_id}")
+    def task_status(task_id: str):
+        if task_id not in tasks.items:
+            raise HTTPException(404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"})
+        return tasks.items[task_id]
+
+    @app.get("/api/datasets/quality")
+    def quality():
+        cached = pipeline.cached_market_counts()
+        return {
+            "source": "AkShare",
+            "cachedSecurities": cached,
+            "totalCached": sum(cached.values()),
+            "approximateRuleRatio": None,
+            "qualityEvents": pipeline.quality_events(),
+        }
+
+    @app.post("/api/labels/build", status_code=202)
+    def build_labels(request: ImportRequest):
+        cached = pipeline.cached_securities()
+        if request.scope == "representative":
+            cached = cached[:3]
+        elif request.scope != "all":
+            raise HTTPException(
+                422, detail={"code": "INVALID_LABEL_SCOPE", "message": "scope must be representative or all"}
+            )
+        try:
+            names = {
+                f'{item["exchange"]}{item["code"]}': item["name"]
+                for item in securities_list()
+            }
+        except Exception:
+            names = {}
+        task_id = label_tasks.submit(
+            pipeline, source, cached, names, settings.data_path
+        )
+        return {"taskId": task_id, "total": len(cached)}
+
+    @app.get("/api/labels/tasks/{task_id}")
+    def label_task_status(task_id: str):
+        if task_id not in label_tasks.items:
+            raise HTTPException(
+                404, detail={"code": "TASK_NOT_FOUND", "message": "标签任务不存在"}
+            )
+        return label_tasks.items[task_id]
+
+    @app.get("/api/securities")
+    def securities(query: str = ""):
+        try:
+            rows = securities_list()
+        except Exception as exc:
+            raise HTTPException(503, detail={"code": "AKSHARE_UNAVAILABLE", "message": str(exc)}) from exc
+        needle = query.strip().lower()
+        if needle:
+            rows = [row for row in rows if needle in row["code"].lower() or needle in row["name"].lower()]
+        return rows[:50]
+
+    def load_bars(exchange: str, code: str) -> pd.DataFrame:
+        normalized = pipeline.latest_derived_path(exchange, code)
+        if normalized is None or not normalized.exists():
+            start = date.fromisoformat(f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-{settings.history_start_date[6:]}")
+            try:
+                raw = source.stock_history(code, start, date.today(), "")
+                factors = source.adjustment_factors(code)
+                pipeline.import_security(exchange, code, raw, factors)
+            except Exception as exc:
+                raise HTTPException(
+                    503, detail={"code": "AKSHARE_FETCH_FAILED", "message": f"行情获取失败：{exc}"}
+                ) from exc
+            normalized = pipeline.latest_derived_path(exchange, code)
+        if normalized is None:
+            raise HTTPException(500, detail={"code": "CACHE_WRITE_FAILED", "message": "快照写入失败"})
+        return pd.read_parquet(normalized)
+
+    def benchmark_bars(exchange: str) -> list[dict]:
+        symbol = "000001" if exchange == "sh" else "399001"
+        start = date.fromisoformat(f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-{settings.history_start_date[6:]}")
+        try:
+            frame = source.index_history(symbol, start, date.today())
+        except Exception:
+            return []
+        for column in ("open", "high", "low", "close"):
+            frame[f"{column}_qfq"] = frame[column]
+        return frame.to_dict("records")
+
+    @app.get("/api/securities/{exchange}/{code}/bars")
+    def bars(exchange: str, code: str):
+        frame = load_bars(exchange, code)
+        return dataframe_records(frame)
+
+    @app.post("/api/p1/audit")
+    def audit(request: AuditRequest):
+        frame = load_bars(request.exchange, request.code)
+        records = frame.to_dict("records")
+        indices = {row["date"]: index for index, row in enumerate(records)}
+        if request.signal_date not in indices:
+            raise HTTPException(
+                422,
+                detail={"code": "SIGNAL_DATE_NOT_FOUND", "message": "信号日不是有效交易日"},
+            )
+        signal_index = indices[request.signal_date]
+        eligibility = sample_eligibility(records, signal_index, rights_status="ok")
+        entry = resolve_executable_entry(
+            records, signal_index, code=request.code, exchange=request.exchange
+        )
+        output = {
+            "eligibility": asdict(eligibility), "entry": asdict(entry), "labels": {},
+            "path": None, "drawdown": None, "dataSource": "AkShare",
+            "dataSnapshotVersion": pipeline.latest_snapshot_version(
+                request.exchange, request.code
+            ),
+            "factorVersion": records[0].get("factor_version"),
+        }
+        if entry.executable and entry.entry_index is not None:
+            benchmark = benchmark_bars(request.exchange)
+            output["labels"] = {
+                str(key): asdict(value)
+                for key, value in compute_forward_labels(
+                    records, benchmark, signal_index, entry.entry_index
+                ).items()
+            }
+            path_start = records[entry.entry_index].get(
+                "open_total_return", records[entry.entry_index]["open_qfq"]
+            )
+            output["path"] = asdict(
+                compute_path_label(records, entry.entry_index, path_start)
+            )
+            output["drawdown"] = asdict(
+                compute_drawdown_label(records, entry.entry_index, path_start, 20, 0.08)
+            )
+            output["maturityDate"] = compute_label_maturity_date(
+                [row["date"] for row in records], entry.entry_index, 20
+            )
+        return output
+
+    return app
+
+
+app = create_app()

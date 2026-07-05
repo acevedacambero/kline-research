@@ -1,0 +1,10 @@
+{
+  "name": "kline-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --dir web dev",
+    "build": "pnpm --dir web build",
+    "test:web": "pnpm --dir web test",
+    "generate:api": ".\\.venv\\Scripts\\python.exe scripts\\export_openapi.py && pnpm --dir web exec openapi-typescript openapi.json -o src/generated-api.d.ts"
+  }
+}
