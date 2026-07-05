@@ -1,8 +1,12 @@
+from datetime import date, timedelta
+import time
+
 import pandas as pd
 from fastapi.testclient import TestClient
 
 from kline.api import create_app, dataframe_records
 from kline.config import Settings
+from kline.data.pipeline import DatasetPipeline
 
 
 class FakeSource:
@@ -37,3 +41,59 @@ def test_validate_akshare_reports_available_securities(tmp_path):
 def test_dataframe_records_converts_nan_to_json_null():
     frame = pd.DataFrame([{"date": "2024-01-02", "ma60": float("nan"), "close": 10.0}])
     assert dataframe_records(frame) == [{"date": "2024-01-02", "ma60": None, "close": 10.0}]
+
+
+def seed_security(data_path):
+    rows = []
+    for index in range(260):
+        close = 10 + index / 100
+        rows.append({
+            "date": date(2024, 1, 1) + timedelta(days=index),
+            "open": close, "high": close + 0.1, "low": close - 0.1, "close": close,
+            "volume": 1000 + index, "amount": 10000 + index,
+        })
+    factors = pd.DataFrame([{
+        "date": date(1900, 1, 1), "qfq_factor": 1.0, "hfq_factor": 1.0,
+    }])
+    pipeline = DatasetPipeline(data_path)
+    pipeline.initialize_catalog()
+    pipeline.import_security("sh", "600000", pd.DataFrame(rows), factors)
+
+
+def test_feature_build_task_and_point_in_time_audit(tmp_path):
+    data_path = tmp_path / "data"
+    seed_security(data_path)
+    app = create_app(Settings(data_path=data_path), FakeSource())
+    client = TestClient(app)
+
+    started = client.post("/api/features/build", json={"scope": "all"})
+    assert started.status_code == 202
+    task_id = started.json()["taskId"]
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        task = client.get(f"/api/features/tasks/{task_id}").json()
+        if task["status"] not in {"queued", "running"}:
+            break
+        time.sleep(0.02)
+    assert task["status"] == "completed"
+    assert task["rows"] == 260
+    assert task["errors"] == []
+
+    audited = client.post(
+        "/api/p2/audit",
+        json={"exchange": "sh", "code": "600000", "signal_date": "2024-09-16"},
+    )
+    assert audited.status_code == 200
+    body = audited.json()
+    assert set(body["groups"]) == {
+        "trend", "position", "momentum", "volumePrice", "tradingBehavior"
+    }
+    assert body["versions"]["featureDefinitionVersion"] == "daily-features-v1"
+    assert body["availableHistory"] == 260
+
+
+def test_feature_task_unknown_id_is_404(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    response = TestClient(app).get("/api/features/tasks/missing")
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "TASK_NOT_FOUND"

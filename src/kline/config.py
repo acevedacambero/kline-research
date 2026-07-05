@@ -18,7 +18,7 @@ VERSIONS = {
     "derivedAdjustmentVersion": "raw-factor-engine-v1",
     "algorithmVersion": "p1-v1",
     "rightsVersion": "akshare-factor-v1",
-    "featureDefinitionVersion": "not-applicable",
+    "featureDefinitionVersion": "daily-features-v1",
     "scoreDefinitionVersion": "not-applicable",
     "labelDefinitionVersion": "daily-v1",
     "limitRuleVersion": "cn-equity-v1",
