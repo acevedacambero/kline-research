@@ -13,6 +13,8 @@ from time import perf_counter
 from types import MappingProxyType
 from typing import Callable, Iterable, Mapping, Sequence
 
+import pandas as pd
+
 
 EASTMONEY_PROVIDER = "eastmoney"
 TENCENT_PROVIDER = "tencent"
@@ -83,10 +85,12 @@ class ProbeReport:
     providers: Mapping[str, ProviderReport]
     passed: bool
     reasons: tuple[str, ...]
+    observations: tuple[ProbeObservation, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "providers", MappingProxyType(dict(self.providers)))
         object.__setattr__(self, "reasons", tuple(self.reasons))
+        object.__setattr__(self, "observations", tuple(self.observations))
 
     def to_dict(self) -> dict[str, object]:
         """Return a detached structure containing only JSON-compatible containers."""
@@ -103,22 +107,50 @@ class ProbeReport:
             }
             for name, summary in self.providers.items()
         }
-        return {"providers": providers, "passed": self.passed, "reasons": list(self.reasons)}
+        observations = [
+            {
+                "provider": item.provider,
+                "security": item.security,
+                "success": item.success,
+                "elapsed_seconds": item.elapsed_seconds,
+                "rows": item.rows,
+                "missing_fields": list(item.missing_fields),
+                "error_type": item.error_type,
+                "error_message": item.error_message,
+            }
+            for item in self.observations
+        ]
+        return {
+            "providers": providers,
+            "passed": self.passed,
+            "reasons": list(self.reasons),
+            "observations": observations,
+        }
 
 
 def classify_error(exc: BaseException) -> str:
     """Return a stable, low-cardinality category for a probe exception."""
-    if isinstance(exc, TimeoutError):
-        return "timeout"
-    if isinstance(exc, ConnectionError):
-        return "network"
-    if isinstance(exc, (ValueError, TypeError, KeyError)):
-        return "data"
-
-    name = type(exc).__name__.lower()
-    if "connection" in name:
-        return "network"
-    return name.removesuffix("error") or "unknown"
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    fallback = "unknown"
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TimeoutError):
+            return "timeout"
+        if isinstance(current, ConnectionError):
+            return "network"
+        if isinstance(current, (ValueError, TypeError, KeyError)):
+            fallback = "data"
+        else:
+            name = type(current).__name__.lower()
+            if "timeout" in name:
+                return "timeout"
+            if "connection" in name:
+                return "network"
+            if fallback == "unknown":
+                fallback = name.removesuffix("error") or "unknown"
+        current = current.__cause__ or current.__context__
+    return fallback
 
 
 def percentile(values: Sequence[float], percent: float) -> float:
@@ -204,6 +236,7 @@ def evaluate_gate(observations: Iterable[ProbeObservation]) -> ProbeReport:
         providers=MappingProxyType(providers),
         passed=not reasons,
         reasons=tuple(reasons),
+        observations=items,
     )
 
 
@@ -228,8 +261,6 @@ class ProviderProbeRunner:
         tencent = TencentHttpSource()
 
         def sina(exchange: str, code: str, start: date, end: date):
-            import akshare as ak
-
             return ak.stock_zh_a_daily(
                 symbol=f"{exchange}{code}",
                 start_date=start.strftime("%Y%m%d"),
@@ -237,15 +268,12 @@ class ProviderProbeRunner:
                 adjust="",
             )
 
-        def index(_exchange: str, code: str, start: date, end: date):
-            from kline.data.akshare_source import AkShareSource
-
-            return AkShareSource().index_history(code, start, end)
+        import akshare as ak
 
         def calendar(_exchange: str, _code: str, _start: date, _end: date):
             from kline.data.akshare_source import AkShareSource
 
-            return AkShareSource().trading_calendar()
+            return AkShareSource(client=ak).trading_calendar()
 
         return {
             EASTMONEY_PROVIDER: lambda exchange, code, start, end: eastmoney.fetch_history(
@@ -253,9 +281,43 @@ class ProviderProbeRunner:
             ),
             TENCENT_PROVIDER: tencent.fetch_history,
             SINA_PROVIDER: sina,
-            INDEX_PROVIDER: index,
+            INDEX_PROVIDER: ProviderProbeRunner.index_adapter(ak),
             CALENDAR_PROVIDER: calendar,
         }
+
+    @staticmethod
+    def index_adapter(client: object) -> ProviderAdapter:
+        """Build an index probe that never invokes an alternate provider."""
+
+        def fetch(_exchange: str, code: str, start: date, end: date) -> pd.DataFrame:
+            frame = client.index_zh_a_hist(  # type: ignore[attr-defined]
+                symbol=code,
+                period="daily",
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
+            )
+            aliases = {
+                "日期": "date",
+                "开盘": "open",
+                "最高": "high",
+                "最低": "low",
+                "收盘": "close",
+                "成交量": "volume",
+                "成交额": "amount",
+            }
+            normalized = frame.rename(columns=aliases)
+            required = ["date", "open", "high", "low", "close", "volume"]
+            missing = [column for column in required if column not in normalized.columns]
+            if missing:
+                raise ValueError(f"index_zh_a_hist missing columns: {', '.join(missing)}")
+            columns = required + (["amount"] if "amount" in normalized.columns else [])
+            result = normalized[columns].copy()
+            result["date"] = pd.to_datetime(result["date"], errors="raise").dt.date
+            for column in columns[1:]:
+                result[column] = pd.to_numeric(result[column], errors="raise")
+            return result.sort_values("date").drop_duplicates("date").reset_index(drop=True)
+
+        return fetch
 
     def run(self, *, quick: bool = False) -> ProbeReport:
         end = self.today()
@@ -279,6 +341,7 @@ class ProviderProbeRunner:
                 passed=False,
                 reasons=report.reasons
                 + ("Quick mode is diagnostic only and is not a production gate.",),
+                observations=report.observations,
             )
         return report
 

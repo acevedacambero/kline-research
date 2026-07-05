@@ -32,9 +32,8 @@ class TencentHttpSource:
         symbol = f"{exchange.lower()}{code}"
         params = {
             "param": (
-                f"{symbol},day,{start_date.isoformat()},{end_date.isoformat()},90,qfq"
+                f"{symbol},day,{start_date.isoformat()},{end_date.isoformat()},90"
             ),
-            "_var": "kline_dayqfq",
         }
         last_error: Exception | None = None
         for attempt in range(1, self.retries + 1):

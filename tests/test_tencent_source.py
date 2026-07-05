@@ -58,9 +58,11 @@ def test_uses_raw_daily_query_parameters_and_bounded_timeout():
     assert url == "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
     assert kwargs["timeout"] == 7
     assert kwargs["params"] == {
-        "param": "sh600000,day,2026-04-01,2026-07-01,90,qfq",
-        "_var": "kline_dayqfq",
+        "param": "sh600000,day,2026-04-01,2026-07-01,90",
     }
+    assert not any(
+        token in str(kwargs["params"]).lower() for token in ("qfq", "hfq")
+    )
 
 
 def test_retries_transient_failure_then_returns_rows():

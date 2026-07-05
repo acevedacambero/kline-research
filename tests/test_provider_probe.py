@@ -247,9 +247,22 @@ def test_report_to_dict_is_json_serializable_and_detached() -> None:
 
     assert json.loads(json.dumps(payload))["passed"] is True
     assert isinstance(payload["reasons"], list)
+    assert payload["observations"][0] == {
+        "provider": "eastmoney",
+        "security": "stock",
+        "success": True,
+        "elapsed_seconds": 0.1,
+        "rows": 10,
+        "missing_fields": [],
+        "error_type": None,
+        "error_message": None,
+    }
     assert isinstance(payload["providers"][EASTMONEY_PROVIDER]["error_categories"], dict)
     payload["providers"][EASTMONEY_PROVIDER]["success_rate"] = 0.0
     assert report.providers[EASTMONEY_PROVIDER].success_rate == pytest.approx(0.9)
+    assert report.observations == tuple(passing_observations())
+    with pytest.raises(FrozenInstanceError):
+        report.observations[0].rows = 0  # type: ignore[misc]
 
 
 def test_tencent_exactly_eighty_percent_passes() -> None:
@@ -351,6 +364,56 @@ def test_runner_records_failures_and_missing_fields_without_aborting() -> None:
     assert report.providers[EASTMONEY_PROVIDER].error_categories == {"timeout": 1}
     assert report.providers[EASTMONEY_PROVIDER].missing_field_count > 0
     assert report.passed is False
+    assert len(report.to_dict()["observations"]) == 25
+
+
+@pytest.mark.parametrize(
+    ("error", "category"),
+    [(TimeoutError("late"), "timeout"), (ConnectionError("offline"), "network")],
+)
+def test_runner_preserves_wrapped_transport_error_category(error, category) -> None:
+    def adapter(*args):
+        try:
+            raise error
+        except Exception as exc:
+            raise RuntimeError("provider attempts exhausted") from exc
+
+    adapters = {provider: lambda *args: FrameLike() for provider in (
+        EASTMONEY_PROVIDER, TENCENT_PROVIDER, SINA_PROVIDER,
+        INDEX_PROVIDER, CALENDAR_PROVIDER,
+    )}
+    adapters[TENCENT_PROVIDER] = adapter
+
+    report = ProviderProbeRunner(adapters=adapters).run(quick=True)
+
+    tencent = [item for item in report.observations if item.provider == TENCENT_PROVIDER]
+    assert all(item.error_type == category for item in tencent)
+
+
+def test_explicit_default_index_adapter_never_calls_fallback() -> None:
+    class FakeClient:
+        fallback_called = False
+
+        def index_zh_a_hist(self, **kwargs):
+            raise ConnectionError("primary unavailable")
+
+        def stock_zh_index_daily(self, **kwargs):
+            self.fallback_called = True
+            return FrameLike()
+
+    client = FakeClient()
+    adapters = {provider: lambda *args: FrameLike() for provider in (
+        EASTMONEY_PROVIDER, TENCENT_PROVIDER, SINA_PROVIDER,
+        INDEX_PROVIDER, CALENDAR_PROVIDER,
+    )}
+    adapters[INDEX_PROVIDER] = ProviderProbeRunner.index_adapter(client)
+
+    report = ProviderProbeRunner(adapters=adapters).run(quick=True)
+
+    item = next(item for item in report.observations if item.provider == INDEX_PROVIDER)
+    assert item.success is False
+    assert item.error_type == "network"
+    assert client.fallback_called is False
 
 
 def test_quick_runner_is_explicitly_diagnostic_and_never_passes_gate() -> None:
