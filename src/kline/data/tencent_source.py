@@ -1,0 +1,82 @@
+from __future__ import annotations
+
+from datetime import date
+import time
+
+import pandas as pd
+import requests
+
+
+class TencentHttpSource:
+    """Fetch unadjusted daily bars from Tencent's K-line endpoint."""
+
+    url = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+
+    def __init__(
+        self,
+        session=None,
+        retries: int = 3,
+        timeout_seconds: float = 15,
+        retry_delay: float = 0.25,
+    ) -> None:
+        if retries < 1:
+            raise ValueError("retries must be at least 1")
+        self.session = session or requests.Session()
+        self.retries = retries
+        self.timeout_seconds = timeout_seconds
+        self.retry_delay = retry_delay
+
+    def fetch_history(
+        self, exchange: str, code: str, start_date: date, end_date: date
+    ) -> pd.DataFrame:
+        symbol = f"{exchange.lower()}{code}"
+        params = {
+            "param": (
+                f"{symbol},day,{start_date.isoformat()},{end_date.isoformat()},90,qfq"
+            ),
+            "_var": "kline_dayqfq",
+        }
+        last_error: Exception | None = None
+        for attempt in range(1, self.retries + 1):
+            try:
+                response = self.session.get(
+                    self.url, params=params, timeout=self.timeout_seconds
+                )
+                response.raise_for_status()
+                payload = response.json()
+                try:
+                    instrument = payload["data"][symbol]
+                except (KeyError, TypeError) as exc:
+                    raise ValueError("malformed Tencent response: instrument missing") from exc
+                if not isinstance(instrument, dict) or "day" not in instrument:
+                    raise ValueError("malformed Tencent response: raw day series missing")
+                rows = instrument["day"]
+                if not rows:
+                    raise ValueError("Tencent returned no daily rows")
+                return self._normalize(rows)
+            except Exception as exc:
+                last_error = exc
+                if attempt < self.retries and self.retry_delay:
+                    time.sleep(self.retry_delay * attempt)
+        raise RuntimeError(
+            f"Tencent {symbol} failed after {self.retries} attempts: {last_error}"
+        ) from last_error
+
+    @staticmethod
+    def _normalize(rows: object) -> pd.DataFrame:
+        if not isinstance(rows, list) or any(
+            not isinstance(row, (list, tuple)) or len(row) < 6 for row in rows
+        ):
+            raise ValueError("malformed Tencent daily rows")
+        include_amount = all(len(row) >= 7 for row in rows)
+        columns = ["date", "open", "close", "high", "low", "volume"]
+        if include_amount:
+            columns.append("amount")
+        result = pd.DataFrame([row[: len(columns)] for row in rows], columns=columns)
+        try:
+            result["date"] = pd.to_datetime(result["date"], errors="raise").dt.date
+            for column in columns[1:]:
+                result[column] = pd.to_numeric(result[column], errors="raise")
+        except Exception as exc:
+            raise ValueError(f"malformed Tencent daily rows: {exc}") from exc
+        return result.sort_values("date").drop_duplicates("date").reset_index(drop=True)

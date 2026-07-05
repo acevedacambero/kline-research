@@ -2,6 +2,7 @@ import json
 from dataclasses import FrozenInstanceError
 
 import pytest
+import requests
 
 from kline.ops.provider_probe import (
     CALENDAR_PROVIDER,
@@ -10,6 +11,7 @@ from kline.ops.provider_probe import (
     SINA_PROVIDER,
     TENCENT_PROVIDER,
     ProbeObservation,
+    ProviderProbeRunner,
     classify_error,
     evaluate_gate,
     percentile,
@@ -185,6 +187,7 @@ def test_missing_threshold_provider_has_explicit_no_observations_reason(
     [
         (TimeoutError("late"), "timeout"),
         (ConnectionError("offline"), "network"),
+        (requests.ConnectionError("offline"), "network"),
         (ValueError("bad payload"), "data"),
         (RuntimeError("boom"), "runtime"),
     ],
@@ -284,3 +287,100 @@ def test_canonical_provider_names_are_stable() -> None:
     )
     assert (INDEX_PROVIDER, CALENDAR_PROVIDER) == ("index", "calendar")
     assert REQUIRED_FIELDS == ("open", "high", "low", "close", "volume")
+
+
+class FrameLike:
+    columns = REQUIRED_FIELDS
+
+    def __len__(self):
+        return 5
+
+
+def test_full_runner_executes_exact_provider_counts_and_serializes() -> None:
+    calls = []
+
+    def adapter(exchange, code, start_date, end_date):
+        calls.append((exchange, code, start_date, end_date))
+        assert (end_date - start_date).days == 90
+        return FrameLike()
+
+    runner = ProviderProbeRunner(
+        adapters={provider: adapter for provider in (
+            EASTMONEY_PROVIDER, TENCENT_PROVIDER, SINA_PROVIDER,
+            INDEX_PROVIDER, CALENDAR_PROVIDER,
+        )}
+    )
+
+    report = runner.run()
+
+    assert {name: summary.observations for name, summary in report.providers.items()} == {
+        EASTMONEY_PROVIDER: 10,
+        TENCENT_PROVIDER: 10,
+        SINA_PROVIDER: 3,
+        INDEX_PROVIDER: 1,
+        CALENDAR_PROVIDER: 1,
+    }
+    assert len(calls) == 25
+    json.dumps(report.to_dict())
+
+
+def test_runner_records_failures_and_missing_fields_without_aborting() -> None:
+    attempts = 0
+
+    class MissingFrame:
+        columns = ("open", "close")
+
+        def __len__(self):
+            return 2
+
+    def adapter(*args):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise TimeoutError("late")
+        return MissingFrame()
+
+    runner = ProviderProbeRunner(adapters={provider: adapter for provider in (
+        EASTMONEY_PROVIDER, TENCENT_PROVIDER, SINA_PROVIDER,
+        INDEX_PROVIDER, CALENDAR_PROVIDER,
+    )})
+
+    report = runner.run()
+
+    assert attempts == 25
+    assert report.providers[EASTMONEY_PROVIDER].error_categories == {"timeout": 1}
+    assert report.providers[EASTMONEY_PROVIDER].missing_field_count > 0
+    assert report.passed is False
+
+
+def test_quick_runner_is_explicitly_diagnostic_and_never_passes_gate() -> None:
+    runner = ProviderProbeRunner(adapters={provider: lambda *args: FrameLike() for provider in (
+        EASTMONEY_PROVIDER, TENCENT_PROVIDER, SINA_PROVIDER,
+        INDEX_PROVIDER, CALENDAR_PROVIDER,
+    )})
+
+    report = runner.run(quick=True)
+
+    assert [report.providers[name].observations for name in (
+        EASTMONEY_PROVIDER, TENCENT_PROVIDER, SINA_PROVIDER,
+        INDEX_PROVIDER, CALENDAR_PROVIDER,
+    )] == [3, 3, 1, 1, 1]
+    assert report.passed is False
+    assert any("diagnostic" in reason.lower() for reason in report.reasons)
+
+
+def test_probe_cli_writes_json_and_quick_mode_returns_diagnostic_exit(tmp_path) -> None:
+    from scripts.probe_providers import main
+
+    runner = ProviderProbeRunner(adapters={provider: lambda *args: FrameLike() for provider in (
+        EASTMONEY_PROVIDER, TENCENT_PROVIDER, SINA_PROVIDER,
+        INDEX_PROVIDER, CALENDAR_PROVIDER,
+    )})
+    output = tmp_path / "probe.json"
+
+    exit_code = main(["--quick", "--output", str(output)], runner=runner)
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert exit_code == 2
+    assert payload["passed"] is False
+    assert "diagnostic" in " ".join(payload["reasons"]).lower()

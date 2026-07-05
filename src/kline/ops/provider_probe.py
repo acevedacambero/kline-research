@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import date, timedelta
+from time import perf_counter
 from types import MappingProxyType
-from typing import Iterable, Mapping, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 
 EASTMONEY_PROVIDER = "eastmoney"
@@ -29,6 +31,21 @@ MARKET_DATA_PROVIDERS = frozenset(
     {EASTMONEY_PROVIDER, TENCENT_PROVIDER, SINA_PROVIDER, INDEX_PROVIDER}
 )
 OHLCV_FIELDS = frozenset({"open", "high", "low", "close", "volume"})
+
+REPRESENTATIVE_SECURITIES = (
+    ("sh", "600000"),
+    ("sz", "000001"),
+    ("bj", "430047"),
+    ("sh", "688981"),
+    ("sz", "300750"),
+    ("sh", "600519"),
+    ("sz", "002594"),
+    ("sh", "601318"),
+    ("sz", "000858"),
+    ("sh", "688036"),
+)
+
+ProviderAdapter = Callable[[str, str, date, date], object]
 
 
 @dataclass(frozen=True)
@@ -99,6 +116,8 @@ def classify_error(exc: BaseException) -> str:
         return "data"
 
     name = type(exc).__name__.lower()
+    if "connection" in name:
+        return "network"
     return name.removesuffix("error") or "unknown"
 
 
@@ -186,3 +205,110 @@ def evaluate_gate(observations: Iterable[ProbeObservation]) -> ProbeReport:
         passed=not reasons,
         reasons=tuple(reasons),
     )
+
+
+class ProviderProbeRunner:
+    """Execute an isolated, non-aborting readiness probe across data providers."""
+
+    def __init__(
+        self,
+        adapters: Mapping[str, ProviderAdapter] | None = None,
+        *,
+        today: Callable[[], date] = date.today,
+    ) -> None:
+        self.adapters = dict(adapters) if adapters is not None else self._default_adapters()
+        self.today = today
+
+    @staticmethod
+    def _default_adapters() -> dict[str, ProviderAdapter]:
+        from kline.data.eastmoney_source import EastMoneyHttpSource
+        from kline.data.tencent_source import TencentHttpSource
+
+        eastmoney = EastMoneyHttpSource()
+        tencent = TencentHttpSource()
+
+        def sina(exchange: str, code: str, start: date, end: date):
+            import akshare as ak
+
+            return ak.stock_zh_a_daily(
+                symbol=f"{exchange}{code}",
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
+                adjust="",
+            )
+
+        def index(_exchange: str, code: str, start: date, end: date):
+            from kline.data.akshare_source import AkShareSource
+
+            return AkShareSource().index_history(code, start, end)
+
+        def calendar(_exchange: str, _code: str, _start: date, _end: date):
+            from kline.data.akshare_source import AkShareSource
+
+            return AkShareSource().trading_calendar()
+
+        return {
+            EASTMONEY_PROVIDER: lambda exchange, code, start, end: eastmoney.fetch_history(
+                exchange, code, start, end, fqt=0
+            ),
+            TENCENT_PROVIDER: tencent.fetch_history,
+            SINA_PROVIDER: sina,
+            INDEX_PROVIDER: index,
+            CALENDAR_PROVIDER: calendar,
+        }
+
+    def run(self, *, quick: bool = False) -> ProbeReport:
+        end = self.today()
+        start = end - timedelta(days=90)
+        stocks = REPRESENTATIVE_SECURITIES[:3] if quick else REPRESENTATIVE_SECURITIES
+        targets = [
+            *((EASTMONEY_PROVIDER, exchange, code) for exchange, code in stocks),
+            *((TENCENT_PROVIDER, exchange, code) for exchange, code in stocks),
+            *((SINA_PROVIDER, exchange, code) for exchange, code in stocks[: (1 if quick else 3)]),
+            (INDEX_PROVIDER, "sh", "000001"),
+            (CALENDAR_PROVIDER, "", "trading-calendar"),
+        ]
+        observations = [
+            self._observe(provider, exchange, code, start, end)
+            for provider, exchange, code in targets
+        ]
+        report = evaluate_gate(observations)
+        if quick:
+            return ProbeReport(
+                providers=report.providers,
+                passed=False,
+                reasons=report.reasons
+                + ("Quick mode is diagnostic only and is not a production gate.",),
+            )
+        return report
+
+    def _observe(
+        self, provider: str, exchange: str, code: str, start: date, end: date
+    ) -> ProbeObservation:
+        began = perf_counter()
+        try:
+            result = self.adapters[provider](exchange, code, start, end)
+            columns = set(getattr(result, "columns", ()))
+            missing = (
+                tuple(sorted(OHLCV_FIELDS - columns))
+                if provider in MARKET_DATA_PROVIDERS
+                else ()
+            )
+            return ProbeObservation(
+                provider=provider,
+                security=f"{exchange}{code}" if exchange else code,
+                success=True,
+                elapsed_seconds=perf_counter() - began,
+                rows=len(result),  # type: ignore[arg-type]
+                missing_fields=missing,
+            )
+        except Exception as exc:
+            return ProbeObservation(
+                provider=provider,
+                security=f"{exchange}{code}" if exchange else code,
+                success=False,
+                elapsed_seconds=perf_counter() - began,
+                rows=0,
+                error_type=classify_error(exc),
+                error_message=str(exc),
+            )
