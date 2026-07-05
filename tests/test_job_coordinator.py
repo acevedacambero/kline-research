@@ -5,7 +5,11 @@ import time
 
 import pytest
 
-from kline.jobs.coordinator import DuplicateActiveJobError, HeavyTaskCoordinator
+from kline.jobs.coordinator import (
+    CoordinatorShutdownError,
+    DuplicateActiveJobError,
+    HeavyTaskCoordinator,
+)
 from kline.jobs.store import JobStatus, JobStore
 
 
@@ -63,7 +67,7 @@ def test_duplicate_active_type_is_rejected(tmp_path):
     store.close()
 
 
-def test_failure_is_persisted_and_future_exposes_exception(tmp_path):
+def test_shutdown_propagates_unobserved_failure_and_persists_it(tmp_path):
     store = JobStore(tmp_path / "jobs.duckdb")
     coordinator = HeavyTaskCoordinator(store)
 
@@ -72,15 +76,17 @@ def test_failure_is_persisted_and_future_exposes_exception(tmp_path):
         raise RuntimeError("network exploded")
 
     submitted = coordinator.submit("download", {}, failing)
-    with pytest.raises(RuntimeError, match="network exploded"):
-        submitted.future.result(timeout=2)
-    coordinator.shutdown()
+    with pytest.raises(CoordinatorShutdownError, match=submitted.job_id) as raised:
+        coordinator.shutdown()
 
     job = store.get(submitted.job_id)
     assert job.status is JobStatus.FAILED
     assert job.error == "RuntimeError: network exploded"
     assert job.progress == {"attempt": 1}
     assert coordinator.active() == []
+    assert raised.value.failures[submitted.job_id] == "RuntimeError: network exploded"
+    with pytest.raises(CoordinatorShutdownError, match=submitted.job_id):
+        coordinator.shutdown()
     store.close()
 
 
@@ -89,9 +95,26 @@ def test_shutdown_drains_work_and_rejects_new_submissions(tmp_path):
     coordinator = HeavyTaskCoordinator(store)
     submitted = coordinator.submit("features", {"value": 7}, lambda payload, progress: payload)
     coordinator.shutdown()
+    coordinator.shutdown()
 
     assert submitted.future.done()
     assert store.get(submitted.job_id).status is JobStatus.COMPLETED
     with pytest.raises(RuntimeError, match="shut down"):
         coordinator.submit("features", {}, lambda payload, progress: None)
+    store.close()
+
+
+def test_immediate_jobs_do_not_leave_stale_pending_state(tmp_path):
+    store = JobStore(tmp_path / "jobs.duckdb")
+    coordinator = HeavyTaskCoordinator(store)
+
+    for index in range(100):
+        submitted = coordinator.submit(
+            f"immediate-{index}", {"index": index}, lambda payload, progress: payload
+        )
+        assert submitted.future.result(timeout=2) == {"index": index}
+
+    assert coordinator.pending_count == 0
+    assert coordinator.active() == []
+    coordinator.shutdown()
     store.close()
