@@ -14,6 +14,13 @@ export type Audit = {
   dataSnapshotVersion?: string
   factorVersion?: string
 }
+export type FeatureValue = number | boolean | string | null
+export type FeatureAudit = {
+  exchange: string; code: string; date: string; availableHistory: number;
+  groups: Record<'trend' | 'position' | 'momentum' | 'volumePrice' | 'tradingBehavior', Record<string, FeatureValue>>;
+  reasons: string[]; priceBasis: string;
+  versions: Record<string, string | null>;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
@@ -44,4 +51,11 @@ export const api = {
     method: 'POST', body: JSON.stringify({ scope }),
   }),
   labelTask: (taskId: string) => request<{ status: string; done: number; total: number; rows: number; errors: unknown[] }>(`/api/labels/tasks/${taskId}`),
+  buildFeatures: (scope: 'representative' | 'all') => request<{ taskId: string; total: number }>('/api/features/build', {
+    method: 'POST', body: JSON.stringify({ scope }),
+  }),
+  featureTask: (taskId: string) => request<{ status: string; done: number; total: number; rows: number; errors: unknown[]; currentSecurity?: string }>(`/api/features/tasks/${taskId}`),
+  featureAudit: (exchange: string, code: string, signalDate: string) => request<FeatureAudit>('/api/p2/audit', {
+    method: 'POST', body: JSON.stringify({ exchange, code, signal_date: signalDate }),
+  }),
 }

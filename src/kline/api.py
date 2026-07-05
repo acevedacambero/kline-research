@@ -18,6 +18,8 @@ from .data.akshare_source import AkShareSource
 from .data.download_source import HybridDownloadSource
 from .data.eastmoney_source import EastMoneyHttpSource
 from .data.pipeline import DatasetPipeline
+from .features import FEATURE_DEFINITION_VERSION, compute_daily_features
+from .features.batch import BatchFeatureBuilder, FeatureDatasetStore
 from .p1 import (
     compute_drawdown_label,
     compute_forward_labels,
@@ -177,6 +179,50 @@ class LabelTaskStore:
         return task_id
 
 
+class FeatureTaskStore:
+    def __init__(self):
+        self.items: dict[str, dict] = {}
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="feature-build")
+
+    def active(self) -> dict | None:
+        return next(
+            (item for item in self.items.values() if item["status"] in {"queued", "running"}),
+            None,
+        )
+
+    def submit(self, securities: list[dict[str, str]], output_root) -> str:
+        task_id = uuid.uuid4().hex
+        self.items[task_id] = {
+            "id": task_id,
+            "status": "queued",
+            "total": len(securities),
+            "done": 0,
+            "rows": 0,
+            "errors": [],
+            "currentSecurity": None,
+        }
+
+        def run():
+            item = self.items[task_id]
+            item["status"] = "running"
+            builder = BatchFeatureBuilder(FeatureDatasetStore(output_root))
+
+            def progress(security, report, error):
+                item["currentSecurity"] = security
+                item["done"] += 1
+                if report:
+                    item["rows"] += report.rows
+                if error:
+                    item["errors"].append({"security": security, "message": str(error)})
+
+            builder.build_many(securities, on_progress=progress)
+            item["status"] = "completed_with_errors" if item["errors"] else "completed"
+            item["currentSecurity"] = None
+
+        self.executor.submit(run)
+        return task_id
+
+
 def _market_counts(securities: list[dict[str, str]]) -> dict[str, int]:
     return {market: sum(item["exchange"] == market for item in securities) for market in ("sh", "sz", "bj")}
 
@@ -202,6 +248,7 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
         EastMoneyHttpSource(retries=1), source
     )
     label_tasks = LabelTaskStore()
+    feature_tasks = FeatureTaskStore()
     security_cache: list[dict[str, str]] | None = None
 
     def securities_list(refresh: bool = False) -> list[dict[str, str]]:
@@ -336,6 +383,53 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
             )
         return label_tasks.items[task_id]
 
+    @app.post("/api/features/build", status_code=202)
+    def build_features(request: ImportRequest):
+        active = feature_tasks.active()
+        if active:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "FEATURE_BUILD_ALREADY_RUNNING",
+                    "message": f'已有特征任务运行中：{active["id"]}',
+                    "taskId": active["id"],
+                },
+            )
+        cached = pipeline.cached_securities()
+        if request.scope == "representative":
+            cached = cached[:3]
+        elif request.scope != "all":
+            raise HTTPException(
+                422,
+                detail={"code": "INVALID_FEATURE_SCOPE", "message": "scope must be representative or all"},
+            )
+        try:
+            names = {
+                f'{item["exchange"]}{item["code"]}': item["name"]
+                for item in securities_list()
+            }
+        except Exception:
+            names = {}
+        cached = [
+            {
+                **item,
+                "st_status": status_from_name(
+                    names.get(f'{item["exchange"]}{item["code"]}', "")
+                ).is_st,
+            }
+            for item in cached
+        ]
+        task_id = feature_tasks.submit(cached, settings.data_path)
+        return {"taskId": task_id, "total": len(cached)}
+
+    @app.get("/api/features/tasks/{task_id}")
+    def feature_task_status(task_id: str):
+        if task_id not in feature_tasks.items:
+            raise HTTPException(
+                404, detail={"code": "TASK_NOT_FOUND", "message": "特征任务不存在"}
+            )
+        return feature_tasks.items[task_id]
+
     @app.get("/api/securities")
     def securities(query: str = ""):
         try:
@@ -424,6 +518,85 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
                 [row["date"] for row in records], entry.entry_index, 20
             )
         return output
+
+    @app.post("/api/p2/audit")
+    def feature_audit(request: AuditRequest):
+        frame = load_bars(request.exchange, request.code)
+        try:
+            name = next(
+                (
+                    item["name"]
+                    for item in securities_list()
+                    if item["exchange"] == request.exchange and item["code"] == request.code
+                ),
+                "",
+            )
+        except Exception:
+            name = ""
+        features = compute_daily_features(
+            frame,
+            exchange=request.exchange,
+            code=request.code,
+            st_status=status_from_name(name).is_st,
+        )
+        selected = features.loc[features["date"] == request.signal_date]
+        if selected.empty:
+            raise HTTPException(
+                422,
+                detail={"code": "SIGNAL_DATE_NOT_FOUND", "message": "审计日期不是有效交易日"},
+            )
+        row = dataframe_records(selected)[0]
+        groups = {
+            "trend": {
+                key: row.get(key)
+                for key in (
+                    "ma5", "ma10", "ma20", "ma60", "ma5_slope", "ma10_slope",
+                    "ma20_slope", "ma60_slope", "close_to_ma5", "close_to_ma10",
+                    "close_to_ma20", "close_to_ma60", "bullish_alignment",
+                    "bearish_alignment",
+                )
+            },
+            "position": {
+                key: row.get(key)
+                for window in (20, 60, 120, 250)
+                for key in (f"range_position_{window}", f"drawdown_from_high_{window}")
+            },
+            "momentum": {
+                f"return_{window}": row.get(f"return_{window}")
+                for window in (5, 10, 20, 60, 120)
+            },
+            "volumePrice": {
+                key: row.get(key)
+                for key in (
+                    "volume_ratio_5", "volume_percentile_20", "amount",
+                    "volatility_20", "amplitude",
+                )
+            },
+            "tradingBehavior": {
+                key: row.get(key)
+                for key in (
+                    "is_limit_up", "limit_up_count_20", "locked_limit_up_streak",
+                    "gap_open", "suspension_gap_days", "is_approx", "rule_reason",
+                )
+            },
+        }
+        return {
+            "exchange": request.exchange,
+            "code": request.code,
+            "date": request.signal_date,
+            "availableHistory": row["available_history"],
+            "groups": groups,
+            "reasons": row["reasons"],
+            "priceBasis": row["price_basis"],
+            "versions": {
+                "snapshotVersion": pipeline.latest_snapshot_version(
+                    request.exchange, request.code
+                ),
+                "factorVersion": row.get("factor_version"),
+                "limitRuleVersion": VERSIONS["limitRuleVersion"],
+                "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
+            },
+        }
 
     return app
 

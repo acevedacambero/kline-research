@@ -10,4 +10,13 @@ describe('API errors', () => {
     })))
     await expect(api.bars('sh', '601100')).rejects.toThrow('行情获取失败：上游断开')
   })
+
+  it('uses the P2 build and audit endpoints', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.buildFeatures('all')
+    await api.featureAudit('sh', '600000', '2024-01-02')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/features/build')
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/p2/audit')
+  })
 })
