@@ -74,6 +74,14 @@ def test_volume_price_features_have_explicit_complete_windows():
     assert pd.isna(result.iloc[4]["volume_ratio_5"])
 
 
+def test_missing_optional_amount_is_preserved_as_unavailable_instead_of_crashing():
+    bars = feature_bars(20).drop(columns=["amount"])
+
+    result = compute_daily_features(bars, exchange="sh", code="600000")
+
+    assert result["amount"].isna().all()
+
+
 def test_trading_behavior_uses_raw_prices_and_rule_width():
     bars = feature_bars(30)
     previous_close = bars.loc[27, "close"]

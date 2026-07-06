@@ -100,11 +100,9 @@ class TencentHttpSource:
             not isinstance(row, (list, tuple)) or len(row) < 6 for row in rows
         ):
             raise ValueError("malformed Tencent daily rows")
-        include_amount = all(len(row) >= 7 for row in rows)
-        columns = ["date", "open", "close", "high", "low", "volume"]
-        if include_amount:
-            columns.append("amount")
-        result = pd.DataFrame([row[: len(columns)] for row in rows], columns=columns)
+        columns = ["date", "open", "close", "high", "low", "volume", "amount"]
+        values = [list(row[:7]) + [None] * max(0, 7 - len(row)) for row in rows]
+        result = pd.DataFrame(values, columns=columns)
         try:
             result["date"] = pd.to_datetime(result["date"], errors="raise").dt.date
             for column in columns[1:]:

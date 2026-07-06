@@ -75,6 +75,17 @@ def test_uses_raw_daily_query_parameters_and_bounded_timeout():
     )
 
 
+def test_six_field_rows_keep_amount_column_with_missing_value():
+    session = Session([payload([["2026-07-01", "10", "11", "12", "9", "100"]])])
+
+    frame = TencentHttpSource(session=session).fetch_history(
+        "sh", "600000", date(2026, 7, 1), date(2026, 7, 2)
+    )
+
+    assert "amount" in frame.columns
+    assert frame["amount"].isna().all()
+
+
 def test_retries_transient_failure_then_returns_rows():
     session = Session([
         requests.Timeout("late"),
