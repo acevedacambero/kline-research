@@ -277,3 +277,121 @@ def test_lazy_cache_missing_output_preserves_message_contract(tmp_path, monkeypa
         assert response.json()["detail"] == {
             "code": "CACHE_WRITE_FAILED", "message": "快照写入失败"
         }
+
+
+def test_active_job_rejection_skips_all_provider_preprocessing(tmp_path, monkeypatch):
+    release = threading.Event()
+    source = BlockingSource(release)
+    calls = 0
+
+    def forbidden_list():
+        nonlocal calls
+        calls += 1
+        raise AssertionError("provider preprocessing must not run")
+
+    source.list_securities = forbidden_list
+    monkeypatch.setattr(api_module.HybridDownloadSource, "fetch_bundle",
+                        lambda self, *args: release.wait(3) or (_ for _ in ()).throw(RuntimeError()))
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb"), source
+    )
+    try:
+        with TestClient(app) as client:
+            first = client.post("/api/datasets/import", json={"scope": "representative"})
+            _wait_running(client, first.json()["taskId"])
+            for path in ("/api/datasets/import", "/api/labels/build", "/api/features/build"):
+                response = client.post(path, json={"scope": "all"})
+                assert response.status_code == 409
+                assert response.json()["detail"]["code"] == "HEAVY_JOB_ALREADY_RUNNING"
+            assert calls == 0
+    finally:
+        release.set()
+
+
+def test_hung_import_fetch_times_out_and_releases_coordinator(tmp_path, monkeypatch):
+    release = threading.Event()
+    monkeypatch.setattr(api_module.HybridDownloadSource, "fetch_bundle",
+                        lambda self, *args: release.wait(10))
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb",
+                 security_fetch_timeout_seconds=1),
+        BlockingSource(release),
+    )
+    try:
+        with TestClient(app) as client:
+            started = client.post("/api/datasets/import", json={"scope": "representative"})
+            task_id = started.json()["taskId"]
+            deadline = time.monotonic() + 2.5
+            while time.monotonic() < deadline:
+                task = client.get(f"/api/datasets/tasks/{task_id}").json()
+                if task["status"] not in {"queued", "running"}:
+                    break
+                time.sleep(0.02)
+            assert task["status"] == "completed_with_errors"
+            assert len(task["errors"]) == 3
+            assert all("timed out after 1s" in error["message"] for error in task["errors"])
+            follow_up = client.post("/api/features/build", json={"scope": "all"})
+            assert follow_up.status_code == 202
+    finally:
+        release.set()
+
+
+def test_hung_lazy_fetch_returns_timeout_and_releases_coordinator(tmp_path):
+    release = threading.Event()
+    source = BlockingSource(release)
+    source.stock_history = lambda *args, **kwargs: release.wait(10)
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb",
+                 security_fetch_timeout_seconds=1), source
+    )
+    try:
+        with TestClient(app) as client:
+            started = time.monotonic()
+            response = client.get("/api/securities/sh/600000/bars")
+            assert time.monotonic() - started < 2.5
+            assert response.status_code == 503
+            assert response.json()["detail"] == {
+                "code": "AKSHARE_FETCH_FAILED",
+                "message": "行情获取失败：fetch timed out after 1s",
+            }
+            follow_up = client.post("/api/features/build", json={"scope": "all"})
+            assert follow_up.status_code == 202
+    finally:
+        release.set()
+
+
+def test_label_and_feature_jobs_use_only_shared_heavy_worker_and_no_pipeline_writes(
+    tmp_path, monkeypatch
+):
+    pipeline_writes = []
+    original = DatasetPipeline.import_security
+
+    def instrumented(self, *args, **kwargs):
+        pipeline_writes.append(threading.current_thread().name)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(DatasetPipeline, "import_security", instrumented)
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb"),
+        BlockingSource(threading.Event()),
+    )
+    with TestClient(app) as client:
+        for start_path, status_prefix in (
+            ("/api/labels/build", "/api/labels/tasks/"),
+            ("/api/features/build", "/api/features/tasks/"),
+        ):
+            response = client.post(start_path, json={"scope": "all"})
+            assert response.status_code == 202
+            task_id = response.json()["taskId"]
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                task = client.get(status_prefix + task_id).json()
+                if task["status"] not in {"queued", "running"}:
+                    break
+                time.sleep(0.01)
+            assert task["status"] == "completed"
+
+        worker_names = [thread.name for thread in threading.enumerate()]
+        assert sum(name.startswith("kline-heavy-job") for name in worker_names) == 1
+        assert not any(name.startswith(("label-build", "feature-build")) for name in worker_names)
+        assert pipeline_writes == []

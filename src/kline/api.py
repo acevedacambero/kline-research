@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import as_completed, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import date
@@ -92,7 +92,14 @@ class _TaskFacade:
         self.lock = lock
 
     def active(self) -> dict | None:
-        # Submission performs the atomic process-global conflict check.
+        active = self.coordinator.active()
+        if active:
+            task_id = active[0].id
+            raise HTTPException(409, detail={
+                "code": "HEAVY_JOB_ALREADY_RUNNING",
+                "message": f"A heavy job is already running: {task_id}",
+                "taskId": task_id,
+            })
         return None
 
     def _submit(self, job_type, payload, operation) -> str:
@@ -130,13 +137,15 @@ class TaskStore(_TaskFacade):
                 return source.fetch_bundle(security["exchange"], security["code"],
                                            start_date, end_date)
 
-            with ThreadPoolExecutor(max_workers=self.workers,
-                                    thread_name_prefix="market-fetch") as executor:
+            executor = ThreadPoolExecutor(max_workers=self.workers,
+                                          thread_name_prefix="market-fetch")
+            try:
                 futures = {
                     executor.submit(fetch, security): security
                     for security in payload["securities"]
                 }
-                for future in as_completed(futures):
+                completed, pending = wait(futures, timeout=timeout_seconds)
+                for future in completed:
                     security = futures[future]
                     key = f'{security["exchange"]}{security["code"]}'
                     state["currentSecurity"] = key
@@ -154,6 +163,18 @@ class TaskStore(_TaskFacade):
                         state["etaSeconds"] = round(remaining / state["speed"]) if state["speed"] else None
                         state["directAvailable"] = source.direct_available
                         progress(state)
+                for future in pending:
+                    future.cancel()
+                    security = futures[future]
+                    key = f'{security["exchange"]}{security["code"]}'
+                    state["errors"].append({
+                        "security": key,
+                        "message": f"fetch timed out after {timeout_seconds}s",
+                    })
+                    state["done"] += 1
+                    progress(state)
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
             state["currentSecurity"] = None
             state["stage"] = "finished"
             return state
@@ -373,6 +394,7 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
 
     @app.post("/api/labels/build", status_code=202)
     def build_labels(request: ImportRequest):
+        label_tasks.active()
         cached = pipeline.cached_securities()
         if request.scope == "representative":
             cached = cached[:3]
@@ -469,8 +491,25 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
             )
 
             def operation(payload, progress):
-                raw = source.stock_history(payload["code"], start, date.today(), "")
-                factors = source.adjustment_factors(payload["code"])
+                def fetch():
+                    return (
+                        source.stock_history(payload["code"], start, date.today(), ""),
+                        source.adjustment_factors(payload["code"]),
+                    )
+
+                executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="market-fetch")
+                future = executor.submit(fetch)
+                try:
+                    completed, _ = wait([future], timeout=settings.security_fetch_timeout_seconds)
+                    if not completed:
+                        future.cancel()
+                        raise TimeoutError(
+                            "fetch timed out after "
+                            f"{settings.security_fetch_timeout_seconds}s"
+                        )
+                    raw, factors = future.result()
+                finally:
+                    executor.shutdown(wait=False, cancel_futures=True)
                 report = pipeline.import_security(
                     payload["exchange"], payload["code"], raw, factors
                 )
@@ -489,7 +528,7 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
                     "cache-security", {"exchange": exchange, "code": code}, operation
                 )
             try:
-                submitted.future.result()
+                submitted.future.result(timeout=settings.security_fetch_timeout_seconds + 1)
             except Exception as exc:
                 raise HTTPException(
                     503,
