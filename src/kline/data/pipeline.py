@@ -237,3 +237,8 @@ class DatasetPipeline:
             ).fetchall()
         keys = ("dataset_key", "event_type", "severity", "message", "created_at")
         return [dict(zip(keys, row, strict=True)) for row in rows]
+
+    def market_cleanup(self):
+        from .market_cleanup import MarketCleanup
+
+        return MarketCleanup(self)
