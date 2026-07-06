@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from datetime import date
+from typing import Protocol
+
+import pandas as pd
+
+
+SUPPORTED_EXCHANGES = ("sh", "sz")
+PROVIDER_POLICY_VERSION = "sh-sz-tencent-sina-v1"
+
+
+class MarketNotSupportedError(ValueError):
+    pass
+
+
+class TencentSource(Protocol):
+    def fetch_history(
+        self, exchange: str, code: str, start_date: date, end_date: date
+    ) -> pd.DataFrame: ...
+
+
+class SinaSource(Protocol):
+    def sina_raw_history(
+        self, exchange: str, code: str, start_date: date, end_date: date
+    ) -> pd.DataFrame: ...
+
+    def sina_adjustment_factors(
+        self, exchange: str, code: str
+    ) -> pd.DataFrame: ...
+
+
+class ProductionProviderPolicy:
+    def __init__(self, tencent: TencentSource, sina: SinaSource) -> None:
+        self.tencent = tencent
+        self.sina = sina
+
+    def fetch_bundle(
+        self, exchange: str, code: str, start_date: date, end_date: date
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        exchange = exchange.lower().strip()
+        if exchange not in SUPPORTED_EXCHANGES:
+            raise MarketNotSupportedError(f"market not supported: {exchange or '<empty>'}")
+
+        try:
+            raw = self.tencent.fetch_history(exchange, code, start_date, end_date)
+            raw_provider = "tencent-http"
+        except Exception:
+            raw = self.sina.sina_raw_history(
+                exchange, code, start_date, end_date
+            )
+            raw_provider = "sina-akshare"
+
+        factors = self.sina.sina_adjustment_factors(exchange, code)
+        required = {"date", "qfq_factor", "hfq_factor"}
+        if (
+            factors.empty
+            or not required.issubset(factors.columns)
+            or factors[list(required)].isna().any().any()
+        ):
+            raise ValueError("factor data is empty or incomplete")
+
+        raw.attrs.update(
+            provider=raw_provider, provider_policy_version=PROVIDER_POLICY_VERSION
+        )
+        factors.attrs.update(
+            provider="sina-akshare",
+            provider_policy_version=PROVIDER_POLICY_VERSION,
+        )
+        return raw, factors

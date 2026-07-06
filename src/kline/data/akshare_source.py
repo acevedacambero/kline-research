@@ -148,6 +148,28 @@ class AkShareSource:
         result["factor_source"] = "stock_zh_a_daily"
         return result
 
+    def sina_raw_history(
+        self, exchange: str, code: str, start_date: date, end_date: date
+    ) -> pd.DataFrame:
+        frame = self._call(
+            "stock_zh_a_daily:raw",
+            self.client.stock_zh_a_daily,
+            symbol=exchange.lower() + code,
+            start_date=start_date.strftime("%Y%m%d"),
+            end_date=end_date.strftime("%Y%m%d"),
+            adjust="",
+        )
+        result = self._normalize_history(frame)
+        result.attrs["provider"] = "sina-akshare"
+        return result
+
+    def sina_adjustment_factors(self, exchange: str, code: str) -> pd.DataFrame:
+        if exchange.lower() not in ("sh", "sz"):
+            raise ValueError(f"unsupported Sina exchange: {exchange}")
+        result = self.adjustment_factors(code)
+        result.attrs["provider"] = "sina-akshare"
+        return result
+
     def trading_calendar(self) -> list[date]:
         frame = self._call(
             "tool_trade_date_hist_sina", self.client.tool_trade_date_hist_sina

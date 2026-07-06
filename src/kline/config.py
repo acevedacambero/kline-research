@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
 
 VERSIONS = {
+    "providerPolicyVersion": "sh-sz-tencent-sina-v1",
     "dataSourceVersion": "akshare-raw-v1",
     "factorDefinitionVersion": "akshare-sina-factor-v1",
     "derivedAdjustmentVersion": "raw-factor-engine-v1",
