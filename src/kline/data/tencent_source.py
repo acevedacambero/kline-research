@@ -32,7 +32,7 @@ class TencentHttpSource:
         symbol = f"{exchange.lower()}{code}"
         params = {
             "param": (
-                f"{symbol},day,{start_date.isoformat()},{end_date.isoformat()},90"
+                f"{symbol},day,{start_date.isoformat()},{end_date.isoformat()},90,"
             ),
         }
         last_error: Exception | None = None
@@ -43,6 +43,13 @@ class TencentHttpSource:
                 )
                 response.raise_for_status()
                 payload = response.json()
+                if not isinstance(payload, dict) or "code" not in payload:
+                    raise ValueError("malformed Tencent response: provider code missing")
+                if payload["code"] != 0:
+                    message = payload.get("msg", payload.get("message", "unknown error"))
+                    raise ValueError(
+                        f"Tencent provider error code={payload['code']}: {message}"
+                    )
                 try:
                     instrument = payload["data"][symbol]
                 except (KeyError, TypeError) as exc:

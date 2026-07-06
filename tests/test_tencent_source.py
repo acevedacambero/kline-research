@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 
 from kline.data.tencent_source import TencentHttpSource
+from kline.ops.provider_probe import classify_error
 
 
 class Response:
@@ -30,7 +31,7 @@ class Session:
 
 
 def payload(rows):
-    return {"data": {"sh600000": {"day": rows}}}
+    return {"code": 0, "msg": "", "data": {"sh600000": {"day": rows}}}
 
 
 def test_normalizes_raw_daily_rows_without_adjusted_series_mixing():
@@ -58,7 +59,7 @@ def test_uses_raw_daily_query_parameters_and_bounded_timeout():
     assert url == "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
     assert kwargs["timeout"] == 7
     assert kwargs["params"] == {
-        "param": "sh600000,day,2026-04-01,2026-07-01,90",
+        "param": "sh600000,day,2026-04-01,2026-07-01,90,",
     }
     assert not any(
         token in str(kwargs["params"]).lower() for token in ("qfq", "hfq")
@@ -77,6 +78,17 @@ def test_retries_transient_failure_then_returns_rows():
 
     assert len(session.calls) == 2
     assert len(frame) == 1
+
+
+def test_reports_provider_error_before_looking_for_raw_series():
+    response = {"code": 1, "msg": "bad params", "data": {}}
+
+    with pytest.raises(RuntimeError, match="Tencent provider error.*bad params") as error:
+        TencentHttpSource(session=Session([response]), retries=1).fetch_history(
+            "sh", "600000", date(2026, 4, 1), date(2026, 7, 1)
+        )
+
+    assert classify_error(error.value) == "data"
 
 
 @pytest.mark.parametrize(
