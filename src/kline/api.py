@@ -44,12 +44,18 @@ class AuditRequest(BaseModel):
 
 
 def _task_response(job: Job) -> dict:
-    total = len(job.payload) if isinstance(job.payload, list) else 0
+    if isinstance(job.payload, list):
+        total = len(job.payload)
+    elif isinstance(job.payload, dict) and isinstance(job.payload.get("securities"), list):
+        total = len(job.payload["securities"])
+    else:
+        total = 0
     defaults = {"total": total, "done": 0, "rows": 0, "errors": [],
                 "currentSecurity": None}
     if job.job_type == "import":
         defaults.update({"stage": "queued", "speed": 0.0, "etaSeconds": None,
-                         "directAvailable": None})
+                         "directAvailable": job.payload.get("directAvailable")
+                         if isinstance(job.payload, dict) else None})
     progress = job.progress if isinstance(job.progress, dict) else {}
     result = job.result if isinstance(job.result, dict) else {}
     item = {"id": job.id, **defaults, **progress, **result}
@@ -63,23 +69,26 @@ def _task_response(job: Job) -> dict:
 
 
 class _DurableItems:
-    def __init__(self, store: JobStore):
+    def __init__(self, store: JobStore, job_types: set[str]):
         self.store = store
+        self.job_types = job_types
 
     def __contains__(self, task_id: str) -> bool:
-        return self.store.get(task_id) is not None
+        job = self.store.get(task_id)
+        return job is not None and job.job_type in self.job_types
 
     def __getitem__(self, task_id: str) -> dict:
         job = self.store.get(task_id)
-        if job is None:
+        if job is None or job.job_type not in self.job_types:
             raise KeyError(task_id)
         return _task_response(job)
 
 
 class _TaskFacade:
-    def __init__(self, coordinator: HeavyTaskCoordinator, store: JobStore, lock: threading.Lock):
+    def __init__(self, coordinator: HeavyTaskCoordinator, store: JobStore, lock: threading.Lock,
+                 job_types: set[str]):
         self.coordinator = coordinator
-        self.items = _DurableItems(store)
+        self.items = _DurableItems(store, job_types)
         self.lock = lock
 
     def active(self) -> dict | None:
@@ -101,13 +110,15 @@ class _TaskFacade:
 
 class TaskStore(_TaskFacade):
     def __init__(self, coordinator, store, lock, workers: int):
-        super().__init__(coordinator, store, lock)
+        super().__init__(coordinator, store, lock, {"import"})
         self.workers = max(1, min(workers, 3))
 
     def submit(self, pipeline, source, securities, start_date, end_date, timeout_seconds) -> str:
         initial = {"total": len(securities), "done": 0, "errors": [],
                    "currentSecurity": None, "stage": "queued", "speed": 0.0,
                    "etaSeconds": None, "directAvailable": source.direct_available}
+
+        payload = {"securities": securities, "directAvailable": source.direct_available}
 
         def operation(payload, progress):
             state = dict(initial)
@@ -121,7 +132,10 @@ class TaskStore(_TaskFacade):
 
             with ThreadPoolExecutor(max_workers=self.workers,
                                     thread_name_prefix="market-fetch") as executor:
-                futures = {executor.submit(fetch, security): security for security in payload}
+                futures = {
+                    executor.submit(fetch, security): security
+                    for security in payload["securities"]
+                }
                 for future in as_completed(futures):
                     security = futures[future]
                     key = f'{security["exchange"]}{security["code"]}'
@@ -144,10 +158,13 @@ class TaskStore(_TaskFacade):
             state["stage"] = "finished"
             return state
 
-        return self._submit("import", securities, operation)
+        return self._submit("import", payload, operation)
 
 
 class LabelTaskStore(_TaskFacade):
+    def __init__(self, coordinator, store, lock):
+        super().__init__(coordinator, store, lock, {"labels"})
+
     def submit(self, pipeline, source, securities, names, output_root) -> str:
         def operation(payload, progress):
             state = {"total": len(payload), "done": 0, "rows": 0, "errors": []}
@@ -179,6 +196,9 @@ class LabelTaskStore(_TaskFacade):
 
 
 class FeatureTaskStore(_TaskFacade):
+    def __init__(self, coordinator, store, lock):
+        super().__init__(coordinator, store, lock, {"features"})
+
     def submit(self, securities, output_root) -> str:
         def operation(payload, progress):
             state = {"total": len(payload), "done": 0, "rows": 0, "errors": [],
@@ -241,6 +261,7 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
     download_source = HybridDownloadSource(
         EastMoneyHttpSource(retries=1), source
     )
+    app.state.download_source = download_source
     submission_lock = threading.Lock()
     tasks = TaskStore(coordinator, job_store, submission_lock, settings.download_workers)
     label_tasks = LabelTaskStore(coordinator, job_store, submission_lock)
@@ -440,18 +461,44 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
     def load_bars(exchange: str, code: str) -> pd.DataFrame:
         normalized = pipeline.latest_derived_path(exchange, code)
         if normalized is None or not normalized.exists():
-            start = date.fromisoformat(f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-{settings.history_start_date[6:]}")
+            if threading.current_thread().name.startswith("kline-heavy-job"):
+                raise RuntimeError("lazy cache fill cannot run inside the heavy-job worker")
+            start = date.fromisoformat(
+                f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-"
+                f"{settings.history_start_date[6:]}"
+            )
+
+            def operation(payload, progress):
+                raw = source.stock_history(payload["code"], start, date.today(), "")
+                factors = source.adjustment_factors(payload["code"])
+                report = pipeline.import_security(
+                    payload["exchange"], payload["code"], raw, factors
+                )
+                return {"snapshotVersion": report.snapshot_version}
+
+            with submission_lock:
+                active = coordinator.active()
+                if active:
+                    task_id = active[0].id
+                    raise HTTPException(409, detail={
+                        "code": "HEAVY_JOB_ALREADY_RUNNING",
+                        "message": f"A heavy job is already running: {task_id}",
+                        "taskId": task_id,
+                    })
+                submitted = coordinator.submit(
+                    "cache-security", {"exchange": exchange, "code": code}, operation
+                )
             try:
-                raw = source.stock_history(code, start, date.today(), "")
-                factors = source.adjustment_factors(code)
-                pipeline.import_security(exchange, code, raw, factors)
+                submitted.future.result()
             except Exception as exc:
                 raise HTTPException(
-                    503, detail={"code": "AKSHARE_FETCH_FAILED", "message": f"行情获取失败：{exc}"}
+                    503, detail={"code": "AKSHARE_FETCH_FAILED", "message": str(exc)}
                 ) from exc
             normalized = pipeline.latest_derived_path(exchange, code)
         if normalized is None:
-            raise HTTPException(500, detail={"code": "CACHE_WRITE_FAILED", "message": "快照写入失败"})
+            raise HTTPException(
+                500, detail={"code": "CACHE_WRITE_FAILED", "message": "cache write failed"}
+            )
         return pd.read_parquet(normalized)
 
     def benchmark_bars(exchange: str) -> list[dict]:

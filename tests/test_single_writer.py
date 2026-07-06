@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import time
 
@@ -25,6 +26,11 @@ class BlockingSource:
 
     def index_history(self, *args, **kwargs):
         return pd.DataFrame()
+
+    def adjustment_factors(self, *args, **kwargs):
+        return pd.DataFrame([{
+            "date": date(1900, 1, 1), "qfq_factor": 1.0, "hfq_factor": 1.0,
+        }])
 
 
 def _wait_running(client: TestClient, task_id: str) -> None:
@@ -131,3 +137,110 @@ def test_durable_queued_import_status_preserves_ui_fields(tmp_path):
         "errors": [], "currentSecurity": None, "stage": "queued", "speed": 0.0,
         "etaSeconds": None, "directAvailable": None,
     }
+
+
+def test_task_status_endpoints_are_scoped_by_job_type(tmp_path):
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb"),
+        BlockingSource(threading.Event()),
+    )
+    import_job = app.state.job_store.create("import", [])
+    label_job = app.state.job_store.create("labels", [])
+    client = TestClient(app)
+    assert client.get(f"/api/labels/tasks/{import_job.id}").status_code == 404
+    assert client.get(f"/api/features/tasks/{import_job.id}").status_code == 404
+    assert client.get(f"/api/datasets/tasks/{label_job.id}").status_code == 404
+
+
+def test_queued_import_status_persists_direct_availability(tmp_path, monkeypatch):
+    release = threading.Event()
+    monkeypatch.setattr(
+        api_module.HybridDownloadSource, "fetch_bundle",
+        lambda self, *args: (release.wait(3), (_ for _ in ()).throw(RuntimeError("released")))[1],
+    )
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb"),
+        BlockingSource(release),
+    )
+    try:
+        with TestClient(app) as client:
+            started = client.post("/api/datasets/import", json={"scope": "representative"})
+            task = client.get(f'/api/datasets/tasks/{started.json()["taskId"]}').json()
+            assert task["directAvailable"] is app.state.download_source.direct_available
+    finally:
+        release.set()
+
+
+def test_lazy_bars_write_uses_coordinator_and_is_blocked_by_active_import(tmp_path, monkeypatch):
+    release = threading.Event()
+    source = BlockingSource(release)
+    monkeypatch.setattr(api_module.HybridDownloadSource, "fetch_bundle",
+                        lambda self, *args: release.wait(3) or (_ for _ in ()).throw(RuntimeError()))
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb"), source
+    )
+    try:
+        with TestClient(app) as client:
+            started = client.post("/api/datasets/import", json={"scope": "representative"})
+            _wait_running(client, started.json()["taskId"])
+            response = client.get("/api/securities/sh/600000/bars")
+            assert response.status_code == 409
+            assert response.json()["detail"]["code"] == "HEAVY_JOB_ALREADY_RUNNING"
+            assert response.json()["detail"]["taskId"] == started.json()["taskId"]
+    finally:
+        release.set()
+
+
+def test_lazy_bars_cache_write_runs_on_heavy_worker(tmp_path, monkeypatch):
+    rows = pd.DataFrame([{
+        "date": date(2024, 1, 2), "open": 10.0, "high": 11.0, "low": 9.0,
+        "close": 10.5, "volume": 100, "amount": 1000,
+    }])
+    source = BlockingSource(threading.Event())
+    source.stock_history = lambda *args, **kwargs: rows
+    writer_threads = []
+    original = DatasetPipeline.import_security
+
+    def instrumented(self, *args, **kwargs):
+        writer_threads.append(threading.current_thread().name)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(DatasetPipeline, "import_security", instrumented)
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb"), source
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/securities/sh/600000/bars")
+        assert response.status_code == 200
+        assert writer_threads == ["kline-heavy-job_0"]
+
+
+def test_two_concurrent_lazy_cache_misses_follow_global_rejection_policy(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+    rows = pd.DataFrame([{
+        "date": date(2024, 1, 2), "open": 10.0, "high": 11.0, "low": 9.0,
+        "close": 10.5, "volume": 100, "amount": 1000,
+    }])
+    source = BlockingSource(release)
+
+    def stock_history(*args, **kwargs):
+        entered.set()
+        release.wait(3)
+        return rows
+
+    source.stock_history = stock_history
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb"), source
+    )
+    try:
+        with TestClient(app) as client, ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(client.get, "/api/securities/sh/600000/bars")
+            assert entered.wait(2)
+            second = client.get("/api/securities/sz/000001/bars")
+            assert second.status_code == 409
+            assert second.json()["detail"]["code"] == "HEAVY_JOB_ALREADY_RUNNING"
+            release.set()
+            assert first.result(timeout=3).status_code == 200
+    finally:
+        release.set()
