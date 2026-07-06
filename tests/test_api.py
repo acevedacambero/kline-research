@@ -97,3 +97,8 @@ def test_feature_task_unknown_id_is_404(tmp_path):
     response = TestClient(app).get("/api/features/tasks/missing")
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "TASK_NOT_FOUND"
+
+
+def test_settings_derive_jobs_database_beside_overridden_data_path(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "custom-data"), FakeSource())
+    assert app.state.jobs_db_path == tmp_path / "custom-data" / "jobs.duckdb"

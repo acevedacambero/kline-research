@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from concurrent.futures import as_completed, ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import date
 import threading
 import time
-import uuid
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -20,6 +19,7 @@ from .data.eastmoney_source import EastMoneyHttpSource
 from .data.pipeline import DatasetPipeline
 from .features import FEATURE_DEFINITION_VERSION, compute_daily_features
 from .features.batch import BatchFeatureBuilder, FeatureDatasetStore
+from .jobs import CoordinatorShutdownError, HeavyTaskCoordinator, Job, JobStatus, JobStore
 from .p1 import (
     compute_drawdown_label,
     compute_forward_labels,
@@ -43,184 +43,208 @@ class AuditRequest(BaseModel):
     signal_date: date
 
 
-class TaskStore:
-    def __init__(self, workers: int = 8):
-        self.items: dict[str, dict] = {}
-        self.lock = threading.Lock()
-        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="akshare-import")
-        self.fetch_executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="market-fetch")
+def _task_response(job: Job) -> dict:
+    if isinstance(job.payload, list):
+        total = len(job.payload)
+    elif isinstance(job.payload, dict) and isinstance(job.payload.get("securities"), list):
+        total = len(job.payload["securities"])
+    else:
+        total = 0
+    defaults = {"total": total, "done": 0, "rows": 0, "errors": [],
+                "currentSecurity": None}
+    if job.job_type == "import":
+        defaults.update({"stage": "queued", "speed": 0.0, "etaSeconds": None,
+                         "directAvailable": job.payload.get("directAvailable")
+                         if isinstance(job.payload, dict) else None})
+    progress = job.progress if isinstance(job.progress, dict) else {}
+    result = job.result if isinstance(job.result, dict) else {}
+    item = {"id": job.id, **defaults, **progress, **result}
+    status = job.status.value
+    if job.status is JobStatus.COMPLETED and item["errors"]:
+        status = "completed_with_errors"
+    item["status"] = status
+    if job.error and not item["errors"]:
+        item["errors"] = [{"message": job.error}]
+    return item
+
+
+class _DurableItems:
+    def __init__(self, store: JobStore, job_types: set[str]):
+        self.store = store
+        self.job_types = job_types
+
+    def __contains__(self, task_id: str) -> bool:
+        job = self.store.get(task_id)
+        return job is not None and job.job_type in self.job_types
+
+    def __getitem__(self, task_id: str) -> dict:
+        job = self.store.get(task_id)
+        if job is None or job.job_type not in self.job_types:
+            raise KeyError(task_id)
+        return _task_response(job)
+
+
+class _TaskFacade:
+    def __init__(self, coordinator: HeavyTaskCoordinator, store: JobStore, lock: threading.Lock,
+                 job_types: set[str]):
+        self.coordinator = coordinator
+        self.items = _DurableItems(store, job_types)
+        self.lock = lock
 
     def active(self) -> dict | None:
-        return next(
-            (item for item in self.items.values() if item["status"] in {"queued", "running"}),
-            None,
-        )
+        active = self.coordinator.active()
+        if active:
+            task_id = active[0].id
+            raise HTTPException(409, detail={
+                "code": "HEAVY_JOB_ALREADY_RUNNING",
+                "message": f"A heavy job is already running: {task_id}",
+                "taskId": task_id,
+            })
+        return None
 
-    def submit(
-        self,
-        pipeline: DatasetPipeline,
-        source: HybridDownloadSource,
-        securities: list[dict[str, str]],
-        start_date: date,
-        end_date: date,
-        timeout_seconds: int,
-    ) -> str:
-        task_id = uuid.uuid4().hex
-        self.items[task_id] = {
-            "id": task_id, "status": "queued", "total": len(securities), "done": 0,
-            "errors": [], "currentSecurity": None, "stage": "queued", "speed": 0.0,
-            "etaSeconds": None, "directAvailable": source.direct_available,
-        }
+    def _submit(self, job_type, payload, operation) -> str:
+        with self.lock:
+            active = self.coordinator.active()
+            if active:
+                task_id = active[0].id
+                raise HTTPException(409, detail={
+                    "code": "HEAVY_JOB_ALREADY_RUNNING",
+                    "message": f"A heavy job is already running: {task_id}",
+                    "taskId": task_id,
+                })
+            return self.coordinator.submit(job_type, payload, operation).job_id
 
-        def run():
-            self.items[task_id]["status"] = "running"
-            self.items[task_id]["stage"] = "parallel-download"
+
+class TaskStore(_TaskFacade):
+    def __init__(self, coordinator, store, lock, workers: int):
+        super().__init__(coordinator, store, lock, {"import"})
+        self.workers = max(1, min(workers, 3))
+
+    def submit(self, pipeline, source, securities, start_date, end_date, timeout_seconds) -> str:
+        initial = {"total": len(securities), "done": 0, "errors": [],
+                   "currentSecurity": None, "stage": "queued", "speed": 0.0,
+                   "etaSeconds": None, "directAvailable": source.direct_available}
+
+        payload = {"securities": securities, "directAvailable": source.direct_available}
+
+        def operation(payload, progress):
+            state = dict(initial)
+            state["stage"] = "parallel-download"
+            progress(state)
             started = time.monotonic()
 
             def fetch(security):
-                return security, source.fetch_bundle(
-                    security["exchange"], security["code"], start_date, end_date
+                return source.fetch_bundle(security["exchange"], security["code"],
+                                           start_date, end_date)
+
+            def record_finished():
+                state["done"] += 1
+                elapsed = max(time.monotonic() - started, 0.001)
+                state["speed"] = round(state["done"] / elapsed, 3)
+                remaining = state["total"] - state["done"]
+                state["etaSeconds"] = (
+                    round(remaining / state["speed"]) if state["speed"] else None
                 )
+                state["directAvailable"] = source.direct_available
+                progress(state)
 
-            futures = {
-                self.fetch_executor.submit(fetch, security): security for security in securities
-            }
-            for future in as_completed(futures):
-                security = futures[future]
-                security_key = f'{security["exchange"]}{security["code"]}'
-                self.items[task_id]["currentSecurity"] = security_key
+            securities = payload["securities"]
+            for offset in range(0, len(securities), self.workers):
+                batch = securities[offset:offset + self.workers]
+                executor = ThreadPoolExecutor(max_workers=len(batch),
+                                              thread_name_prefix="market-fetch")
                 try:
-                    self.items[task_id]["stage"] = "writing-snapshot"
-                    _, (raw, factors) = future.result(timeout=timeout_seconds)
-                    self.items[task_id]["stage"] = "writing-snapshot"
-                    with self.lock:
-                        pipeline.import_security(
-                            security["exchange"], security["code"], raw, factors
-                        )
-                except FutureTimeoutError:
-                    future.cancel()
-                    self.items[task_id]["errors"].append(
-                        {"security": security_key, "message": f"fetch timed out after {timeout_seconds}s"}
-                    )
-                except Exception as exc:
-                    self.items[task_id]["errors"].append(
-                        {"security": security_key, "message": str(exc)}
-                    )
+                    futures = {
+                        executor.submit(fetch, security): security for security in batch
+                    }
+                    completed, pending = wait(futures, timeout=timeout_seconds)
+                    for future in completed:
+                        security = futures[future]
+                        key = f'{security["exchange"]}{security["code"]}'
+                        state["currentSecurity"] = key
+                        state["stage"] = "writing-snapshot"
+                        try:
+                            raw, factors = future.result()
+                            pipeline.import_security(
+                                security["exchange"], security["code"], raw, factors
+                            )
+                        except Exception as exc:
+                            state["errors"].append({"security": key, "message": str(exc)})
+                        finally:
+                            record_finished()
+                    for future in pending:
+                        future.cancel()
+                        security = futures[future]
+                        key = f'{security["exchange"]}{security["code"]}'
+                        state["errors"].append({
+                            "security": key,
+                            "message": f"fetch timed out after {timeout_seconds}s",
+                        })
+                        record_finished()
                 finally:
-                    self.items[task_id]["done"] += 1
-                    elapsed = max(time.monotonic() - started, 0.001)
-                    speed = self.items[task_id]["done"] / elapsed
-                    remaining = self.items[task_id]["total"] - self.items[task_id]["done"]
-                    self.items[task_id]["speed"] = round(speed, 3)
-                    self.items[task_id]["etaSeconds"] = round(remaining / speed) if speed else None
-                    self.items[task_id]["directAvailable"] = source.direct_available
-            self.items[task_id]["status"] = (
-                "completed_with_errors" if self.items[task_id]["errors"] else "completed"
-            )
-            self.items[task_id]["currentSecurity"] = None
-            self.items[task_id]["stage"] = "finished"
+                    executor.shutdown(wait=False, cancel_futures=True)
+            state["currentSecurity"] = None
+            state["stage"] = "finished"
+            return state
 
-        self.executor.submit(run)
-        return task_id
+        return self._submit("import", payload, operation)
 
 
-class LabelTaskStore:
-    def __init__(self):
-        self.items: dict[str, dict] = {}
-        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="label-build")
+class LabelTaskStore(_TaskFacade):
+    def __init__(self, coordinator, store, lock):
+        super().__init__(coordinator, store, lock, {"labels"})
 
-    def submit(
-        self,
-        pipeline: DatasetPipeline,
-        source: AkShareSource,
-        securities: list[dict[str, str]],
-        names: dict[str, str],
-        output_root,
-    ) -> str:
-        task_id = uuid.uuid4().hex
-        self.items[task_id] = {
-            "id": task_id, "status": "queued", "total": len(securities), "done": 0,
-            "rows": 0, "errors": [],
-        }
-
-        def run():
-            self.items[task_id]["status"] = "running"
-            benchmarks: dict[str, list[dict]] = {}
-            builder = BatchLabelBuilder()
-            store = LabelDatasetStore(output_root)
-            for security in securities:
+    def submit(self, pipeline, source, securities, names, output_root) -> str:
+        def operation(payload, progress):
+            state = {"total": len(payload), "done": 0, "rows": 0, "errors": []}
+            benchmarks = {}
+            builder, output = BatchLabelBuilder(), LabelDatasetStore(output_root)
+            for security in payload:
                 key = f'{security["exchange"]}{security["code"]}'
                 try:
-                    if security["exchange"] not in benchmarks:
-                        symbol = "000001" if security["exchange"] == "sh" else "399001"
+                    exchange = security["exchange"]
+                    if exchange not in benchmarks:
+                        symbol = "000001" if exchange == "sh" else "399001"
                         frame = source.index_history(symbol, date(1990, 1, 1), date.today())
                         for column in ("open", "high", "low", "close"):
                             frame[f"{column}_qfq"] = frame[column]
                             frame[f"{column}_total_return"] = frame[column]
-                        benchmarks[security["exchange"]] = frame.to_dict("records")
+                        benchmarks[exchange] = frame.to_dict("records")
                     bars = pd.read_parquet(security["derived_path"]).to_dict("records")
-                    status = status_from_name(names.get(key, ""))
-                    rows = builder.build(
-                        security["exchange"], security["code"], bars,
-                        benchmarks[security["exchange"]], security["snapshot_version"],
-                        st_status=status.is_st,
-                    )
-                    report = store.write(security["exchange"], security["code"], rows)
-                    self.items[task_id]["rows"] += report.rows
+                    rows = builder.build(exchange, security["code"], bars, benchmarks[exchange],
+                                         security["snapshot_version"],
+                                         st_status=status_from_name(names.get(key, "")).is_st)
+                    state["rows"] += output.write(exchange, security["code"], rows).rows
                 except Exception as exc:
-                    self.items[task_id]["errors"].append({"security": key, "message": str(exc)})
+                    state["errors"].append({"security": key, "message": str(exc)})
                 finally:
-                    self.items[task_id]["done"] += 1
-            self.items[task_id]["status"] = (
-                "completed_with_errors" if self.items[task_id]["errors"] else "completed"
-            )
-
-        self.executor.submit(run)
-        return task_id
+                    state["done"] += 1
+                    progress(state)
+            return state
+        return self._submit("labels", securities, operation)
 
 
-class FeatureTaskStore:
-    def __init__(self):
-        self.items: dict[str, dict] = {}
-        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="feature-build")
+class FeatureTaskStore(_TaskFacade):
+    def __init__(self, coordinator, store, lock):
+        super().__init__(coordinator, store, lock, {"features"})
 
-    def active(self) -> dict | None:
-        return next(
-            (item for item in self.items.values() if item["status"] in {"queued", "running"}),
-            None,
-        )
-
-    def submit(self, securities: list[dict[str, str]], output_root) -> str:
-        task_id = uuid.uuid4().hex
-        self.items[task_id] = {
-            "id": task_id,
-            "status": "queued",
-            "total": len(securities),
-            "done": 0,
-            "rows": 0,
-            "errors": [],
-            "currentSecurity": None,
-        }
-
-        def run():
-            item = self.items[task_id]
-            item["status"] = "running"
+    def submit(self, securities, output_root) -> str:
+        def operation(payload, progress):
+            state = {"total": len(payload), "done": 0, "rows": 0, "errors": [],
+                     "currentSecurity": None}
             builder = BatchFeatureBuilder(FeatureDatasetStore(output_root))
-
-            def progress(security, report, error):
-                item["currentSecurity"] = security
-                item["done"] += 1
+            def on_progress(security, report, error):
+                state["currentSecurity"] = security
+                state["done"] += 1
                 if report:
-                    item["rows"] += report.rows
+                    state["rows"] += report.rows
                 if error:
-                    item["errors"].append({"security": security, "message": str(error)})
-
-            builder.build_many(securities, on_progress=progress)
-            item["status"] = "completed_with_errors" if item["errors"] else "completed"
-            item["currentSecurity"] = None
-
-        self.executor.submit(run)
-        return task_id
+                    state["errors"].append({"security": security, "message": str(error)})
+                progress(state)
+            builder.build_many(payload, on_progress=on_progress)
+            state["currentSecurity"] = None
+            return state
+        return self._submit("features", securities, operation)
 
 
 def _market_counts(securities: list[dict[str, str]]) -> dict[str, int]:
@@ -234,21 +258,43 @@ def dataframe_records(frame: pd.DataFrame) -> list[dict]:
 def create_app(settings: Settings | None = None, source: AkShareSource | None = None) -> FastAPI:
     settings = settings or Settings()
     source = source or AkShareSource(retries=settings.request_retries)
-    app = FastAPI(title="K-line Research API", version="0.2.0")
+    jobs_db_path = settings.jobs_db_path or settings.data_path / "jobs.duckdb"
+    jobs_db_path.parent.mkdir(parents=True, exist_ok=True)
+    job_store = JobStore(jobs_db_path, memory_limit=settings.duckdb_memory_limit,
+                         threads=settings.duckdb_threads)
+    coordinator = HeavyTaskCoordinator(job_store)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        try:
+            coordinator.shutdown()
+        except CoordinatorShutdownError:
+            pass
+        finally:
+            job_store.close()
+
+    app = FastAPI(title="K-line Research API", version="0.2.0", lifespan=lifespan)
+    app.state.jobs_db_path = jobs_db_path
+    app.state.job_store = job_store
+    app.state.heavy_coordinator = coordinator
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    pipeline = DatasetPipeline(settings.data_path)
+    pipeline = DatasetPipeline(settings.data_path, memory_limit=settings.duckdb_memory_limit,
+                               threads=settings.duckdb_threads)
     pipeline.initialize_catalog()
-    tasks = TaskStore(settings.download_workers)
     download_source = HybridDownloadSource(
         EastMoneyHttpSource(retries=1), source
     )
-    label_tasks = LabelTaskStore()
-    feature_tasks = FeatureTaskStore()
+    app.state.download_source = download_source
+    submission_lock = threading.Lock()
+    tasks = TaskStore(coordinator, job_store, submission_lock, settings.download_workers)
+    label_tasks = LabelTaskStore(coordinator, job_store, submission_lock)
+    feature_tasks = FeatureTaskStore(coordinator, job_store, submission_lock)
     security_cache: list[dict[str, str]] | None = None
 
     def securities_list(refresh: bool = False) -> list[dict[str, str]]:
@@ -356,6 +402,7 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
 
     @app.post("/api/labels/build", status_code=202)
     def build_labels(request: ImportRequest):
+        label_tasks.active()
         cached = pipeline.cached_securities()
         if request.scope == "representative":
             cached = cached[:3]
@@ -444,18 +491,65 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
     def load_bars(exchange: str, code: str) -> pd.DataFrame:
         normalized = pipeline.latest_derived_path(exchange, code)
         if normalized is None or not normalized.exists():
-            start = date.fromisoformat(f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-{settings.history_start_date[6:]}")
+            if threading.current_thread().name.startswith("kline-heavy-job"):
+                raise RuntimeError("lazy cache fill cannot run inside the heavy-job worker")
+            start = date.fromisoformat(
+                f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-"
+                f"{settings.history_start_date[6:]}"
+            )
+
+            def operation(payload, progress):
+                def fetch():
+                    return (
+                        source.stock_history(payload["code"], start, date.today(), ""),
+                        source.adjustment_factors(payload["code"]),
+                    )
+
+                executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="market-fetch")
+                future = executor.submit(fetch)
+                try:
+                    completed, _ = wait([future], timeout=settings.security_fetch_timeout_seconds)
+                    if not completed:
+                        future.cancel()
+                        raise TimeoutError(
+                            "fetch timed out after "
+                            f"{settings.security_fetch_timeout_seconds}s"
+                        )
+                    raw, factors = future.result()
+                finally:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                report = pipeline.import_security(
+                    payload["exchange"], payload["code"], raw, factors
+                )
+                return {"snapshotVersion": report.snapshot_version}
+
+            with submission_lock:
+                active = coordinator.active()
+                if active:
+                    task_id = active[0].id
+                    raise HTTPException(409, detail={
+                        "code": "HEAVY_JOB_ALREADY_RUNNING",
+                        "message": f"A heavy job is already running: {task_id}",
+                        "taskId": task_id,
+                    })
+                submitted = coordinator.submit(
+                    "cache-security", {"exchange": exchange, "code": code}, operation
+                )
             try:
-                raw = source.stock_history(code, start, date.today(), "")
-                factors = source.adjustment_factors(code)
-                pipeline.import_security(exchange, code, raw, factors)
+                submitted.future.result(timeout=settings.security_fetch_timeout_seconds + 1)
             except Exception as exc:
                 raise HTTPException(
-                    503, detail={"code": "AKSHARE_FETCH_FAILED", "message": f"行情获取失败：{exc}"}
+                    503,
+                    detail={
+                        "code": "AKSHARE_FETCH_FAILED",
+                        "message": f"行情获取失败：{exc}",
+                    },
                 ) from exc
             normalized = pipeline.latest_derived_path(exchange, code)
         if normalized is None:
-            raise HTTPException(500, detail={"code": "CACHE_WRITE_FAILED", "message": "快照写入失败"})
+            raise HTTPException(
+                500, detail={"code": "CACHE_WRITE_FAILED", "message": "快照写入失败"}
+            )
         return pd.read_parquet(normalized)
 
     def benchmark_bars(exchange: str) -> list[dict]:

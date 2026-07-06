@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 import hashlib
 from pathlib import Path
+import re
+from typing import Iterator
 
 import duckdb
 import pandas as pd
@@ -27,12 +30,30 @@ class ImportReport:
 
 
 class DatasetPipeline:
-    def __init__(self, output_root: Path):
+    _MEMORY_LIMIT = re.compile(r"^[1-9][0-9]*(?:\.[0-9]+)?(?:KB|MB|GB|TB)$", re.I)
+
+    def __init__(self, output_root: Path, *, memory_limit: str = "2GB", threads: int = 2):
+        if not isinstance(memory_limit, str) or not self._MEMORY_LIMIT.fullmatch(memory_limit):
+            raise ValueError("memory_limit must be a positive number followed by KB, MB, GB, or TB")
+        if isinstance(threads, bool) or not isinstance(threads, int) or not 1 <= threads <= 1024:
+            raise ValueError("threads must be an integer between 1 and 1024")
         self.output_root = Path(output_root)
+        self.memory_limit = memory_limit.upper()
+        self.threads = threads
         self.catalog_path = self.output_root / "catalog.duckdb"
         self.security_master_path = (
             self.output_root / "data-foundation-v1" / "facts" / "security_master.parquet"
         )
+
+    @contextmanager
+    def connection(self) -> Iterator[duckdb.DuckDBPyConnection]:
+        connection = duckdb.connect(str(self.catalog_path))
+        try:
+            connection.execute(f"SET memory_limit='{self.memory_limit}'")
+            connection.execute(f"SET threads={self.threads}")
+            yield connection
+        finally:
+            connection.close()
 
     def save_security_master(self, securities: list[dict[str, str]]) -> None:
         self.security_master_path.parent.mkdir(parents=True, exist_ok=True)
@@ -45,7 +66,7 @@ class DatasetPipeline:
 
     def initialize_catalog(self) -> CatalogReport:
         self.output_root.mkdir(parents=True, exist_ok=True)
-        with duckdb.connect(str(self.catalog_path)) as connection:
+        with self.connection() as connection:
             connection.execute(
                 """
                 create table if not exists dataset_manifest (
@@ -102,7 +123,7 @@ class DatasetPipeline:
         raw_path = root / "facts" / "raw_bars" / exchange / f"{code}.parquet"
         factor_path = root / "facts" / "adjustment_factors" / exchange / f"{code}.parquet"
         normalized_path = root / "derived" / exchange / f"{code}.parquet"
-        with duckdb.connect(str(self.catalog_path)) as connection:
+        with self.connection() as connection:
             existing = connection.execute(
                 "select content_hash from dataset_manifest where dataset_key = ?", [dataset_key]
             ).fetchone()
@@ -163,7 +184,7 @@ class DatasetPipeline:
         )
 
     def latest_derived_path(self, exchange: str, code: str) -> Path | None:
-        with duckdb.connect(str(self.catalog_path)) as connection:
+        with self.connection() as connection:
             row = connection.execute(
                 "select derived_path from dataset_manifest where dataset_key = ?",
                 [f"stock:{exchange}:{code}"],
@@ -171,7 +192,7 @@ class DatasetPipeline:
         return Path(row[0]) if row and row[0] else None
 
     def latest_snapshot_version(self, exchange: str, code: str) -> str | None:
-        with duckdb.connect(str(self.catalog_path)) as connection:
+        with self.connection() as connection:
             row = connection.execute(
                 "select snapshot_version from dataset_manifest where dataset_key = ?",
                 [f"stock:{exchange}:{code}"],
@@ -179,7 +200,7 @@ class DatasetPipeline:
         return row[0] if row and row[0] else None
 
     def cached_market_counts(self) -> dict[str, int]:
-        with duckdb.connect(str(self.catalog_path)) as connection:
+        with self.connection() as connection:
             rows = connection.execute(
                 """select split_part(dataset_key, ':', 2) market, count(*)
                 from dataset_manifest where dataset_key like 'stock:%'
@@ -190,7 +211,7 @@ class DatasetPipeline:
         return counts
 
     def cached_securities(self) -> list[dict[str, str]]:
-        with duckdb.connect(str(self.catalog_path)) as connection:
+        with self.connection() as connection:
             rows = connection.execute(
                 """select split_part(dataset_key, ':', 2), split_part(dataset_key, ':', 3),
                 derived_path, snapshot_version from dataset_manifest
@@ -208,7 +229,7 @@ class DatasetPipeline:
         ]
 
     def quality_events(self, limit: int = 100) -> list[dict[str, str]]:
-        with duckdb.connect(str(self.catalog_path)) as connection:
+        with self.connection() as connection:
             rows = connection.execute(
                 """select dataset_key, event_type, severity, message, created_at
                 from data_quality_events order by created_at desc limit ?""",
