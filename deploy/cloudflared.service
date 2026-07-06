@@ -1,0 +1,19 @@
+[Unit]
+Description=Cloudflare Tunnel for K-line Research
+After=network-online.target kline.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/apps/kline/shared/secrets/cloudflared.env
+ExecStart=%h/.local/bin/cloudflared tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+MemoryMax=256M
+TasksMax=64
+
+[Install]
+WantedBy=default.target
