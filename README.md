@@ -42,3 +42,23 @@ pnpm build
 - 历史 ST 缺少可靠逐日来源，当前使用证券现名近似并显式标记 `st_status_approx`；注册制 IPO noLimit 窗口按上市交易序号处理。
 - 历史 ST 状态采用近似规则并返回 `isApprox`；后续可通过版本化状态表修正。
 - 卖出执行、成本滑点、P2 特征评分/筛选、概率校准和回测不在当前范围。
+
+## 生产部署 Gate
+
+目标服务器必须同时通过 provider 可达性和 DuckDB 单写者两项 Gate，才允许进入生产部署。Gate 报告包含运行环境元数据，只保存在已忽略的 `artifacts/` 目录，不得提交到 Git。
+
+在目标服务器的隔离临时工作区运行完整 provider Gate：
+
+```bash
+KLINE_ENV=test python scripts/probe_providers.py --output provider-gate.json
+```
+
+通过阈值为：EastMoney 成功率不低于 90%，Tencent 成功率不低于 80%，Sina 至少一次成功，指数和交易日历检查均成功，且 OHLCV 字段完整。报告同时记录平均/P95 延迟、空响应、缺失字段和分类错误。`--quick` 仅用于诊断，不能作为生产 Gate 通过证据。
+
+所有数据与数据库路径均指向隔离临时工作区后，运行单写者 Gate：
+
+```bash
+KLINE_ENV=test python -m pytest tests/test_job_store.py tests/test_job_coordinator.py tests/test_single_writer.py tests/test_api.py -q
+```
+
+该 Gate 要求 Uvicorn 只运行一个 worker，且测试观测到的 DuckDB 最大写并发为 1。任一 Gate 失败都必须阻断部署，不得通过放宽阈值取得通过结果。
