@@ -6,6 +6,7 @@ import time
 import pytest
 
 from kline.jobs.coordinator import (
+    CoordinatorError,
     CoordinatorShutdownError,
     DuplicateActiveJobError,
     HeavyTaskCoordinator,
@@ -202,4 +203,38 @@ def test_context_manager_preserves_body_exception(tmp_path):
             raise ValueError("body failed")
 
     assert any("shutdown" in note for note in raised.value.__notes__)
+    store.close()
+
+
+def test_worker_cannot_reentrantly_shutdown_coordinator(tmp_path):
+    store = JobStore(tmp_path / "jobs.duckdb")
+    coordinator = HeavyTaskCoordinator(store)
+    submitted = coordinator.submit(
+        "download", {}, lambda payload, progress: coordinator.shutdown()
+    )
+
+    with pytest.raises(CoordinatorError, match="worker thread"):
+        submitted.future.result(timeout=2)
+    with pytest.raises(CoordinatorShutdownError):
+        coordinator.shutdown()
+
+    assert store.get(submitted.job_id).status is JobStatus.FAILED
+    store.close()
+
+
+def test_completed_job_does_not_spuriously_block_same_type_submission(tmp_path):
+    store = JobStore(tmp_path / "jobs.duckdb")
+    coordinator = HeavyTaskCoordinator(store)
+    release = threading.Event()
+    first = coordinator.submit(
+        "download", {}, lambda payload, progress: release.wait(timeout=2)
+    )
+
+    with coordinator._lock:
+        release.set()
+        assert first.future.result(timeout=2) is True
+        second = coordinator.submit("download", {}, lambda payload, progress: payload)
+
+    assert second.future.result(timeout=2) == {}
+    coordinator.shutdown()
     store.close()

@@ -11,11 +11,15 @@ ProgressCallback = Callable[[Any], None]
 Operation = Callable[[Any, ProgressCallback], Any]
 
 
-class DuplicateActiveJobError(RuntimeError):
+class CoordinatorError(RuntimeError):
     pass
 
 
-class CoordinatorShutdownError(RuntimeError):
+class DuplicateActiveJobError(CoordinatorError):
+    pass
+
+
+class CoordinatorShutdownError(CoordinatorError):
     """One or more jobs failed before the coordinator finished shutting down."""
 
     def __init__(self, failures: dict[str, str]) -> None:
@@ -38,6 +42,7 @@ class HeavyTaskCoordinator:
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kline-heavy-job")
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
+        self._worker_context = threading.local()
         self._futures: dict[str, Future[Any]] = {}
         self._job_types: dict[str, str] = {}
         self._failures: dict[str, str] = {}
@@ -48,6 +53,7 @@ class HeavyTaskCoordinator:
         with self._lock:
             if self._shutdown_state != "open":
                 raise RuntimeError("coordinator has been shut down")
+            self._prune_completed_locked()
             if job_type in self._job_types:
                 raise DuplicateActiveJobError(f"active {job_type!r} job already exists")
             job = self._store.create(job_type, payload)
@@ -67,6 +73,7 @@ class HeavyTaskCoordinator:
             return SubmittedJob(job.id, future)
 
     def _run(self, job_id: str, payload: Any, operation: Operation) -> Any:
+        self._worker_context.active = True
         try:
             self._store.transition(job_id, JobStatus.RUNNING)
             result = operation(payload, lambda progress: self._store.update_progress(job_id, progress))
@@ -82,6 +89,8 @@ class HeavyTaskCoordinator:
                     f"{type(persistence_error).__name__}: {persistence_error}"
                 )
             raise
+        finally:
+            self._worker_context.active = False
 
     def _finished(self, job_id: str, job_type: str, future: Future[Any]) -> None:
         with self._condition:
@@ -127,6 +136,8 @@ class HeavyTaskCoordinator:
             ]
 
     def shutdown(self) -> None:
+        if getattr(self._worker_context, "active", False):
+            raise CoordinatorError("coordinator cannot be shut down from its worker thread")
         with self._condition:
             if self._shutdown_state == "draining":
                 self._condition.wait_for(lambda: self._shutdown_state == "drained")
