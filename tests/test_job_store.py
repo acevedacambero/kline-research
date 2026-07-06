@@ -27,12 +27,20 @@ def test_jobs_persist_with_detached_json_values(tmp_path):
 def test_schema_version_and_configured_duckdb_settings(tmp_path):
     with JobStore(tmp_path / "jobs.duckdb", memory_limit="256MB", threads=1) as store:
         assert store.schema_version == 1
-        assert store.connection.execute(
-            "SELECT value FROM schema_metadata WHERE key = ?", ["schema_version"]
-        ).fetchone() == ("1",)
-        assert store.connection.execute(
+        assert store._connection.execute(
             "SELECT current_setting('threads'), current_setting('memory_limit')"
         ).fetchone() == (1, "244.1 MiB")
+
+
+def test_unsupported_schema_version_is_rejected(tmp_path):
+    path = tmp_path / "jobs.duckdb"
+    connection = duckdb.connect(str(path))
+    connection.execute("CREATE TABLE schema_metadata (key VARCHAR PRIMARY KEY, value VARCHAR)")
+    connection.execute("INSERT INTO schema_metadata VALUES (?, ?)", ["schema_version", "99"])
+    connection.close()
+
+    with pytest.raises(RuntimeError, match="unsupported jobs schema version 99"):
+        JobStore(path)
 
 
 @pytest.mark.parametrize("memory_limit", ["2GB; DROP TABLE jobs", "unlimited", "-1GB"])

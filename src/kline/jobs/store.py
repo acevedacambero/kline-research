@@ -61,20 +61,20 @@ class JobStore:
         if isinstance(threads, bool) or not isinstance(threads, int) or not 1 <= threads <= 1024:
             raise ValueError("threads must be an integer between 1 and 1024")
         self._lock = threading.RLock()
-        self.connection = duckdb.connect(str(path))
+        self._connection = duckdb.connect(str(path))
         try:
             # DuckDB does not accept parameters in SET statements. Values are strictly validated above.
-            self.connection.execute(f"SET memory_limit='{memory_limit.upper()}'")
-            self.connection.execute(f"SET threads={threads}")
+            self._connection.execute(f"SET memory_limit='{memory_limit.upper()}'")
+            self._connection.execute(f"SET threads={threads}")
             self._initialize_schema()
             self._recover_running_jobs()
         except BaseException:
-            self.connection.close()
+            self._connection.close()
             raise
 
     def _initialize_schema(self) -> None:
         with self._lock:
-            self.connection.execute(
+            self._connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schema_metadata (
                     key VARCHAR PRIMARY KEY,
@@ -82,11 +82,17 @@ class JobStore:
                 )
                 """
             )
-            self.connection.execute(
+            self._connection.execute(
                 "INSERT INTO schema_metadata VALUES (?, ?) ON CONFLICT (key) DO NOTHING",
                 ["schema_version", "1"],
             )
-            self.connection.execute(
+            version_row = self._connection.execute(
+                "SELECT value FROM schema_metadata WHERE key = ?", ["schema_version"]
+            ).fetchone()
+            if version_row != ("1",):
+                found = version_row[0] if version_row else "missing"
+                raise RuntimeError(f"unsupported jobs schema version {found}; expected 1")
+            self._connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS jobs (
                     id VARCHAR PRIMARY KEY,
@@ -105,7 +111,7 @@ class JobStore:
 
     def _recover_running_jobs(self) -> None:
         with self._lock:
-            self.connection.execute(
+            self._connection.execute(
                 "UPDATE jobs SET status = ?, updated_at = current_timestamp WHERE status = ?",
                 [JobStatus.INTERRUPTED.value, JobStatus.RUNNING.value],
             )
@@ -113,7 +119,7 @@ class JobStore:
     @property
     def schema_version(self) -> int:
         with self._lock:
-            row = self.connection.execute(
+            row = self._connection.execute(
                 "SELECT value FROM schema_metadata WHERE key = ?", ["schema_version"]
             ).fetchone()
             return int(row[0])
@@ -121,7 +127,7 @@ class JobStore:
     def create(self, job_type: str, payload: Any, *, resumable: bool = False) -> Job:
         job_id = str(uuid.uuid4())
         with self._lock:
-            self.connection.execute(
+            self._connection.execute(
                 """
                 INSERT INTO jobs (id, job_type, status, progress, payload, resumable)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -132,7 +138,7 @@ class JobStore:
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
-            row = self.connection.execute(
+            row = self._connection.execute(
                 """SELECT id, job_type, status, progress, payload, result, error, resumable,
                           created_at, updated_at FROM jobs WHERE id = ?""",
                 [job_id],
@@ -154,7 +160,7 @@ class JobStore:
                 sql += " WHERE status = ?"
                 parameters.append(status.value)
             sql += " ORDER BY created_at, id"
-            return [_job_from_row(row) for row in self.connection.execute(sql, parameters).fetchall()]
+            return [_job_from_row(row) for row in self._connection.execute(sql, parameters).fetchall()]
 
     def transition(self, job_id: str, status: JobStatus) -> Job:
         status = JobStatus(status)
@@ -162,7 +168,7 @@ class JobStore:
             current = self._require(job_id)
             if status not in _TRANSITIONS[current.status]:
                 raise ValueError(f"invalid job transition: {current.status.value} -> {status.value}")
-            self.connection.execute(
+            self._connection.execute(
                 "UPDATE jobs SET status = ?, updated_at = current_timestamp WHERE id = ?",
                 [status.value, job_id],
             )
@@ -171,7 +177,7 @@ class JobStore:
     def update_progress(self, job_id: str, progress: Any) -> Job:
         with self._lock:
             self._require(job_id)
-            self.connection.execute(
+            self._connection.execute(
                 "UPDATE jobs SET progress = ?, updated_at = current_timestamp WHERE id = ?",
                 [_json(progress), job_id],
             )
@@ -182,7 +188,7 @@ class JobStore:
             current = self._require(job_id)
             if JobStatus.COMPLETED not in _TRANSITIONS[current.status]:
                 raise ValueError(f"cannot complete job in {current.status.value} state")
-            self.connection.execute(
+            self._connection.execute(
                 """UPDATE jobs SET status = ?, result = ?, error = NULL,
                        updated_at = current_timestamp WHERE id = ?""",
                 [JobStatus.COMPLETED.value, _json(result), job_id],
@@ -194,7 +200,7 @@ class JobStore:
             current = self._require(job_id)
             if JobStatus.FAILED not in _TRANSITIONS[current.status]:
                 raise ValueError(f"cannot fail job in {current.status.value} state")
-            self.connection.execute(
+            self._connection.execute(
                 """UPDATE jobs SET status = ?, error = ?, updated_at = current_timestamp
                    WHERE id = ?""",
                 [JobStatus.FAILED.value, error, job_id],
@@ -203,7 +209,7 @@ class JobStore:
 
     def close(self) -> None:
         with self._lock:
-            self.connection.close()
+            self._connection.close()
 
     def __enter__(self) -> JobStore:
         return self

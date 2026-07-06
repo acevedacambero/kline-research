@@ -108,13 +108,98 @@ def test_immediate_jobs_do_not_leave_stale_pending_state(tmp_path):
     store = JobStore(tmp_path / "jobs.duckdb")
     coordinator = HeavyTaskCoordinator(store)
 
-    for index in range(100):
+    for index in range(200):
         submitted = coordinator.submit(
             f"immediate-{index}", {"index": index}, lambda payload, progress: payload
         )
         assert submitted.future.result(timeout=2) == {"index": index}
 
     assert coordinator.pending_count == 0
+    assert coordinator.tracked_count == 0
     assert coordinator.active() == []
     coordinator.shutdown()
+    store.close()
+
+
+def test_unserializable_result_marks_job_failed(tmp_path):
+    store = JobStore(tmp_path / "jobs.duckdb")
+    coordinator = HeavyTaskCoordinator(store)
+    submitted = coordinator.submit("features", {}, lambda payload, progress: {object()})
+
+    with pytest.raises(TypeError):
+        submitted.future.result(timeout=2)
+    with pytest.raises(CoordinatorShutdownError):
+        coordinator.shutdown()
+
+    job = store.get(submitted.job_id)
+    assert job.status is JobStatus.FAILED
+    assert "TypeError" in job.error
+    assert "JSON serializable" in job.error
+    store.close()
+
+
+def test_operation_receives_detached_persisted_payload(tmp_path):
+    store = JobStore(tmp_path / "jobs.duckdb")
+    coordinator = HeavyTaskCoordinator(store)
+    release = threading.Event()
+    blocker = coordinator.submit(
+        "blocker", {}, lambda payload, progress: release.wait(timeout=2)
+    )
+    payload = {"symbols": ["000001"]}
+    queued = coordinator.submit("download", payload, lambda received, progress: received)
+    payload["symbols"].append("mutated")
+    release.set()
+
+    blocker.future.result(timeout=2)
+    assert queued.future.result(timeout=2) == {"symbols": ["000001"]}
+    coordinator.shutdown()
+    store.close()
+
+
+def test_concurrent_shutdown_callers_wait_and_receive_same_failure(tmp_path):
+    store = JobStore(tmp_path / "jobs.duckdb")
+    coordinator = HeavyTaskCoordinator(store)
+    release = threading.Event()
+
+    def failing(payload, progress):
+        release.wait(timeout=2)
+        raise RuntimeError("late failure")
+
+    coordinator.submit("download", {}, failing)
+    errors: list[BaseException] = []
+    started = threading.Barrier(3)
+
+    def shut_down():
+        started.wait(timeout=2)
+        try:
+            coordinator.shutdown()
+        except BaseException as exc:
+            errors.append(exc)
+
+    callers = [threading.Thread(target=shut_down) for _ in range(2)]
+    for caller in callers:
+        caller.start()
+    started.wait(timeout=2)
+    time.sleep(0.03)
+    assert all(caller.is_alive() for caller in callers)
+    release.set()
+    for caller in callers:
+        caller.join(timeout=2)
+
+    assert len(errors) == 2
+    assert isinstance(errors[0], CoordinatorShutdownError)
+    assert errors[0] is errors[1]
+    store.close()
+
+
+def test_context_manager_preserves_body_exception(tmp_path):
+    store = JobStore(tmp_path / "jobs.duckdb")
+    with pytest.raises(ValueError, match="body failed") as raised:
+        with HeavyTaskCoordinator(store) as coordinator:
+            coordinator.submit(
+                "download", {}, lambda payload, progress: (_ for _ in ()).throw(RuntimeError("job"))
+            )
+            raise ValueError("body failed")
+
+    assert any("shutdown" in note for note in raised.value.__notes__)
     store.close()
