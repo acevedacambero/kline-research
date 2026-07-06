@@ -64,32 +64,31 @@ def test_feature_build_task_and_point_in_time_audit(tmp_path):
     data_path = tmp_path / "data"
     seed_security(data_path)
     app = create_app(Settings(data_path=data_path), FakeSource())
-    client = TestClient(app)
+    with TestClient(app) as client:
+        started = client.post("/api/features/build", json={"scope": "all"})
+        assert started.status_code == 202
+        task_id = started.json()["taskId"]
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            task = client.get(f"/api/features/tasks/{task_id}").json()
+            if task["status"] not in {"queued", "running"}:
+                break
+            time.sleep(0.02)
+        assert task["status"] == "completed"
+        assert task["rows"] == 260
+        assert task["errors"] == []
 
-    started = client.post("/api/features/build", json={"scope": "all"})
-    assert started.status_code == 202
-    task_id = started.json()["taskId"]
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        task = client.get(f"/api/features/tasks/{task_id}").json()
-        if task["status"] not in {"queued", "running"}:
-            break
-        time.sleep(0.02)
-    assert task["status"] == "completed"
-    assert task["rows"] == 260
-    assert task["errors"] == []
-
-    audited = client.post(
-        "/api/p2/audit",
-        json={"exchange": "sh", "code": "600000", "signal_date": "2024-09-16"},
-    )
-    assert audited.status_code == 200
-    body = audited.json()
-    assert set(body["groups"]) == {
-        "trend", "position", "momentum", "volumePrice", "tradingBehavior"
-    }
-    assert body["versions"]["featureDefinitionVersion"] == "daily-features-v1"
-    assert body["availableHistory"] == 260
+        audited = client.post(
+            "/api/p2/audit",
+            json={"exchange": "sh", "code": "600000", "signal_date": "2024-09-16"},
+        )
+        assert audited.status_code == 200
+        body = audited.json()
+        assert set(body["groups"]) == {
+            "trend", "position", "momentum", "volumePrice", "tradingBehavior"
+        }
+        assert body["versions"]["featureDefinitionVersion"] == "daily-features-v1"
+        assert body["availableHistory"] == 260
 
 
 def test_feature_task_unknown_id_is_404(tmp_path):
