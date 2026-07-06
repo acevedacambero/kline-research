@@ -492,12 +492,16 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
                 submitted.future.result()
             except Exception as exc:
                 raise HTTPException(
-                    503, detail={"code": "AKSHARE_FETCH_FAILED", "message": str(exc)}
+                    503,
+                    detail={
+                        "code": "AKSHARE_FETCH_FAILED",
+                        "message": f"行情获取失败：{exc}",
+                    },
                 ) from exc
             normalized = pipeline.latest_derived_path(exchange, code)
         if normalized is None:
             raise HTTPException(
-                500, detail={"code": "CACHE_WRITE_FAILED", "message": "cache write failed"}
+                500, detail={"code": "CACHE_WRITE_FAILED", "message": "快照写入失败"}
             )
         return pd.read_parquet(normalized)
 

@@ -244,3 +244,36 @@ def test_two_concurrent_lazy_cache_misses_follow_global_rejection_policy(tmp_pat
             assert first.result(timeout=3).status_code == 200
     finally:
         release.set()
+
+
+def test_lazy_cache_fetch_failure_preserves_message_contract(tmp_path):
+    source = BlockingSource(threading.Event())
+    source.stock_history = lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("boom"))
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb"), source
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/securities/sh/600000/bars")
+        assert response.status_code == 503
+        assert response.json()["detail"] == {
+            "code": "AKSHARE_FETCH_FAILED", "message": "行情获取失败：boom"
+        }
+
+
+def test_lazy_cache_missing_output_preserves_message_contract(tmp_path, monkeypatch):
+    rows = pd.DataFrame([{
+        "date": date(2024, 1, 2), "open": 10.0, "high": 11.0, "low": 9.0,
+        "close": 10.5, "volume": 100, "amount": 1000,
+    }])
+    source = BlockingSource(threading.Event())
+    source.stock_history = lambda *args, **kwargs: rows
+    monkeypatch.setattr(DatasetPipeline, "latest_derived_path", lambda *args: None)
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb"), source
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/securities/sh/600000/bars")
+        assert response.status_code == 500
+        assert response.json()["detail"] == {
+            "code": "CACHE_WRITE_FAILED", "message": "快照写入失败"
+        }
