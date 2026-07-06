@@ -117,7 +117,7 @@ def test_import_writes_are_serial_on_one_coordinator_thread(tmp_path, monkeypatc
             time.sleep(0.01)
 
         assert task["status"] == "completed"
-        assert task["done"] == task["total"] == 3
+        assert task["done"] == task["total"] == 2
         assert maximum == 1
         assert len(writer_threads) == 1
         assert app.state.heavy_coordinator.pending_count == 0
@@ -328,7 +328,7 @@ def test_hung_import_fetch_times_out_and_releases_coordinator(tmp_path, monkeypa
                     break
                 time.sleep(0.02)
             assert task["status"] == "completed_with_errors"
-            assert len(task["errors"]) == 3
+            assert len(task["errors"]) == 2
             assert all("timed out after 1s" in error["message"] for error in task["errors"])
             follow_up = client.post("/api/features/build", json={"scope": "all"})
             assert follow_up.status_code == 202

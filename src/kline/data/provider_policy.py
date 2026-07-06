@@ -34,6 +34,7 @@ class ProductionProviderPolicy:
     def __init__(self, tencent: TencentSource, sina: SinaSource) -> None:
         self.tencent = tencent
         self.sina = sina
+        self.direct_available = True
 
     def fetch_bundle(
         self, exchange: str, code: str, start_date: date, end_date: date
@@ -46,6 +47,7 @@ class ProductionProviderPolicy:
             raw = self.tencent.fetch_history(exchange, code, start_date, end_date)
             raw_provider = "tencent-http"
         except Exception:
+            self.direct_available = False
             raw = self.sina.sina_raw_history(
                 exchange, code, start_date, end_date
             )
@@ -68,3 +70,11 @@ class ProductionProviderPolicy:
             provider_policy_version=PROVIDER_POLICY_VERSION,
         )
         return raw, factors
+
+    def index_history(
+        self, exchange: str, start_date: date, end_date: date
+    ) -> pd.DataFrame:
+        exchange = exchange.lower().strip()
+        if exchange not in SUPPORTED_EXCHANGES:
+            raise MarketNotSupportedError(f"market not supported: {exchange or '<empty>'}")
+        return self.tencent.index_history(exchange, start_date, end_date)

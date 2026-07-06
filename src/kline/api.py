@@ -14,9 +14,12 @@ from pydantic import BaseModel
 
 from .config import Settings, VERSIONS
 from .data.akshare_source import AkShareSource
-from .data.download_source import HybridDownloadSource
-from .data.eastmoney_source import EastMoneyHttpSource
+from .data.provider_policy import (
+    ProductionProviderPolicy as HybridDownloadSource,
+    SUPPORTED_EXCHANGES,
+)
 from .data.pipeline import DatasetPipeline
+from .data.tencent_source import TencentHttpSource
 from .features import FEATURE_DEFINITION_VERSION, compute_daily_features
 from .features.batch import BatchFeatureBuilder, FeatureDatasetStore
 from .jobs import CoordinatorShutdownError, HeavyTaskCoordinator, Job, JobStatus, JobStore
@@ -30,6 +33,32 @@ from .p1 import (
 )
 from .p1.batch import BatchLabelBuilder, LabelDatasetStore
 from .p1.market_rules import status_from_name
+
+
+class _InjectedProviderAdapter:
+    """Adapt an explicitly injected legacy source without making network calls."""
+
+    def __init__(self, source) -> None:
+        self.source = source
+
+    def fetch_history(self, exchange, code, start_date, end_date):
+        return self.source.stock_history(code, start_date, end_date, "")
+
+    def index_history(self, exchange, start_date, end_date):
+        symbol = "000001" if exchange == "sh" else "399001"
+        return self.source.index_history(symbol, start_date, end_date)
+
+    def sina_raw_history(self, exchange, code, start_date, end_date):
+        method = getattr(self.source, "sina_raw_history", None)
+        if method is not None:
+            return method(exchange, code, start_date, end_date)
+        return self.source.stock_history(code, start_date, end_date, "")
+
+    def sina_adjustment_factors(self, exchange, code):
+        method = getattr(self.source, "sina_adjustment_factors", None)
+        if method is not None:
+            return method(exchange, code)
+        return self.source.adjustment_factors(code)
 
 
 class ImportRequest(BaseModel):
@@ -204,8 +233,7 @@ class LabelTaskStore(_TaskFacade):
                 try:
                     exchange = security["exchange"]
                     if exchange not in benchmarks:
-                        symbol = "000001" if exchange == "sh" else "399001"
-                        frame = source.index_history(symbol, date(1990, 1, 1), date.today())
+                        frame = source.index_history(exchange, date(1990, 1, 1), date.today())
                         for column in ("open", "high", "low", "close"):
                             frame[f"{column}_qfq"] = frame[column]
                             frame[f"{column}_total_return"] = frame[column]
@@ -248,7 +276,10 @@ class FeatureTaskStore(_TaskFacade):
 
 
 def _market_counts(securities: list[dict[str, str]]) -> dict[str, int]:
-    return {market: sum(item["exchange"] == market for item in securities) for market in ("sh", "sz", "bj")}
+    return {
+        market: sum(item["exchange"] == market for item in securities)
+        for market in SUPPORTED_EXCHANGES
+    }
 
 
 def dataframe_records(frame: pd.DataFrame) -> list[dict]:
@@ -257,6 +288,7 @@ def dataframe_records(frame: pd.DataFrame) -> list[dict]:
 
 def create_app(settings: Settings | None = None, source: AkShareSource | None = None) -> FastAPI:
     settings = settings or Settings()
+    source_injected = source is not None
     source = source or AkShareSource(retries=settings.request_retries)
     jobs_db_path = settings.jobs_db_path or settings.data_path / "jobs.duckdb"
     jobs_db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -287,9 +319,13 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
     pipeline = DatasetPipeline(settings.data_path, memory_limit=settings.duckdb_memory_limit,
                                threads=settings.duckdb_threads)
     pipeline.initialize_catalog()
-    download_source = HybridDownloadSource(
-        EastMoneyHttpSource(retries=1), source
-    )
+    if source_injected:
+        adapter = _InjectedProviderAdapter(source)
+        download_source = HybridDownloadSource(adapter, adapter)
+    else:
+        download_source = HybridDownloadSource(
+            TencentHttpSource(retries=settings.request_retries), source
+        )
     app.state.download_source = download_source
     submission_lock = threading.Lock()
     tasks = TaskStore(coordinator, job_store, submission_lock, settings.download_workers)
@@ -304,7 +340,23 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
         if security_cache is None or refresh:
             security_cache = source.list_securities()
             pipeline.save_security_master(security_cache)
+        security_cache = [
+            item for item in security_cache
+            if item.get("exchange") in SUPPORTED_EXCHANGES
+        ]
         return security_cache
+
+    def require_supported_market(exchange: str) -> str:
+        normalized = exchange.lower().strip()
+        if normalized not in SUPPORTED_EXCHANGES:
+            raise HTTPException(
+                422,
+                detail={
+                    "code": "MARKET_NOT_SUPPORTED",
+                    "message": f"market not supported: {normalized or '<empty>'}",
+                },
+            )
+        return normalized
 
     @app.get("/api/system/health")
     def health():
@@ -347,7 +399,6 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
             securities = [
                 {"exchange": "sh", "code": "600000", "name": "浦发银行"},
                 {"exchange": "sz", "code": "000001", "name": "平安银行"},
-                {"exchange": "bj", "code": "920001", "name": "纬达光电"},
             ]
         elif request.scope == "all":
             try:
@@ -403,7 +454,10 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
     @app.post("/api/labels/build", status_code=202)
     def build_labels(request: ImportRequest):
         label_tasks.active()
-        cached = pipeline.cached_securities()
+        cached = [
+            item for item in pipeline.cached_securities()
+            if item["exchange"] in SUPPORTED_EXCHANGES
+        ]
         if request.scope == "representative":
             cached = cached[:3]
         elif request.scope != "all":
@@ -418,7 +472,7 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
         except Exception:
             names = {}
         task_id = label_tasks.submit(
-            pipeline, source, cached, names, settings.data_path
+            pipeline, download_source, cached, names, settings.data_path
         )
         return {"taskId": task_id, "total": len(cached)}
 
@@ -442,7 +496,10 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
                     "taskId": active["id"],
                 },
             )
-        cached = pipeline.cached_securities()
+        cached = [
+            item for item in pipeline.cached_securities()
+            if item["exchange"] in SUPPORTED_EXCHANGES
+        ]
         if request.scope == "representative":
             cached = cached[:3]
         elif request.scope != "all":
@@ -489,6 +546,7 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
         return rows[:50]
 
     def load_bars(exchange: str, code: str) -> pd.DataFrame:
+        exchange = require_supported_market(exchange)
         normalized = pipeline.latest_derived_path(exchange, code)
         if normalized is None or not normalized.exists():
             if threading.current_thread().name.startswith("kline-heavy-job"):
@@ -500,9 +558,8 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
 
             def operation(payload, progress):
                 def fetch():
-                    return (
-                        source.stock_history(payload["code"], start, date.today(), ""),
-                        source.adjustment_factors(payload["code"]),
+                    return download_source.fetch_bundle(
+                        payload["exchange"], payload["code"], start, date.today()
                     )
 
                 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="market-fetch")
@@ -553,10 +610,10 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
         return pd.read_parquet(normalized)
 
     def benchmark_bars(exchange: str) -> list[dict]:
-        symbol = "000001" if exchange == "sh" else "399001"
+        exchange = require_supported_market(exchange)
         start = date.fromisoformat(f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-{settings.history_start_date[6:]}")
         try:
-            frame = source.index_history(symbol, start, date.today())
+            frame = download_source.index_history(exchange, start, date.today())
         except Exception:
             return []
         for column in ("open", "high", "low", "close"):

@@ -34,4 +34,21 @@ describe('App', () => {
     expect(screen.getByText('交易行为')).toBeInTheDocument()
     expect(screen.getByText('历史不足')).toBeInTheDocument()
   })
+
+  it('offers Shanghai and Shenzhen markets only', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => ({
+      ok: true,
+      json: async () => String(input).includes('/quality')
+        ? { totalCached: 0 }
+        : { status: 'ok', dataSource: 'Tencent/Sina', cachePath: 'data', versions: {} },
+    })))
+
+    const { container } = render(<App />)
+    await screen.findByRole('heading', { level: 1 })
+    const exchangeSelect = container.querySelector('select')
+
+    expect(exchangeSelect).not.toBeNull()
+    expect(Array.from(exchangeSelect!.options).map(option => option.value)).toEqual(['sh', 'sz'])
+    expect(container.querySelector('option[value="bj"]')).toBeNull()
+  })
 })
