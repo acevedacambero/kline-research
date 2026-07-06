@@ -5,6 +5,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     data_path: Path = Path("data")
+    jobs_db_path: Path | None = None
+    duckdb_memory_limit: str = "2GB"
+    duckdb_threads: int = 2
+    market_timezone: str = "Asia/Shanghai"
     history_start_date: str = "19900101"
     request_retries: int = 3
     security_fetch_timeout_seconds: int = 60
