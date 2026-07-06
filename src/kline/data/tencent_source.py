@@ -35,7 +35,6 @@ class TencentHttpSource:
                 f"{symbol},day,{start_date.isoformat()},{end_date.isoformat()},90,"
             ),
         }
-        last_error: Exception | None = None
         for attempt in range(1, self.retries + 1):
             try:
                 response = self.session.get(
@@ -61,12 +60,20 @@ class TencentHttpSource:
                     raise ValueError("Tencent returned no daily rows")
                 return self._normalize(rows)
             except Exception as exc:
-                last_error = exc
-                if attempt < self.retries and self.retry_delay:
+                if not self._is_retryable(exc) or attempt == self.retries:
+                    raise RuntimeError(
+                        f"Tencent {symbol} failed after {attempt} attempts: {exc}"
+                    ) from exc
+                if self.retry_delay:
                     time.sleep(self.retry_delay * attempt)
-        raise RuntimeError(
-            f"Tencent {symbol} failed after {self.retries} attempts: {last_error}"
-        ) from last_error
+        raise AssertionError("unreachable")
+
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        if isinstance(exc, requests.HTTPError):
+            status = exc.response.status_code if exc.response is not None else None
+            return status == 429 or (status is not None and status >= 500)
+        return isinstance(exc, (requests.Timeout, requests.ConnectionError))
 
     @staticmethod
     def _normalize(rows: object) -> pd.DataFrame:

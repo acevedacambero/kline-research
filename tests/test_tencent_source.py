@@ -1,17 +1,20 @@
 from datetime import date
 
 import pytest
+import requests
 
 from kline.data.tencent_source import TencentHttpSource
 from kline.ops.provider_probe import classify_error
 
 
 class Response:
-    def __init__(self, payload):
+    def __init__(self, payload=None, http_error=None):
         self.payload = payload
+        self.http_error = http_error
 
     def raise_for_status(self):
-        return None
+        if self.http_error is not None:
+            raise self.http_error
 
     def json(self):
         return self.payload
@@ -27,6 +30,8 @@ class Session:
         outcome = next(self.outcomes)
         if isinstance(outcome, Exception):
             raise outcome
+        if isinstance(outcome, Response):
+            return outcome
         return Response(outcome)
 
 
@@ -68,7 +73,7 @@ def test_uses_raw_daily_query_parameters_and_bounded_timeout():
 
 def test_retries_transient_failure_then_returns_rows():
     session = Session([
-        TimeoutError("late"),
+        requests.Timeout("late"),
         payload([["2026-07-01", "10", "11", "12", "9", "100"]]),
     ])
 
@@ -82,12 +87,14 @@ def test_retries_transient_failure_then_returns_rows():
 
 def test_reports_provider_error_before_looking_for_raw_series():
     response = {"code": 1, "msg": "bad params", "data": {}}
+    session = Session([response])
 
     with pytest.raises(RuntimeError, match="Tencent provider error.*bad params") as error:
-        TencentHttpSource(session=Session([response]), retries=1).fetch_history(
+        TencentHttpSource(session=session, retry_delay=0).fetch_history(
             "sh", "600000", date(2026, 4, 1), date(2026, 7, 1)
         )
 
+    assert len(session.calls) == 1
     assert classify_error(error.value) == "data"
 
 
@@ -100,7 +107,44 @@ def test_reports_provider_error_before_looking_for_raw_series():
     ],
 )
 def test_rejects_empty_or_malformed_responses(response, message):
-    with pytest.raises(RuntimeError, match=message):
-        TencentHttpSource(session=Session([response]), retries=1).fetch_history(
+    session = Session([response])
+
+    with pytest.raises(RuntimeError, match=message) as error:
+        TencentHttpSource(session=session, retry_delay=0).fetch_history(
             "sh", "600000", date(2026, 4, 1), date(2026, 7, 1)
         )
+
+    assert len(session.calls) == 1
+    assert classify_error(error.value) == "data"
+
+
+def test_does_not_retry_nonretryable_http_status():
+    response = requests.Response()
+    response.status_code = 404
+    http_error = requests.HTTPError("not found", response=response)
+    session = Session([Response(http_error=http_error)])
+
+    with pytest.raises(RuntimeError, match="not found"):
+        TencentHttpSource(session=session, retry_delay=0).fetch_history(
+            "sh", "600000", date(2026, 4, 1), date(2026, 7, 1)
+        )
+
+    assert len(session.calls) == 1
+
+
+@pytest.mark.parametrize("status_code", [429, 503])
+def test_retries_retryable_http_status_then_returns_rows(status_code):
+    response = requests.Response()
+    response.status_code = status_code
+    http_error = requests.HTTPError("retryable", response=response)
+    session = Session([
+        Response(http_error=http_error),
+        payload([["2026-07-01", "10", "11", "12", "9", "100"]]),
+    ])
+
+    frame = TencentHttpSource(session=session, retries=2, retry_delay=0).fetch_history(
+        "sh", "600000", date(2026, 4, 1), date(2026, 7, 1)
+    )
+
+    assert len(session.calls) == 2
+    assert len(frame) == 1
