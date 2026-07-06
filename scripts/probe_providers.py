@@ -43,6 +43,14 @@ def main(
             f"{summary.p95_latency_seconds:>6.3f}"
         )
     status = "DIAGNOSTIC" if args.quick else ("PASS" if report.passed else "FAIL")
+    if report.reasons:
+        print("required failures:")
+        for reason in report.reasons:
+            print(f"  - {reason}")
+    if report.warnings:
+        print("warnings:")
+        for warning in report.warnings:
+            print(f"  - {warning}")
     print(f"status: {status}; report: {args.output}")
     return 2 if args.quick else (0 if report.passed else 1)
 

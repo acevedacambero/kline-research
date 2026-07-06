@@ -1,64 +1,92 @@
 # K 线结构概率研究台
 
-通过 AkShare 获取 A 股证券列表、未复权日线、复权因子与指数数据，以 raw OHLCV 为事实源，在系统内派生 QFQ/HFQ/total-return，并提供 P1 标签审计 API 与 React 工作台。正式概率口径仅支持日线。
+本地 Web 研究应用，提供沪深日线数据、P1 标签和 P2 特征审计。正式价格计算以未复权行情为事实源，在本地派生前复权、后复权和总回报序列。
 
-## 启动
+## 市场与数据源
+
+- 产品范围仅包含上海、深圳市场；北交所请求返回 `422 MARKET_NOT_SUPPORTED`。
+- 生产原始股票行情：腾讯 HTTP；失败时显式回退到新浪原始日线。
+- 指数行情：腾讯上证指数 `sh000001`、深证成指 `sz399001`。
+- 复权因子和交易日历：AKShare 封装的新浪接口。
+- 东方财富仅保留为上线诊断项，不参与生产路由，也不阻塞上线。
+- 当前供应商策略版本：`sh-sz-tencent-sina-v1`。
+
+## 本地启动
 
 ```powershell
 # 后端
 .\.venv\Scripts\python.exe -m uvicorn kline.api:app --host 127.0.0.1 --port 8000
 
 # 前端（另一个终端）
+cd web
 pnpm dev
 ```
 
-浏览器打开 `http://127.0.0.1:5173`。
+浏览器打开 `http://127.0.0.1:5173`。数据默认存放在 `data/`，可通过 `KLINE_DATA_PATH` 修改。
 
-数据快照默认输出到项目的 `data/data-foundation-v1/snapshots`，可通过 `KLINE_DATA_PATH` 覆盖。首次查询或导入需要联网访问 AkShare 上游接口。
-
-## 验证与导入
+## 验证
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\ruff.exe check src tests
-pnpm test:web
+.\.venv\Scripts\python.exe -m ruff check src tests scripts
+cd web
+pnpm test
 pnpm build
-
-# 导入沪深北各两个代表文件
-.\.venv\Scripts\python.exe scripts\import_representative.py
 ```
 
-## 当前边界
+## 北交所缓存清理
 
-- 已实现 AkShare 证券列表、raw 日线、复权因子、指数、不可变内容快照、质量事件及 DuckDB 清单。
-- QFQ/HFQ/total-return 由 raw + factor 在系统内派生；涨跌停和可执行入口只使用 raw。
-- 已实现资格、交易规则、T+1～T+3 入口、收益/超额、路径、回撤、成熟度和独立时段。
-- 已实现缓存全集的异步 P1 批量标签任务；默认按 5 个交易日采样，输出 P5/P10/P20/P60、路径、回撤、成熟日及完整版本键。
-- `POST /api/labels/build` 启动任务，`GET /api/labels/tasks/{taskId}` 查询进度；标签保存在 `data/data-foundation-v1/labels/<snapshot>/`。
-- 已实现 P2 日频离线特征：趋势、位置、动量、量价和交易行为五组。趋势/形态使用 QFQ，收益/波动使用 total-return，涨停/一字板/缺口使用 raw。
-- `POST /api/features/build` 异步生成本地缓存证券的特征，`GET /api/features/tasks/{taskId}` 查询进度，`POST /api/p2/audit` 按证券与日期解释五组时间点特征。
-- 特征保存在 `data/data-foundation-v1/features/daily-features-v1/`，路径和清单绑定快照、因子、交易规则及特征定义版本；窗口不足保留空值，不使用未来数据填补。
-- 全市场下载优先使用东方财富 HTTP；不可用时自动熔断到 AkShare/Sina。默认跳过已有本地快照，仅下载缺失证券；传入 `refresh: true` 才强制刷新。
-- 历史 ST 缺少可靠逐日来源，当前使用证券现名近似并显式标记 `st_status_approx`；注册制 IPO noLimit 窗口按上市交易序号处理。
-- 历史 ST 状态采用近似规则并返回 `isApprox`；后续可通过版本化状态表修正。
-- 卖出执行、成本滑点、P2 特征评分/筛选、概率校准和回测不在当前范围。
+清理命令默认只生成不可变预览，不修改数据：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\cleanup_market.py `
+  --exchange bj `
+  --output artifacts\bj-cleanup-plan.json
+```
+
+核对清单后，必须同时提供精确市场、执行开关和原清单文件：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\cleanup_market.py `
+  --execute `
+  --exchange bj `
+  --plan artifacts\bj-cleanup-plan.json `
+  --output artifacts\bj-cleanup-receipt.json
+```
+
+执行器只删除清单中经过指纹验证的北交所文件和元数据；共享文件受保护，不会递归删除快照根目录。清理回执与 Gate 报告位于已忽略的 `artifacts/`，不得提交到 Git。
 
 ## 生产部署 Gate
 
-目标服务器必须同时通过 provider 可达性和 DuckDB 单写者两项 Gate，才允许进入生产部署。Gate 报告包含运行环境元数据，只保存在已忽略的 `artifacts/` 目录，不得提交到 Git。
-
-在目标服务器的隔离临时工作区运行完整 provider Gate：
+目标服务器必须同时通过供应商可达性 Gate 和 DuckDB 单写者 Gate，才能进入部署阶段。
 
 ```bash
-KLINE_ENV=test python scripts/probe_providers.py --output provider-gate.json
+python scripts/probe_providers.py --output provider-gate.json
 ```
 
-通过阈值为：EastMoney 成功率不低于 90%，Tencent 成功率不低于 80%，Sina 至少一次成功，指数和交易日历检查均成功，且 OHLCV 字段完整。报告同时记录平均/P95 延迟、空响应、缺失字段和分类错误。`--quick` 仅用于诊断，不能作为生产 Gate 通过证据。
+供应商 Gate 版本为 `sh-sz-provider-g2-v2`，必需检查包括：
 
-所有数据与数据库路径均指向隔离临时工作区后，运行单写者 Gate：
+- 腾讯沪深股票代表样本 10 个，成功率不低于 80%，OHLCV 完整且非空；
+- 腾讯沪深指数 2 个全部成功；
+- 新浪复权因子 6 个全部成功，覆盖和值有效；
+- 新浪原始行情回退 2 个全部成功；
+- 新浪交易日历成功。
+
+东方财富结果记录在 `diagnosticChecks`，失败只产生警告。`--quick` 仅供诊断，固定返回退出码 2，不能作为上线凭证。
+
+DuckDB 单写者验证：
 
 ```bash
-KLINE_ENV=test python -m pytest tests/test_job_store.py tests/test_job_coordinator.py tests/test_single_writer.py tests/test_api.py -q
+python -m pytest tests/test_job_store.py tests/test_job_coordinator.py \
+  tests/test_single_writer.py tests/test_api.py -q
 ```
 
-该 Gate 要求 Uvicorn 只运行一个 worker，且测试观测到的 DuckDB 最大写并发为 1。任一 Gate 失败都必须阻断部署，不得通过放宽阈值取得通过结果。
+生产 Uvicorn 只允许一个 worker。任一必需 Gate 失败都必须阻断部署。
+
+## 当前边界
+
+- 仅提供日线正式标签和特征；周线、月线尚未纳入版本体系。
+- P1 包含资格、交易规则、T+1 至 T+3 可执行入口、P5/P10/P20/P60 收益、路径、回撤和成熟度。
+- P2 提供趋势、位置、动量、量价和交易行为五组时点特征。
+- 历史 ST 状态仍可能使用近似规则并保留审计标记。
+- 实时行情、交易执行、概率校准、策略回测、成本和滑点不在当前范围。

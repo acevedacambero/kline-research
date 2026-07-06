@@ -39,6 +39,10 @@ def payload(rows):
     return {"code": 0, "msg": "", "data": {"sh600000": {"day": rows}}}
 
 
+def symbol_payload(symbol, rows):
+    return {"code": 0, "msg": "", "data": {symbol: {"day": rows}}}
+
+
 def test_normalizes_raw_daily_rows_without_adjusted_series_mixing():
     session = Session([payload([["2026-07-01", "10", "11", "12", "9", "100", "1000"]])])
 
@@ -148,3 +152,28 @@ def test_retries_retryable_http_status_then_returns_rows(status_code):
 
     assert len(session.calls) == 2
     assert len(frame) == 1
+
+
+@pytest.mark.parametrize(
+    ("exchange", "symbol"), [("sh", "sh000001"), ("sz", "sz399001")]
+)
+def test_index_history_uses_explicit_tencent_market_mapping(exchange, symbol):
+    session = Session([
+        symbol_payload(symbol, [["2026-07-01", "3000", "3010", "3020", "2990", "100"]])
+    ])
+
+    frame = TencentHttpSource(session=session).index_history(
+        exchange, date(2026, 7, 1), date(2026, 7, 2)
+    )
+
+    assert frame.iloc[0]["close"] == 3010
+    assert frame.attrs["provider"] == "tencent-http"
+    assert session.calls[0][1]["params"]["param"].startswith(symbol + ",day,")
+
+
+@pytest.mark.parametrize("exchange", ["bj", "hk", ""])
+def test_index_history_rejects_unsupported_exchange(exchange):
+    source = TencentHttpSource(session=Session([]))
+
+    with pytest.raises(ValueError, match="index exchange"):
+        source.index_history(exchange, date(2026, 7, 1), date(2026, 7, 2))

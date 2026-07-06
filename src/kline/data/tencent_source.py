@@ -30,6 +30,23 @@ class TencentHttpSource:
         self, exchange: str, code: str, start_date: date, end_date: date
     ) -> pd.DataFrame:
         symbol = f"{exchange.lower()}{code}"
+        return self._fetch_symbol(symbol, start_date, end_date)
+
+    def index_history(
+        self, exchange: str, start_date: date, end_date: date
+    ) -> pd.DataFrame:
+        symbols = {"sh": "sh000001", "sz": "sz399001"}
+        try:
+            symbol = symbols[exchange.lower()]
+        except KeyError as exc:
+            raise ValueError(f"unsupported index exchange: {exchange}") from exc
+        result = self._fetch_symbol(symbol, start_date, end_date)
+        result.attrs["provider"] = "tencent-http"
+        return result
+
+    def _fetch_symbol(
+        self, symbol: str, start_date: date, end_date: date
+    ) -> pd.DataFrame:
         params = {
             "param": (
                 f"{symbol},day,{start_date.isoformat()},{end_date.isoformat()},90,"
@@ -58,7 +75,9 @@ class TencentHttpSource:
                 rows = instrument["day"]
                 if not rows:
                     raise ValueError("Tencent returned no daily rows")
-                return self._normalize(rows)
+                result = self._normalize(rows)
+                result.attrs["provider"] = "tencent-http"
+                return result
             except Exception as exc:
                 if not self._is_retryable(exc) or attempt == self.retries:
                     raise RuntimeError(

@@ -99,6 +99,7 @@ export function App() {
       <div className="version"><span>标签版本</span><strong>{health?.versions.labelDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>交易规则</span><strong>{health?.versions.limitRuleVersion ?? '—'}</strong></div>
       <div className="version"><span>特征版本</span><strong>{health?.versions.featureDefinitionVersion ?? '—'}</strong></div>
+      <div className="version"><span>行情策略</span><strong>{health?.versions.providerPolicyVersion ?? '—'}</strong></div>
       <button disabled={busy} onClick={() => startImport('representative')}>拉取代表样本</button>
       <button className="secondary" disabled={busy} onClick={() => startImport('all')}>高速下载全市场</button>
       <button className="secondary" disabled={busy} onClick={startLabels}>生成 P1 标签</button>
@@ -107,7 +108,7 @@ export function App() {
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P1 AUDITOR</span><h2>P1 标签审计台</h2></div><span className="message">{message}</span></div>
       <form onSubmit={runAudit}>
-        <label>交易所<select value={exchange} onChange={e => setExchange(e.target.value)}><option value="sh">上海</option><option value="sz">深圳</option><option value="bj">北京</option></select></label>
+        <label>交易所<select value={exchange} onChange={e => setExchange(e.target.value)}><option value="sh">上海</option><option value="sz">深圳</option></select></label>
         <label>证券代码<input aria-label="证券代码" value={code} onChange={e => setCode(e.target.value)} /></label>
         <label>信号日<input type="date" value={signalDate} onChange={e => setSignalDate(e.target.value)} /></label>
         <button disabled={busy}>计算并审计</button>

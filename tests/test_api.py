@@ -19,6 +19,15 @@ class FakeSource:
     def index_history(self, *args, **kwargs):
         return pd.DataFrame()
 
+    def adjustment_factors(self, *args, **kwargs):
+        return pd.DataFrame()
+
+    def sina_raw_history(self, *args, **kwargs):
+        raise AssertionError("provider must not be called")
+
+    def sina_adjustment_factors(self, *args, **kwargs):
+        raise AssertionError("provider must not be called")
+
 
 def test_health_exposes_all_version_keys(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
@@ -101,3 +110,56 @@ def test_feature_task_unknown_id_is_404(tmp_path):
 def test_settings_derive_jobs_database_beside_overridden_data_path(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "custom-data"), FakeSource())
     assert app.state.jobs_db_path == tmp_path / "custom-data" / "jobs.duckdb"
+
+
+class MixedMarketSource(FakeSource):
+    def list_securities(self):
+        return [
+            {"exchange": "sh", "code": "600000", "name": "SH"},
+            {"exchange": "sz", "code": "000001", "name": "SZ"},
+            {"exchange": "bj", "code": "920001", "name": "BJ"},
+        ]
+
+
+def test_public_security_list_filters_beijing_market(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), MixedMarketSource())
+    response = TestClient(app).get("/api/securities")
+    assert response.status_code == 200
+    assert {item["exchange"] for item in response.json()} == {"sh", "sz"}
+
+
+def test_representative_import_contains_only_supported_markets(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), MixedMarketSource())
+    with TestClient(app) as client:
+        response = client.post("/api/datasets/import", json={"scope": "representative"})
+    assert response.status_code == 202
+    assert response.json()["requested"] == 2
+
+
+def test_full_import_filters_beijing_market(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), MixedMarketSource())
+    with TestClient(app) as client:
+        response = client.post("/api/datasets/import", json={"scope": "all"})
+    assert response.status_code == 202
+    assert response.json()["requested"] == 2
+
+
+def test_beijing_market_requests_are_rejected_before_data_access(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), MixedMarketSource())
+    with TestClient(app) as client:
+        responses = [
+            client.get("/api/securities/bj/920001/bars"),
+            client.post(
+                "/api/p1/audit",
+                json={"exchange": "bj", "code": "920001", "signal_date": "2024-01-02"},
+            ),
+            client.post(
+                "/api/p2/audit",
+                json={"exchange": "bj", "code": "920001", "signal_date": "2024-01-02"},
+            ),
+        ]
+    assert [response.status_code for response in responses] == [422, 422, 422]
+    assert all(
+        response.json()["detail"]["code"] == "MARKET_NOT_SUPPORTED"
+        for response in responses
+    )
