@@ -395,3 +395,97 @@ def test_label_and_feature_jobs_use_only_shared_heavy_worker_and_no_pipeline_wri
         assert sum(name.startswith("kline-heavy-job") for name in worker_names) == 1
         assert not any(name.startswith(("label-build", "feature-build")) for name in worker_names)
         assert pipeline_writes == []
+
+
+def test_import_attempts_all_securities_across_bounded_fetch_batches(tmp_path, monkeypatch):
+    securities = [
+        {"exchange": "sh", "code": f"60000{index}", "name": str(index)}
+        for index in range(7)
+    ]
+    source = BlockingSource(threading.Event())
+    source.list_securities = lambda: securities
+    raw = pd.DataFrame([{
+        "date": date(2024, 1, 2), "open": 10.0, "high": 11.0, "low": 9.0,
+        "close": 10.5, "volume": 100, "amount": 1000,
+    }])
+    factors = source.adjustment_factors()
+    attempts = []
+
+    def fetch(self, exchange, code, start, end):
+        attempts.append(code)
+        time.sleep(0.4)
+        return raw.copy(), factors.copy()
+
+    monkeypatch.setattr(api_module.HybridDownloadSource, "fetch_bundle", fetch)
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb",
+                 download_workers=3, security_fetch_timeout_seconds=1), source
+    )
+    with TestClient(app) as client:
+        response = client.post("/api/datasets/import", json={"scope": "all", "refresh": True})
+        task_id = response.json()["taskId"]
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            task = client.get(f"/api/datasets/tasks/{task_id}").json()
+            if task["status"] not in {"queued", "running"}:
+                break
+            time.sleep(0.02)
+        assert task["status"] == "completed"
+        assert task["done"] == task["total"] == 7
+        assert task["errors"] == []
+        assert sorted(attempts) == sorted(item["code"] for item in securities)
+
+
+def test_later_import_batch_runs_after_first_batch_times_out(tmp_path, monkeypatch):
+    securities = [
+        {"exchange": "sh", "code": f"60000{index}", "name": str(index)}
+        for index in range(5)
+    ]
+    source = BlockingSource(threading.Event())
+    source.list_securities = lambda: securities
+    release = threading.Event()
+    raw = pd.DataFrame([{
+        "date": date(2024, 1, 2), "open": 10.0, "high": 11.0, "low": 9.0,
+        "close": 10.5, "volume": 100, "amount": 1000,
+    }])
+    factors = source.adjustment_factors()
+    attempted = []
+    written = []
+
+    def fetch(self, exchange, code, start, end):
+        attempted.append(code)
+        if code in {"600000", "600001", "600002"}:
+            release.wait(10)
+        return raw.copy(), factors.copy()
+
+    original = DatasetPipeline.import_security
+
+    def instrumented(self, exchange, code, *args, **kwargs):
+        written.append(code)
+        return original(self, exchange, code, *args, **kwargs)
+
+    monkeypatch.setattr(api_module.HybridDownloadSource, "fetch_bundle", fetch)
+    monkeypatch.setattr(DatasetPipeline, "import_security", instrumented)
+    app = create_app(
+        Settings(data_path=tmp_path / "data", jobs_db_path=tmp_path / "jobs.duckdb",
+                 download_workers=3, security_fetch_timeout_seconds=1), source
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post("/api/datasets/import", json={"scope": "all", "refresh": True})
+            task_id = response.json()["taskId"]
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                task = client.get(f"/api/datasets/tasks/{task_id}").json()
+                if task["status"] not in {"queued", "running"}:
+                    break
+                time.sleep(0.02)
+            assert task["status"] == "completed_with_errors"
+            assert task["done"] == task["total"] == 5
+            assert {error["security"] for error in task["errors"]} == {
+                "sh600000", "sh600001", "sh600002"
+            }
+            assert set(attempted) == {item["code"] for item in securities}
+            assert set(written) == {"600003", "600004"}
+    finally:
+        release.set()

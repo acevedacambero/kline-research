@@ -137,44 +137,52 @@ class TaskStore(_TaskFacade):
                 return source.fetch_bundle(security["exchange"], security["code"],
                                            start_date, end_date)
 
-            executor = ThreadPoolExecutor(max_workers=self.workers,
-                                          thread_name_prefix="market-fetch")
-            try:
-                futures = {
-                    executor.submit(fetch, security): security
-                    for security in payload["securities"]
-                }
-                completed, pending = wait(futures, timeout=timeout_seconds)
-                for future in completed:
-                    security = futures[future]
-                    key = f'{security["exchange"]}{security["code"]}'
-                    state["currentSecurity"] = key
-                    state["stage"] = "writing-snapshot"
-                    try:
-                        raw, factors = future.result(timeout=timeout_seconds)
-                        pipeline.import_security(security["exchange"], security["code"], raw, factors)
-                    except Exception as exc:
-                        state["errors"].append({"security": key, "message": str(exc)})
-                    finally:
-                        state["done"] += 1
-                        elapsed = max(time.monotonic() - started, 0.001)
-                        state["speed"] = round(state["done"] / elapsed, 3)
-                        remaining = state["total"] - state["done"]
-                        state["etaSeconds"] = round(remaining / state["speed"]) if state["speed"] else None
-                        state["directAvailable"] = source.direct_available
-                        progress(state)
-                for future in pending:
-                    future.cancel()
-                    security = futures[future]
-                    key = f'{security["exchange"]}{security["code"]}'
-                    state["errors"].append({
-                        "security": key,
-                        "message": f"fetch timed out after {timeout_seconds}s",
-                    })
-                    state["done"] += 1
-                    progress(state)
-            finally:
-                executor.shutdown(wait=False, cancel_futures=True)
+            def record_finished():
+                state["done"] += 1
+                elapsed = max(time.monotonic() - started, 0.001)
+                state["speed"] = round(state["done"] / elapsed, 3)
+                remaining = state["total"] - state["done"]
+                state["etaSeconds"] = (
+                    round(remaining / state["speed"]) if state["speed"] else None
+                )
+                state["directAvailable"] = source.direct_available
+                progress(state)
+
+            securities = payload["securities"]
+            for offset in range(0, len(securities), self.workers):
+                batch = securities[offset:offset + self.workers]
+                executor = ThreadPoolExecutor(max_workers=len(batch),
+                                              thread_name_prefix="market-fetch")
+                try:
+                    futures = {
+                        executor.submit(fetch, security): security for security in batch
+                    }
+                    completed, pending = wait(futures, timeout=timeout_seconds)
+                    for future in completed:
+                        security = futures[future]
+                        key = f'{security["exchange"]}{security["code"]}'
+                        state["currentSecurity"] = key
+                        state["stage"] = "writing-snapshot"
+                        try:
+                            raw, factors = future.result()
+                            pipeline.import_security(
+                                security["exchange"], security["code"], raw, factors
+                            )
+                        except Exception as exc:
+                            state["errors"].append({"security": key, "message": str(exc)})
+                        finally:
+                            record_finished()
+                    for future in pending:
+                        future.cancel()
+                        security = futures[future]
+                        key = f'{security["exchange"]}{security["code"]}'
+                        state["errors"].append({
+                            "security": key,
+                            "message": f"fetch timed out after {timeout_seconds}s",
+                        })
+                        record_finished()
+                finally:
+                    executor.shutdown(wait=False, cancel_futures=True)
             state["currentSecurity"] = None
             state["stage"] = "finished"
             return state
