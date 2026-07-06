@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     request_retries: int = 3
     security_fetch_timeout_seconds: int = 60
     download_workers: int = 8
+    frontend_dist_path: Path | None = None
+    cloudflare_access_required: bool = False
+    cloudflare_access_team_domain: str = ""
+    cloudflare_access_audience: str = ""
+    cloudflare_access_allowed_emails: str = ""
     model_config = SettingsConfigDict(env_prefix="KLINE_", env_file=".env", extra="ignore")
 
 
