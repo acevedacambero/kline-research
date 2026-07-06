@@ -1,8 +1,4 @@
-"""Provider probe observations and deployment-gate evaluation.
-
-Canonical provider names are lower-case: ``eastmoney``, ``tencent``, ``sina``,
-``index``, and ``calendar``.
-"""
+"""Versioned Shanghai/Shenzhen provider readiness gate."""
 
 from __future__ import annotations
 
@@ -16,36 +12,34 @@ from typing import Callable, Iterable, Mapping, Sequence
 import pandas as pd
 
 
+GATE_VERSION = "sh-sz-provider-g2-v2"
 EASTMONEY_PROVIDER = "eastmoney"
 TENCENT_PROVIDER = "tencent"
-SINA_PROVIDER = "sina"
-INDEX_PROVIDER = "index"
+SINA_PROVIDER = "sina-raw"
+FACTOR_PROVIDER = "sina-factor"
+INDEX_PROVIDER = "tencent-index"
 CALENDAR_PROVIDER = "calendar"
-
 CANONICAL_PROVIDERS = (
-    EASTMONEY_PROVIDER,
     TENCENT_PROVIDER,
-    SINA_PROVIDER,
     INDEX_PROVIDER,
+    FACTOR_PROVIDER,
+    SINA_PROVIDER,
     CALENDAR_PROVIDER,
+    EASTMONEY_PROVIDER,
 )
 MARKET_DATA_PROVIDERS = frozenset(
     {EASTMONEY_PROVIDER, TENCENT_PROVIDER, SINA_PROVIDER, INDEX_PROVIDER}
 )
 OHLCV_FIELDS = frozenset({"open", "high", "low", "close", "volume"})
-
 REPRESENTATIVE_SECURITIES = (
-    ("sh", "600000"),
-    ("sz", "000001"),
-    ("bj", "430047"),
-    ("sh", "688981"),
-    ("sz", "300750"),
-    ("sh", "600519"),
-    ("sz", "002594"),
-    ("sh", "601318"),
-    ("sz", "000858"),
-    ("sh", "688036"),
+    ("sh", "600000"), ("sz", "000001"), ("sh", "688981"),
+    ("sz", "300750"), ("sh", "600519"), ("sz", "002594"),
+    ("sh", "601318"), ("sz", "000858"), ("sh", "688036"),
+    ("sz", "000333"),
 )
+FACTOR_SECURITIES = REPRESENTATIVE_SECURITIES[:6]
+SINA_FALLBACK_SECURITIES = REPRESENTATIVE_SECURITIES[:2]
+INDEX_TARGETS = (("sh", "000001"), ("sz", "399001"))
 
 ProviderAdapter = Callable[[str, str, date, date], object]
 
@@ -60,6 +54,8 @@ class ProbeObservation:
     missing_fields: tuple[str, ...] = ()
     error_type: str | None = None
     error_message: str | None = None
+    factor_coverage_complete: bool | None = None
+    factor_values_valid: bool | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "missing_fields", tuple(self.missing_fields))
@@ -85,27 +81,33 @@ class ProbeReport:
     providers: Mapping[str, ProviderReport]
     passed: bool
     reasons: tuple[str, ...]
-    observations: tuple[ProbeObservation, ...] = ()
+    observations: tuple[ProbeObservation, ...]
+    required_checks: Mapping[str, bool]
+    diagnostic_checks: Mapping[str, bool]
+    warnings: tuple[str, ...] = ()
+    gate_version: str = GATE_VERSION
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "providers", MappingProxyType(dict(self.providers)))
+        object.__setattr__(self, "required_checks", MappingProxyType(dict(self.required_checks)))
+        object.__setattr__(self, "diagnostic_checks", MappingProxyType(dict(self.diagnostic_checks)))
         object.__setattr__(self, "reasons", tuple(self.reasons))
+        object.__setattr__(self, "warnings", tuple(self.warnings))
         object.__setattr__(self, "observations", tuple(self.observations))
 
     def to_dict(self) -> dict[str, object]:
-        """Return a detached structure containing only JSON-compatible containers."""
         providers = {
             name: {
-                "observations": summary.observations,
-                "successes": summary.successes,
-                "success_rate": summary.success_rate,
-                "mean_latency_seconds": summary.mean_latency_seconds,
-                "p95_latency_seconds": summary.p95_latency_seconds,
-                "empty_response_count": summary.empty_response_count,
-                "missing_field_count": summary.missing_field_count,
-                "error_categories": dict(summary.error_categories),
+                "observations": item.observations,
+                "successes": item.successes,
+                "success_rate": item.success_rate,
+                "mean_latency_seconds": item.mean_latency_seconds,
+                "p95_latency_seconds": item.p95_latency_seconds,
+                "empty_response_count": item.empty_response_count,
+                "missing_field_count": item.missing_field_count,
+                "error_categories": dict(item.error_categories),
             }
-            for name, summary in self.providers.items()
+            for name, item in self.providers.items()
         }
         observations = [
             {
@@ -117,19 +119,24 @@ class ProbeReport:
                 "missing_fields": list(item.missing_fields),
                 "error_type": item.error_type,
                 "error_message": item.error_message,
+                "factor_coverage_complete": item.factor_coverage_complete,
+                "factor_values_valid": item.factor_values_valid,
             }
             for item in self.observations
         ]
         return {
+            "gateVersion": self.gate_version,
             "providers": providers,
             "passed": self.passed,
             "reasons": list(self.reasons),
+            "warnings": list(self.warnings),
+            "requiredChecks": dict(self.required_checks),
+            "diagnosticChecks": dict(self.diagnostic_checks),
             "observations": observations,
         }
 
 
 def classify_error(exc: BaseException) -> str:
-    """Return a stable, low-cardinality category for a probe exception."""
     current: BaseException | None = exc
     seen: set[int] = set()
     fallback = "unknown"
@@ -154,12 +161,10 @@ def classify_error(exc: BaseException) -> str:
 
 
 def percentile(values: Sequence[float], percent: float) -> float:
-    """Calculate a percentile with linear interpolation between nearest ranks."""
     if not 0 <= percent <= 100:
         raise ValueError("percent must be between 0 and 100")
     if not values:
         return 0.0
-
     ordered = sorted(values)
     position = (len(ordered) - 1) * percent / 100
     lower = int(position)
@@ -169,9 +174,9 @@ def percentile(values: Sequence[float], percent: float) -> float:
 
 
 def _summarize(items: Sequence[ProbeObservation]) -> ProviderReport:
-    successes = sum(item.success for item in items)
     latencies = [item.elapsed_seconds for item in items]
     errors = Counter(item.error_type for item in items if item.error_type)
+    successes = sum(item.success for item in items)
     return ProviderReport(
         observations=len(items),
         successes=successes,
@@ -180,69 +185,66 @@ def _summarize(items: Sequence[ProbeObservation]) -> ProviderReport:
         p95_latency_seconds=percentile(latencies, 95),
         empty_response_count=sum(item.success and item.rows <= 0 for item in items),
         missing_field_count=sum(len(item.missing_fields) for item in items),
-        error_categories=MappingProxyType(dict(sorted(errors.items()))),
+        error_categories=dict(sorted(errors.items())),
     )
 
 
 def evaluate_gate(observations: Iterable[ProbeObservation]) -> ProbeReport:
-    """Aggregate observations and evaluate all provider-readiness thresholds."""
     items = tuple(observations)
     grouped = {provider: [] for provider in CANONICAL_PROVIDERS}
     for item in items:
         grouped.setdefault(item.provider, []).append(item)
-
     providers = {name: _summarize(group) for name, group in grouped.items()}
-    reasons: list[str] = []
 
-    if not items:
-        reasons.append("No probe observations were provided.")
-
-    eastmoney_rate = providers[EASTMONEY_PROVIDER].success_rate
-    if not grouped[EASTMONEY_PROVIDER]:
-        reasons.append("No EastMoney observations were provided.")
-    if eastmoney_rate < 0.9:
-        reasons.append(f"EastMoney success rate {eastmoney_rate:.1%} is below 90%.")
-
-    tencent_rate = providers[TENCENT_PROVIDER].success_rate
-    if not grouped[TENCENT_PROVIDER]:
-        reasons.append("No Tencent observations were provided.")
-    if tencent_rate < 0.8:
-        reasons.append(f"Tencent success rate {tencent_rate:.1%} is below 80%.")
-
-    if not any(item.success and item.provider == SINA_PROVIDER for item in items):
-        reasons.append("Sina has no successful observation.")
-    if not any(item.success and item.provider == INDEX_PROVIDER for item in items):
-        reasons.append("The index probe did not succeed.")
-    if not any(item.success and item.provider == CALENDAR_PROVIDER for item in items):
-        reasons.append("The calendar probe did not succeed.")
-
-    empty_successes = [item for item in items if item.success and item.rows <= 0]
-    if empty_successes:
-        reasons.append(f"{len(empty_successes)} successful probe(s) returned an empty response.")
-
-    incomplete = [
-        item
-        for item in items
-        if item.success
-        and item.provider in MARKET_DATA_PROVIDERS
-        and OHLCV_FIELDS.intersection(item.missing_fields)
-    ]
-    if incomplete:
-        reasons.append(
-            f"{len(incomplete)} successful stock/index probe(s) have missing required OHLCV fields."
+    def clean(provider: str, expected: int, *, minimum_rate: float = 1.0) -> bool:
+        group = grouped[provider]
+        return (
+            len(group) == expected
+            and providers[provider].success_rate >= minimum_rate
+            and not providers[provider].empty_response_count
+            and not providers[provider].missing_field_count
         )
 
+    factors = grouped[FACTOR_PROVIDER]
+    factor_ok = clean(FACTOR_PROVIDER, 6) and all(
+        item.factor_coverage_complete is True and item.factor_values_valid is True
+        for item in factors
+    )
+    required = {
+        "tencentStocks": clean(TENCENT_PROVIDER, 10, minimum_rate=0.8),
+        "tencentIndexes": clean(INDEX_PROVIDER, 2),
+        "sinaFactors": factor_ok,
+        "sinaRawFallback": clean(SINA_PROVIDER, 2),
+        "tradingCalendar": clean(CALENDAR_PROVIDER, 1),
+    }
+    reasons = [
+        message
+        for key, message in (
+            ("tencentStocks", "Tencent stock checks did not meet the 80% threshold."),
+            ("tencentIndexes", "Tencent index checks require both SH and SZ indexes."),
+            ("sinaFactors", "Sina factor coverage or values are incomplete."),
+            ("sinaRawFallback", "Sina raw fallback checks require SH and SZ success."),
+            ("tradingCalendar", "The Sina trading calendar check failed."),
+        )
+        if not required[key]
+    ]
+    eastmoney_ok = bool(grouped[EASTMONEY_PROVIDER]) and all(
+        item.success for item in grouped[EASTMONEY_PROVIDER]
+    )
+    diagnostic = {"eastmoney": eastmoney_ok}
+    warnings = () if eastmoney_ok else ("EastMoney diagnostics failed; production routing is unaffected.",)
     return ProbeReport(
-        providers=MappingProxyType(providers),
+        providers=providers,
         passed=not reasons,
         reasons=tuple(reasons),
         observations=items,
+        required_checks=required,
+        diagnostic_checks=diagnostic,
+        warnings=warnings,
     )
 
 
 class ProviderProbeRunner:
-    """Execute an isolated, non-aborting readiness probe across data providers."""
-
     def __init__(
         self,
         adapters: Mapping[str, ProviderAdapter] | None = None,
@@ -254,96 +256,60 @@ class ProviderProbeRunner:
 
     @staticmethod
     def _default_adapters() -> dict[str, ProviderAdapter]:
+        from kline.data.akshare_source import AkShareSource
         from kline.data.eastmoney_source import EastMoneyHttpSource
         from kline.data.tencent_source import TencentHttpSource
 
-        eastmoney = EastMoneyHttpSource()
+        sina = AkShareSource()
         tencent = TencentHttpSource()
-
-        def sina(exchange: str, code: str, start: date, end: date):
-            return ak.stock_zh_a_daily(
-                symbol=f"{exchange}{code}",
-                start_date=start.strftime("%Y%m%d"),
-                end_date=end.strftime("%Y%m%d"),
-                adjust="",
-            )
-
-        import akshare as ak
-
-        def calendar(_exchange: str, _code: str, _start: date, _end: date):
-            from kline.data.akshare_source import AkShareSource
-
-            return AkShareSource(client=ak).trading_calendar()
-
+        eastmoney = EastMoneyHttpSource()
         return {
+            TENCENT_PROVIDER: tencent.fetch_history,
+            INDEX_PROVIDER: lambda exchange, _code, start, end: tencent.index_history(
+                exchange, start, end
+            ),
+            FACTOR_PROVIDER: lambda exchange, code, _start, _end: (
+                sina.sina_adjustment_factors(exchange, code)
+            ),
+            SINA_PROVIDER: sina.sina_raw_history,
+            CALENDAR_PROVIDER: lambda _exchange, _code, _start, _end: sina.trading_calendar(),
             EASTMONEY_PROVIDER: lambda exchange, code, start, end: eastmoney.fetch_history(
                 exchange, code, start, end, fqt=0
             ),
-            TENCENT_PROVIDER: tencent.fetch_history,
-            SINA_PROVIDER: sina,
-            INDEX_PROVIDER: ProviderProbeRunner.index_adapter(ak),
-            CALENDAR_PROVIDER: calendar,
         }
-
-    @staticmethod
-    def index_adapter(client: object) -> ProviderAdapter:
-        """Build an index probe that never invokes an alternate provider."""
-
-        def fetch(_exchange: str, code: str, start: date, end: date) -> pd.DataFrame:
-            frame = client.index_zh_a_hist(  # type: ignore[attr-defined]
-                symbol=code,
-                period="daily",
-                start_date=start.strftime("%Y%m%d"),
-                end_date=end.strftime("%Y%m%d"),
-            )
-            aliases = {
-                "日期": "date",
-                "开盘": "open",
-                "最高": "high",
-                "最低": "low",
-                "收盘": "close",
-                "成交量": "volume",
-                "成交额": "amount",
-            }
-            normalized = frame.rename(columns=aliases)
-            required = ["date", "open", "high", "low", "close", "volume"]
-            missing = [column for column in required if column not in normalized.columns]
-            if missing:
-                raise ValueError(f"index_zh_a_hist missing columns: {', '.join(missing)}")
-            columns = required + (["amount"] if "amount" in normalized.columns else [])
-            result = normalized[columns].copy()
-            result["date"] = pd.to_datetime(result["date"], errors="raise").dt.date
-            for column in columns[1:]:
-                result[column] = pd.to_numeric(result[column], errors="raise")
-            return result.sort_values("date").drop_duplicates("date").reset_index(drop=True)
-
-        return fetch
 
     def run(self, *, quick: bool = False) -> ProbeReport:
         end = self.today()
         start = end - timedelta(days=90)
         stocks = REPRESENTATIVE_SECURITIES[:3] if quick else REPRESENTATIVE_SECURITIES
         targets = [
-            *((EASTMONEY_PROVIDER, exchange, code) for exchange, code in stocks),
             *((TENCENT_PROVIDER, exchange, code) for exchange, code in stocks),
-            *((SINA_PROVIDER, exchange, code) for exchange, code in stocks[: (1 if quick else 3)]),
-            (INDEX_PROVIDER, "sh", "000001"),
+            *((INDEX_PROVIDER, exchange, code) for exchange, code in INDEX_TARGETS),
+            *((FACTOR_PROVIDER, exchange, code) for exchange, code in (
+                FACTOR_SECURITIES[:2] if quick else FACTOR_SECURITIES
+            )),
+            *((SINA_PROVIDER, exchange, code) for exchange, code in (
+                SINA_FALLBACK_SECURITIES[:1] if quick else SINA_FALLBACK_SECURITIES
+            )),
             (CALENDAR_PROVIDER, "", "trading-calendar"),
+            *((EASTMONEY_PROVIDER, exchange, code) for exchange, code in stocks),
         ]
-        observations = [
+        observations = tuple(
             self._observe(provider, exchange, code, start, end)
             for provider, exchange, code in targets
-        ]
+        )
         report = evaluate_gate(observations)
-        if quick:
-            return ProbeReport(
-                providers=report.providers,
-                passed=False,
-                reasons=report.reasons
-                + ("Quick mode is diagnostic only and is not a production gate.",),
-                observations=report.observations,
-            )
-        return report
+        if not quick:
+            return report
+        return ProbeReport(
+            providers=report.providers,
+            passed=False,
+            reasons=report.reasons + ("Quick mode is diagnostic only and is not a production gate.",),
+            observations=report.observations,
+            required_checks=report.required_checks,
+            diagnostic_checks=report.diagnostic_checks,
+            warnings=report.warnings,
+        )
 
     def _observe(
         self, provider: str, exchange: str, code: str, start: date, end: date
@@ -354,9 +320,13 @@ class ProviderProbeRunner:
             columns = set(getattr(result, "columns", ()))
             missing = (
                 tuple(sorted(OHLCV_FIELDS - columns))
-                if provider in MARKET_DATA_PROVIDERS
-                else ()
+                if provider in MARKET_DATA_PROVIDERS else ()
             )
+            coverage = values_valid = None
+            if provider == FACTOR_PROVIDER:
+                required = {"qfq_factor", "hfq_factor"}
+                coverage = required.issubset(columns) and not result.empty  # type: ignore[union-attr]
+                values_valid = coverage and not result[list(required)].isna().any().any()  # type: ignore[index]
             return ProbeObservation(
                 provider=provider,
                 security=f"{exchange}{code}" if exchange else code,
@@ -364,6 +334,8 @@ class ProviderProbeRunner:
                 elapsed_seconds=perf_counter() - began,
                 rows=len(result),  # type: ignore[arg-type]
                 missing_fields=missing,
+                factor_coverage_complete=coverage,
+                factor_values_valid=values_valid,
             )
         except Exception as exc:
             return ProbeObservation(
@@ -375,3 +347,14 @@ class ProviderProbeRunner:
                 error_type=classify_error(exc),
                 error_message=str(exc),
             )
+
+    @staticmethod
+    def index_adapter(client: object) -> ProviderAdapter:
+        """Compatibility helper for an explicit single-provider index adapter."""
+        def fetch(_exchange: str, code: str, start: date, end: date) -> pd.DataFrame:
+            frame = client.index_zh_a_hist(  # type: ignore[attr-defined]
+                symbol=code, period="daily",
+                start_date=start.strftime("%Y%m%d"), end_date=end.strftime("%Y%m%d"),
+            )
+            return frame
+        return fetch
