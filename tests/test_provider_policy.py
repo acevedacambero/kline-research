@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from kline.data.provider_policy import (
+    HISTORY_BACKFILL_VERSION,
     MarketNotSupportedError,
     ProductionProviderPolicy,
 )
@@ -76,6 +77,24 @@ def test_tencent_failure_uses_explicit_sina_raw_fallback():
     assert len(tencent.calls) == 1
     assert len(sina.raw_calls) == 1
     assert raw.attrs["provider"] == "sina-akshare"
+
+
+def test_long_history_bundle_bypasses_tencent():
+    tencent, sina = TencentFake(), SinaFake()
+    policy = ProductionProviderPolicy(tencent=tencent, sina=sina)
+
+    raw, factor_frame = policy.fetch_long_history_bundle(
+        "sh", "600000", date(1990, 1, 1), date(2026, 7, 7)
+    )
+
+    assert tencent.calls == []
+    assert sina.raw_calls == [("sh", "600000", date(1990, 1, 1), date(2026, 7, 7))]
+    assert sina.factor_calls == [("sh", "600000")]
+    assert raw.attrs == {
+        "provider": "sina-akshare",
+        "provider_policy_version": HISTORY_BACKFILL_VERSION,
+    }
+    assert factor_frame.attrs["provider_policy_version"] == HISTORY_BACKFILL_VERSION
 
 
 def test_rejects_beijing_before_calling_any_provider():

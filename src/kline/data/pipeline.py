@@ -100,6 +100,9 @@ class DatasetPipeline:
                 connection.execute(
                     f"alter table dataset_manifest add column if not exists {column} varchar"
                 )
+            connection.execute(
+                "alter table data_quality_events add column if not exists content_hash varchar"
+            )
         return CatalogReport("ready", str(self.catalog_path))
 
     @staticmethod
@@ -231,14 +234,42 @@ class DatasetPipeline:
             for exchange, code, derived_path, snapshot_version in rows
         ]
 
+    def dataset_manifest_rows(self) -> list[dict[str, str]]:
+        with self.connection() as connection:
+            rows = connection.execute(
+                """select dataset_key, content_hash, derived_path, snapshot_version
+                from dataset_manifest where derived_path is not null order by dataset_key"""
+            ).fetchall()
+        keys = ("dataset_key", "content_hash", "derived_path", "snapshot_version")
+        return [dict(zip(keys, row, strict=True)) for row in rows]
+
+    def record_quality_event(
+        self,
+        dataset_key: str,
+        event_type: str,
+        severity: str,
+        message: str,
+        *,
+        content_hash: str | None = None,
+    ) -> None:
+        with self.connection() as connection:
+            connection.execute(
+                """insert into data_quality_events(
+                    dataset_key, event_type, severity, message, content_hash
+                ) values (?, ?, ?, ?, ?)""",
+                [dataset_key, event_type, severity, message, content_hash],
+            )
+
     def quality_events(self, limit: int = 100) -> list[dict[str, str]]:
         with self.connection() as connection:
             rows = connection.execute(
-                """select dataset_key, event_type, severity, message, created_at
+                """select dataset_key, event_type, severity, message, created_at, content_hash
                 from data_quality_events order by created_at desc limit ?""",
                 [limit],
             ).fetchall()
-        keys = ("dataset_key", "event_type", "severity", "message", "created_at")
+        keys = (
+            "dataset_key", "event_type", "severity", "message", "created_at", "content_hash"
+        )
         return [dict(zip(keys, row, strict=True)) for row in rows]
 
     def market_cleanup(self):
