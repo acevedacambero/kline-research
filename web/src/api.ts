@@ -21,6 +21,11 @@ export type FeatureAudit = {
   reasons: string[]; priceBasis: string;
   versions: Record<string, string | null>;
 }
+export type HistoryBackfillTask = {
+  status: string; done: number; total: number; completed: number;
+  listingHistoryShort: number; errors: unknown[]; currentSecurity?: string | null;
+  speed: number; etaSeconds?: number | null;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
@@ -46,6 +51,10 @@ export const api = {
     method: 'POST', body: JSON.stringify({ scope }),
   }),
   importTask: (taskId: string) => request<{ status: string; done: number; total: number; errors: unknown[]; currentSecurity?: string; stage?: string; speed?: number; etaSeconds?: number; directAvailable?: boolean }>(`/api/datasets/tasks/${taskId}`),
+  startHistoryBackfill: () => request<{ taskId: string; total: number; threshold: number }>('/api/datasets/backfill-history', {
+    method: 'POST',
+  }),
+  historyBackfillTask: (taskId: string) => request<HistoryBackfillTask>(`/api/datasets/backfill-history/${taskId}`),
   quality: () => request<{ totalCached: number }>('/api/datasets/quality'),
   buildLabels: (scope: 'representative' | 'all') => request<{ taskId: string; total: number }>('/api/labels/build', {
     method: 'POST', body: JSON.stringify({ scope }),

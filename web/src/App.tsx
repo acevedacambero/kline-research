@@ -77,6 +77,26 @@ export function App() {
     } catch (error) { setMessage(error instanceof Error ? error.message : '标签任务启动失败'); setBusy(false) }
   }
 
+  async function startHistoryBackfill() {
+    setBusy(true)
+    try {
+      const result = await api.startHistoryBackfill()
+      setMessage(`历史补全任务 ${result.taskId.slice(0, 8)} 已启动：候选 ${result.total} 只`)
+      const poll = async () => {
+        const task = await api.historyBackfillTask(result.taskId)
+        const current = task.currentSecurity ? ` · 当前 ${task.currentSecurity}` : ''
+        const speed = task.speed ? ` · ${task.speed.toFixed(2)} 只/秒 · ETA ${task.etaSeconds ?? '—'} 秒` : ''
+        setMessage(`历史补全 ${task.done}/${task.total} · 已补全 ${task.completed} · 新股 ${task.listingHistoryShort} · 错误 ${task.errors.length}${current}${speed}`)
+        if (task.status === 'queued' || task.status === 'running') window.setTimeout(poll, 1000)
+        else {
+          setBusy(false)
+          setMessage(`历史补全完成：已补全 ${task.completed} · 新股 ${task.listingHistoryShort} · 错误 ${task.errors.length}；检查错误后，再手动生成 P1 和 P2`)
+        }
+      }
+      await poll()
+    } catch (error) { setMessage(error instanceof Error ? error.message : '历史补全启动失败'); setBusy(false) }
+  }
+
   async function startFeatures() {
     setBusy(true)
     try {
@@ -102,6 +122,7 @@ export function App() {
       <div className="version"><span>行情策略</span><strong>{health?.versions.providerPolicyVersion ?? '—'}</strong></div>
       <button disabled={busy} onClick={() => startImport('representative')}>拉取代表样本</button>
       <button className="secondary" disabled={busy} onClick={() => startImport('all')}>高速下载全市场</button>
+      <button className="secondary" disabled={busy} onClick={startHistoryBackfill}>补全短历史</button>
       <button className="secondary" disabled={busy} onClick={startLabels}>生成 P1 标签</button>
       <button className="secondary" disabled={busy} onClick={startFeatures}>生成 P2 特征</button>
     </section>

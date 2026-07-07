@@ -51,4 +51,29 @@ describe('App', () => {
     expect(Array.from(exchangeSelect!.options).map(option => option.value)).toEqual(['sh', 'sz'])
     expect(container.querySelector('option[value="bj"]')).toBeNull()
   })
+
+  it('starts history backfill and renders its terminal summary', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      const body = path === '/api/datasets/backfill-history'
+        ? { taskId: 'task-1', total: 5, threshold: 250 }
+        : path === '/api/datasets/backfill-history/task-1'
+          ? {
+              status: 'completed_with_errors', done: 5, total: 5, completed: 3,
+              listingHistoryShort: 1, errors: [{ security: 'sh600000' }],
+              currentSecurity: null, speed: 2, etaSeconds: 0,
+            }
+          : path.includes('/quality')
+            ? { totalCached: 5 }
+            : { status: 'ok', dataSource: 'AkShare', cachePath: 'data', versions: {} }
+      return { ok: true, json: async () => body }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '补全短历史' }))
+
+    expect(await screen.findByText(/已补全 3 · 新股 1 · 错误 1/)).toBeInTheDocument()
+    expect(screen.getByText(/检查错误后，再手动生成 P1 和 P2/)).toBeInTheDocument()
+  })
 })

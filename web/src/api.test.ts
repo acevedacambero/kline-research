@@ -19,4 +19,13 @@ describe('API errors', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/features/build')
     expect(fetchMock.mock.calls[1][0]).toBe('/api/p2/audit')
   })
+
+  it('uses the history backfill start and status endpoints', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.startHistoryBackfill()
+    await api.historyBackfillTask('task-1')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/datasets/backfill-history')
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/datasets/backfill-history/task-1')
+  })
 })
