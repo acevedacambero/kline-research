@@ -43,6 +43,26 @@ def test_dataset_pipeline_writes_parquet_and_catalog(tmp_path):
     assert report.status == "ready"
 
 
+def test_pipeline_resolves_legacy_windows_manifest_paths(tmp_path):
+    output = tmp_path / "data"
+    pipeline = DatasetPipeline(output)
+    pipeline.initialize_catalog()
+    expected = output / "data-foundation-v1" / "snapshots" / "s1" / "derived" / "sh" / "600000.parquet"
+    expected.parent.mkdir(parents=True)
+    expected.write_bytes(b"placeholder")
+    with pipeline.connection() as connection:
+        connection.execute(
+            """insert into dataset_manifest(
+                dataset_key, content_hash, dataset_version, derived_path, snapshot_version
+            ) values ('stock:sh:600000', 'hash', 'v1', ?, 's1')""",
+            [r"data\data-foundation-v1\snapshots\s1\derived\sh\600000.parquet"],
+        )
+
+    assert pipeline.latest_derived_path("sh", "600000") == expected
+    assert pipeline.cached_securities()[0]["derived_path"] == str(expected)
+    assert pipeline.dataset_manifest_rows()[0]["derived_path"] == str(expected)
+
+
 def test_pipeline_imports_raw_and_factor_facts_then_builds_derived_views(tmp_path):
     raw = pd.DataFrame([{"date": date(2024, 1, 2), "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.5, "volume": 100, "amount": 1000.0}])
     factors = pd.DataFrame([{"date": date(1900, 1, 1), "qfq_factor": 2.0, "hfq_factor": 3.0, "factor_source": "sina"}])

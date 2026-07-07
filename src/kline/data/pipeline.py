@@ -47,6 +47,16 @@ class DatasetPipeline:
             self.output_root / "data-foundation-v1" / "facts" / "security_master.parquet"
         )
 
+    def _resolve_manifest_path(self, value: str) -> Path:
+        path = Path(value.replace("\\", "/"))
+        if path.is_absolute():
+            return path
+        parts = path.parts
+        if "data-foundation-v1" in parts:
+            offset = parts.index("data-foundation-v1")
+            return self.output_root.joinpath(*parts[offset:])
+        return self.output_root / path
+
     @contextmanager
     def connection(self) -> Iterator[duckdb.DuckDBPyConnection]:
         with self._connection_lock:
@@ -195,7 +205,7 @@ class DatasetPipeline:
                 "select derived_path from dataset_manifest where dataset_key = ?",
                 [f"stock:{exchange}:{code}"],
             ).fetchone()
-        return Path(row[0]) if row and row[0] else None
+        return self._resolve_manifest_path(row[0]) if row and row[0] else None
 
     def latest_snapshot_version(self, exchange: str, code: str) -> str | None:
         with self.connection() as connection:
@@ -228,7 +238,7 @@ class DatasetPipeline:
             {
                 "exchange": exchange,
                 "code": code,
-                "derived_path": derived_path,
+                "derived_path": str(self._resolve_manifest_path(derived_path)),
                 "snapshot_version": snapshot_version,
             }
             for exchange, code, derived_path, snapshot_version in rows
@@ -241,7 +251,10 @@ class DatasetPipeline:
                 from dataset_manifest where derived_path is not null order by dataset_key"""
             ).fetchall()
         keys = ("dataset_key", "content_hash", "derived_path", "snapshot_version")
-        return [dict(zip(keys, row, strict=True)) for row in rows]
+        items = [dict(zip(keys, row, strict=True)) for row in rows]
+        for item in items:
+            item["derived_path"] = str(self._resolve_manifest_path(item["derived_path"]))
+        return items
 
     def record_quality_event(
         self,
