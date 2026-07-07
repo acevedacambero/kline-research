@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +14,8 @@ class Settings(BaseSettings):
     request_retries: int = 3
     security_fetch_timeout_seconds: int = 60
     download_workers: int = 8
+    history_backfill_min_days: int = Field(default=250, ge=1)
+    history_backfill_freshness_days: int = Field(default=10, ge=1)
     frontend_dist_path: Path | None = None
     cloudflare_access_required: bool = False
     cloudflare_access_team_domain: str = ""

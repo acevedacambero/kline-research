@@ -20,6 +20,7 @@ from .access import AccessDenied, CloudflareAccessVerifier
 from .data.akshare_source import AkShareSource
 from .data.history_backfill import (
     BackfillCandidate,
+    HistoryBackfillService,
 )
 from .data.provider_policy import (
     ProductionProviderPolicy as HybridDownloadSource,
@@ -94,6 +95,13 @@ def _task_response(job: Job) -> dict:
         defaults.update({"stage": "queued", "speed": 0.0, "etaSeconds": None,
                          "directAvailable": job.payload.get("directAvailable")
                          if isinstance(job.payload, dict) else None})
+    elif job.job_type == "history_backfill":
+        defaults.update({
+            "completed": 0,
+            "listingHistoryShort": 0,
+            "speed": 0.0,
+            "etaSeconds": None,
+        })
     progress = job.progress if isinstance(job.progress, dict) else {}
     result = job.result if isinstance(job.result, dict) else {}
     item = {"id": job.id, **defaults, **progress, **result}
@@ -436,6 +444,15 @@ def create_app(
     tasks = TaskStore(coordinator, job_store, submission_lock, settings.download_workers)
     label_tasks = LabelTaskStore(coordinator, job_store, submission_lock)
     feature_tasks = FeatureTaskStore(coordinator, job_store, submission_lock)
+    history_backfill_service = HistoryBackfillService(
+        pipeline,
+        download_source,
+        min_days=settings.history_backfill_min_days,
+        freshness_days=settings.history_backfill_freshness_days,
+    )
+    history_backfill_tasks = HistoryBackfillTaskStore(
+        coordinator, job_store, submission_lock
+    )
     security_cache: list[dict[str, str]] | None = None
 
     def securities_list(refresh: bool = False) -> list[dict[str, str]]:
@@ -552,13 +569,43 @@ def create_app(
     @app.get("/api/datasets/quality")
     def quality():
         cached = pipeline.cached_market_counts()
+        events = pipeline.quality_events(limit=100_000)
         return {
             "source": "AkShare",
             "cachedSecurities": cached,
             "totalCached": sum(cached.values()),
+            "shortHistoryCached": len(history_backfill_service.scan()),
+            "listingHistoryShort": sum(
+                event["event_type"] == "listing-history-short" for event in events
+            ),
+            "historyBackfillFailed": sum(
+                event["event_type"] == "history-backfill-failed" for event in events
+            ),
             "approximateRuleRatio": None,
-            "qualityEvents": pipeline.quality_events(),
+            "qualityEvents": events[:100],
         }
+
+    @app.post("/api/datasets/backfill-history", status_code=202)
+    def start_history_backfill():
+        history_backfill_tasks.active()
+        candidates = history_backfill_service.scan()
+        task_id = history_backfill_tasks.submit(
+            history_backfill_service, candidates, date.today()
+        )
+        return {
+            "taskId": task_id,
+            "total": len(candidates),
+            "threshold": settings.history_backfill_min_days,
+        }
+
+    @app.get("/api/datasets/backfill-history/{task_id}")
+    def history_backfill_status(task_id: str):
+        if task_id not in history_backfill_tasks.items:
+            raise HTTPException(
+                404,
+                detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"},
+            )
+        return history_backfill_tasks.items[task_id]
 
     @app.post("/api/labels/build", status_code=202)
     def build_labels(request: ImportRequest):

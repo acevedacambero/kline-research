@@ -126,6 +126,59 @@
         }
       }
     },
+    "/api/datasets/backfill-history": {
+      "post": {
+        "summary": "Start History Backfill",
+        "operationId": "start_history_backfill_api_datasets_backfill_history_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/datasets/backfill-history/{task_id}": {
+      "get": {
+        "summary": "History Backfill Status",
+        "operationId": "history_backfill_status_api_datasets_backfill_history__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/labels/build": {
       "post": {
         "summary": "Build Labels",

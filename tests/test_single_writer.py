@@ -60,7 +60,11 @@ def test_import_blocks_label_and_feature_globally(tmp_path, monkeypatch):
             task_id = started.json()["taskId"]
             _wait_running(client, task_id)
 
-            for path in ("/api/labels/build", "/api/features/build"):
+            for path in (
+                "/api/labels/build",
+                "/api/features/build",
+                "/api/datasets/backfill-history",
+            ):
                 response = client.post(path, json={"scope": "all"})
                 assert response.status_code == 409
                 assert response.json()["detail"] == {
@@ -299,7 +303,12 @@ def test_active_job_rejection_skips_all_provider_preprocessing(tmp_path, monkeyp
         with TestClient(app) as client:
             first = client.post("/api/datasets/import", json={"scope": "representative"})
             _wait_running(client, first.json()["taskId"])
-            for path in ("/api/datasets/import", "/api/labels/build", "/api/features/build"):
+            for path in (
+                "/api/datasets/import",
+                "/api/labels/build",
+                "/api/features/build",
+                "/api/datasets/backfill-history",
+            ):
                 response = client.post(path, json={"scope": "all"})
                 assert response.status_code == 409
                 assert response.json()["detail"]["code"] == "HEAVY_JOB_ALREADY_RUNNING"

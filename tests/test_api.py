@@ -3,6 +3,8 @@ import time
 
 import pandas as pd
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
+import pytest
 
 from kline.api import create_app, dataframe_records
 from kline.config import Settings
@@ -163,3 +165,56 @@ def test_beijing_market_requests_are_rejected_before_data_access(tmp_path):
         response.json()["detail"]["code"] == "MARKET_NOT_SUPPORTED"
         for response in responses
     )
+
+
+def test_history_backfill_api_starts_and_is_pollable(tmp_path):
+    data_path = tmp_path / "data"
+    pipeline = DatasetPipeline(data_path)
+    pipeline.initialize_catalog()
+    raw = pd.DataFrame(
+        [{
+            "date": date.today(), "open": 10.0, "high": 11.0, "low": 9.0,
+            "close": 10.5, "volume": 100, "amount": 1000.0,
+        }]
+    )
+    factors = pd.DataFrame(
+        [{"date": date(1900, 1, 1), "qfq_factor": 1.0, "hfq_factor": 1.0}]
+    )
+    pipeline.import_security("sh", "600000", raw, factors)
+    app = create_app(Settings(data_path=data_path), FakeSource())
+
+    with TestClient(app) as client:
+        started = client.post("/api/datasets/backfill-history")
+        assert started.status_code == 202
+        assert started.json()["threshold"] == 250
+        assert started.json()["total"] == 1
+        task_id = started.json()["taskId"]
+        task = client.get(f"/api/datasets/backfill-history/{task_id}")
+
+    assert task.status_code == 200
+    assert {
+        "status", "done", "total", "completed", "listingHistoryShort",
+        "errors", "currentSecurity", "speed", "etaSeconds",
+    }.issubset(task.json())
+
+
+def test_history_backfill_unknown_task_is_404(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    response = TestClient(app).get("/api/datasets/backfill-history/missing")
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "TASK_NOT_FOUND"
+
+
+def test_quality_reports_history_backfill_counts(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    response = TestClient(app).get("/api/datasets/quality")
+    assert response.status_code == 200
+    assert response.json()["shortHistoryCached"] == 0
+    assert response.json()["listingHistoryShort"] == 0
+    assert response.json()["historyBackfillFailed"] == 0
+
+
+def test_history_backfill_settings_are_positive():
+    assert Settings().history_backfill_min_days == 250
+    with pytest.raises(ValidationError):
+        Settings(history_backfill_min_days=0)
