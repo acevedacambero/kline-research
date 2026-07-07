@@ -12,3 +12,4 @@ web/vite.config.d.ts
 /artifacts/
 *.duckdb
 .env
+.worktrees/
