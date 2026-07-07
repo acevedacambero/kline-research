@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import date
+from pathlib import Path
 import threading
 import time
 
@@ -17,6 +18,9 @@ from pydantic import BaseModel
 from .config import Settings, VERSIONS
 from .access import AccessDenied, CloudflareAccessVerifier
 from .data.akshare_source import AkShareSource
+from .data.history_backfill import (
+    BackfillCandidate,
+)
 from .data.provider_policy import (
     ProductionProviderPolicy as HybridDownloadSource,
     SUPPORTED_EXCHANGES,
@@ -80,6 +84,8 @@ def _task_response(job: Job) -> dict:
         total = len(job.payload)
     elif isinstance(job.payload, dict) and isinstance(job.payload.get("securities"), list):
         total = len(job.payload["securities"])
+    elif isinstance(job.payload, dict) and isinstance(job.payload.get("candidates"), list):
+        total = len(job.payload["candidates"])
     else:
         total = 0
     defaults = {"total": total, "done": 0, "rows": 0, "errors": [],
@@ -276,6 +282,72 @@ class FeatureTaskStore(_TaskFacade):
             state["currentSecurity"] = None
             return state
         return self._submit("features", securities, operation)
+
+
+class HistoryBackfillTaskStore(_TaskFacade):
+    def __init__(self, coordinator, store, lock):
+        super().__init__(coordinator, store, lock, {"history_backfill"})
+
+    def submit(self, service, candidates, as_of_date: date) -> str:
+        payload = {
+            "candidates": [
+                {
+                    **asdict(candidate),
+                    "path": str(candidate.path),
+                }
+                for candidate in candidates
+            ],
+            "asOfDate": as_of_date.isoformat(),
+        }
+
+        def operation(payload, progress):
+            state = {
+                "total": len(payload["candidates"]),
+                "done": 0,
+                "completed": 0,
+                "listingHistoryShort": 0,
+                "errors": [],
+                "currentSecurity": None,
+                "speed": 0.0,
+                "etaSeconds": None,
+            }
+            started = time.monotonic()
+            for item in payload["candidates"]:
+                candidate = BackfillCandidate(
+                    **{**item, "path": Path(item["path"])}
+                )
+                key = f"{candidate.exchange}{candidate.code}"
+                state["currentSecurity"] = key
+                try:
+                    result = service.backfill(
+                        candidate, as_of_date=date.fromisoformat(payload["asOfDate"])
+                    )
+                    if result.status == "listing_history_short":
+                        state["listingHistoryShort"] += 1
+                    else:
+                        state["completed"] += 1
+                except Exception as exc:
+                    state["errors"].append(
+                        {
+                            "security": key,
+                            "stage": "history-fetch",
+                            "code": getattr(exc, "code", "HISTORY_BACKFILL_FAILED"),
+                            "message": str(exc),
+                        }
+                    )
+                finally:
+                    state["done"] += 1
+                    elapsed = max(time.monotonic() - started, 0.001)
+                    state["speed"] = round(state["done"] / elapsed, 3)
+                    remaining = state["total"] - state["done"]
+                    state["etaSeconds"] = (
+                        round(remaining / state["speed"]) if state["speed"] else None
+                    )
+                    progress(state)
+            state["currentSecurity"] = None
+            return state
+
+        return self._submit("history_backfill", payload, operation)
 
 
 def _market_counts(securities: list[dict[str, str]]) -> dict[str, int]:

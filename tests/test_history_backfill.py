@@ -1,9 +1,20 @@
 from datetime import date, timedelta
+from pathlib import Path
+import threading
 
 import pandas as pd
 
-from kline.data.history_backfill import HistoryBackfillService
+import pytest
+
+from kline.data.history_backfill import (
+    BackfillCandidate,
+    BackfillCoverageError,
+    BackfillResult,
+    HistoryBackfillService,
+)
 from kline.data.pipeline import DatasetPipeline
+from kline.api import HistoryBackfillTaskStore
+from kline.jobs import HeavyTaskCoordinator, JobStore
 
 
 def bars(count: int, *, end: date = date(2026, 7, 7)) -> pd.DataFrame:
@@ -57,3 +68,108 @@ def test_scan_skips_acknowledged_listing_with_unchanged_content_hash(tmp_path):
     candidates = HistoryBackfillService(pipeline, source=None, min_days=250).scan()
 
     assert candidates == []
+
+
+class LongHistorySource:
+    def __init__(self, raw: pd.DataFrame):
+        self.raw = raw
+        self.calls = []
+
+    def fetch_long_history_bundle(self, exchange, code, start, end):
+        self.calls.append((exchange, code, start, end))
+        return self.raw.copy(), factors()
+
+
+def short_candidate(pipeline: DatasetPipeline):
+    pipeline.import_security("sh", "600000", bars(90), factors())
+    return HistoryBackfillService(pipeline, source=None, min_days=250).scan()[0]
+
+
+def test_backfill_replaces_short_snapshot_and_records_counts(tmp_path):
+    pipeline = DatasetPipeline(tmp_path / "data")
+    pipeline.initialize_catalog()
+    candidate = short_candidate(pipeline)
+    service = HistoryBackfillService(
+        pipeline, LongHistorySource(bars(400)), min_days=250
+    )
+
+    result = service.backfill(candidate, as_of_date=date(2026, 7, 7))
+
+    assert result.status == "completed"
+    assert result.before_count == 90
+    assert result.after_count == 400
+    latest = pd.read_parquet(pipeline.latest_derived_path("sh", "600000"))
+    assert len(latest) == 400
+    event = pipeline.quality_events()[0]
+    assert event["event_type"] == "history-backfilled"
+    assert "90 -> 400" in event["message"]
+
+
+def test_backfill_acknowledges_fresh_listing_history(tmp_path):
+    pipeline = DatasetPipeline(tmp_path / "data")
+    pipeline.initialize_catalog()
+    candidate = short_candidate(pipeline)
+    service = HistoryBackfillService(
+        pipeline, LongHistorySource(bars(120)), min_days=250, freshness_days=10
+    )
+
+    result = service.backfill(candidate, as_of_date=date(2026, 7, 7))
+
+    assert result.status == "listing_history_short"
+    assert result.after_count == 120
+    manifest = pipeline.dataset_manifest_rows()[0]
+    event = pipeline.quality_events()[0]
+    assert event["event_type"] == "listing-history-short"
+    assert event["content_hash"] == manifest["content_hash"]
+
+
+def test_backfill_rejects_stale_short_response_and_preserves_snapshot(tmp_path):
+    pipeline = DatasetPipeline(tmp_path / "data")
+    pipeline.initialize_catalog()
+    candidate = short_candidate(pipeline)
+    old_path = pipeline.latest_derived_path("sh", "600000")
+    stale = bars(120, end=date(2026, 6, 1))
+    service = HistoryBackfillService(
+        pipeline, LongHistorySource(stale), min_days=250, freshness_days=10
+    )
+
+    with pytest.raises(BackfillCoverageError) as error:
+        service.backfill(candidate, as_of_date=date(2026, 7, 7))
+
+    assert error.value.code == "HISTORY_COVERAGE_INCOMPLETE"
+    assert pipeline.latest_derived_path("sh", "600000") == old_path
+    assert pipeline.quality_events()[0]["event_type"] == "history-backfill-failed"
+
+
+def test_task_isolates_security_failure_and_keeps_processing(tmp_path):
+    candidates = [
+        BackfillCandidate("sh", "600000", Path("a"), "s1", "h1", 90),
+        BackfillCandidate("sz", "000001", Path("b"), "s2", "h2", 100),
+    ]
+
+    class Service:
+        def backfill(self, candidate, *, as_of_date):
+            if candidate.code == "600000":
+                raise BackfillCoverageError("HISTORY_COVERAGE_INCOMPLETE", "stale")
+            return BackfillResult("completed", 100, 500, "s3")
+
+    store = JobStore(tmp_path / "jobs.duckdb")
+    coordinator = HeavyTaskCoordinator(store)
+    tasks = HistoryBackfillTaskStore(coordinator, store, threading.Lock())
+    task_id = tasks.submit(Service(), candidates, date(2026, 7, 7))
+
+    coordinator.shutdown()
+    result = store.get(task_id).result
+    store.close()
+
+    assert result["done"] == result["total"] == 2
+    assert result["completed"] == 1
+    assert result["listingHistoryShort"] == 0
+    assert result["errors"] == [
+        {
+            "security": "sh600000",
+            "stage": "history-fetch",
+            "code": "HISTORY_COVERAGE_INCOMPLETE",
+            "message": "stale",
+        }
+    ]
