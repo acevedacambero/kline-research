@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import hashlib
 from pathlib import Path
 import re
+import threading
 from typing import Iterator
 
 import duckdb
@@ -40,6 +41,7 @@ class DatasetPipeline:
         self.output_root = Path(output_root)
         self.memory_limit = memory_limit.upper()
         self.threads = threads
+        self._connection_lock = threading.RLock()
         self.catalog_path = self.output_root / "catalog.duckdb"
         self.security_master_path = (
             self.output_root / "data-foundation-v1" / "facts" / "security_master.parquet"
@@ -47,13 +49,14 @@ class DatasetPipeline:
 
     @contextmanager
     def connection(self) -> Iterator[duckdb.DuckDBPyConnection]:
-        connection = duckdb.connect(str(self.catalog_path))
-        try:
-            connection.execute(f"SET memory_limit='{self.memory_limit}'")
-            connection.execute(f"SET threads={self.threads}")
-            yield connection
-        finally:
-            connection.close()
+        with self._connection_lock:
+            connection = duckdb.connect(str(self.catalog_path))
+            try:
+                connection.execute(f"SET memory_limit='{self.memory_limit}'")
+                connection.execute(f"SET threads={self.threads}")
+                yield connection
+            finally:
+                connection.close()
 
     def save_security_master(self, securities: list[dict[str, str]]) -> None:
         self.security_master_path.parent.mkdir(parents=True, exist_ok=True)

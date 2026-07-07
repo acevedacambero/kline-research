@@ -27,11 +27,13 @@ def test_cloudflared_service_reads_token_from_private_environment():
     assert "Restart=always" in unit
 
 
-def test_healthcheck_is_bounded_and_local_only():
+def test_healthcheck_retries_during_bounded_service_startup_window():
     script = read("healthcheck.sh")
     assert "127.0.0.1:8800/healthz" in script
     assert "--max-time 10" in script
     assert "curl" in script
+    assert "for attempt in {1..12}" in script
+    assert "sleep 1" in script
 
 
 def test_rollback_switches_release_symlink_without_touching_shared_data():

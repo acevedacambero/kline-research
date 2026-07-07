@@ -2,6 +2,17 @@
 
 本地 Web 研究应用，提供沪深日线数据、P1 标签和 P2 特征审计。正式价格计算以未复权行情为事实源，在本地派生前复权、后复权和总回报序列。
 
+## 生产站点
+
+- 地址：`https://skyland.us.ci/`，整个站点由 Cloudflare Access 保护，仅授权邮箱可登录。
+- 源站仅监听 `127.0.0.1:8800`；公网不开放应用端口，Cloudflare Tunnel 是唯一入口。
+- FastAPI 会再次验证 Access JWT 的签名、issuer、AUD、有效期和邮箱白名单。
+- 应用与隧道均以用户级 systemd 服务运行；生产 Uvicorn 固定为单 worker。
+- 发布目录位于 `~/apps/kline/releases/`，`current` 指向当前版本，`previous` 指向可回滚版本；运行数据始终保留在 `shared/data`。
+
+常用运维命令见 [`deploy/README.md`](deploy/README.md)。回滚执行
+`~/apps/kline/scripts/rollback.sh`，脚本会等待健康检查通过，且不会修改共享数据。
+
 ## 市场与数据源
 
 - 产品范围仅包含上海、深圳市场；北交所请求返回 `422 MARKET_NOT_SUPPORTED`。

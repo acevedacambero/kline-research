@@ -1,10 +1,38 @@
 from datetime import date
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
+import time
 
 import pandas as pd
 import pytest
 
 from kline.data.pipeline import DatasetPipeline
+
+
+def test_dataset_pipeline_serializes_catalog_connections(tmp_path):
+    pipeline = DatasetPipeline(tmp_path / "output")
+    pipeline.initialize_catalog()
+    counter_lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def hold_connection() -> None:
+        nonlocal active, max_active
+        with pipeline.connection():
+            with counter_lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.05)
+            with counter_lock:
+                active -= 1
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(hold_connection) for _ in range(2)]
+        for future in futures:
+            future.result()
+
+    assert max_active == 1
 
 
 def test_dataset_pipeline_writes_parquet_and_catalog(tmp_path):
