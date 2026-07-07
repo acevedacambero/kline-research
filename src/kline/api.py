@@ -10,9 +10,12 @@ import time
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .config import Settings, VERSIONS
+from .access import AccessDenied, CloudflareAccessVerifier
 from .data.akshare_source import AkShareSource
 from .data.provider_policy import (
     ProductionProviderPolicy as HybridDownloadSource,
@@ -286,7 +289,12 @@ def dataframe_records(frame: pd.DataFrame) -> list[dict]:
     return frame.astype(object).where(pd.notna(frame), None).to_dict("records")
 
 
-def create_app(settings: Settings | None = None, source: AkShareSource | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    source: AkShareSource | None = None,
+    *,
+    access_verifier: CloudflareAccessVerifier | None = None,
+) -> FastAPI:
     settings = settings or Settings()
     source_injected = source is not None
     source = source or AkShareSource(retries=settings.request_retries)
@@ -316,6 +324,31 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    if settings.cloudflare_access_required:
+        verifier = access_verifier or CloudflareAccessVerifier(settings)
+
+        @app.middleware("http")
+        async def require_cloudflare_access(request, call_next):
+            if request.url.path.startswith("/api/"):
+                token = request.headers.get("Cf-Access-Jwt-Assertion", "")
+                if not token:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": {
+                            "code": "ACCESS_DENIED",
+                            "message": "Cloudflare Access token is required",
+                        }},
+                    )
+                try:
+                    verifier.verify(token)
+                except AccessDenied as exc:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": {
+                            "code": "ACCESS_DENIED", "message": str(exc),
+                        }},
+                    )
+            return await call_next(request)
     pipeline = DatasetPipeline(settings.data_path, memory_limit=settings.duckdb_memory_limit,
                                threads=settings.duckdb_threads)
     pipeline.initialize_catalog()
@@ -366,6 +399,10 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
             "cachePath": str(settings.data_path),
             "versions": VERSIONS,
         }
+
+    @app.get("/healthz", include_in_schema=False)
+    def healthz():
+        return {"status": "ok"}
 
     @app.post("/api/datasets/validate")
     def validate_dataset():
@@ -749,6 +786,12 @@ def create_app(settings: Settings | None = None, source: AkShareSource | None = 
             },
         }
 
+    if settings.frontend_dist_path and settings.frontend_dist_path.is_dir():
+        app.mount(
+            "/",
+            StaticFiles(directory=settings.frontend_dist_path, html=True),
+            name="frontend",
+        )
     return app
 
 

@@ -1,0 +1,23 @@
+[Unit]
+Description=K-line Research private web application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/apps/kline/current
+EnvironmentFile=%h/apps/kline/shared/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/apps/kline/current/.venv/bin/uvicorn kline.api:app --host 127.0.0.1 --port 8800 --workers 1
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/apps/kline/shared
+MemoryMax=2800M
+TasksMax=256
+
+[Install]
+WantedBy=default.target

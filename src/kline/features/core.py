@@ -38,7 +38,7 @@ def compute_daily_features(
         return frame
     required = {
         "date", "open", "high", "low", "close", "open_qfq", "high_qfq",
-        "low_qfq", "close_qfq", "close_total_return", "volume", "amount",
+        "low_qfq", "close_qfq", "close_total_return", "volume",
     }
     missing = sorted(required.difference(frame.columns))
     if missing:
@@ -52,7 +52,10 @@ def compute_daily_features(
             "exchange": exchange,
             "code": code,
             "available_history": pd.Series(range(1, len(frame) + 1), dtype="int64"),
-            "amount": pd.to_numeric(frame["amount"], errors="coerce"),
+            "amount": pd.to_numeric(
+                frame["amount"] if "amount" in frame else pd.Series(float("nan"), index=frame.index),
+                errors="coerce",
+            ),
         }
     )
 

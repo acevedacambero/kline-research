@@ -11,6 +11,7 @@ dependencies = [
   "pandas>=2.2,<3",
   "pyarrow>=18,<22",
   "pydantic-settings>=2.7,<3",
+  "PyJWT[crypto]>=2.10,<3",
   "requests>=2.32,<3",
   "uvicorn>=0.34,<1",
 ]
