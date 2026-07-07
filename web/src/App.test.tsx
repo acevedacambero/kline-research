@@ -55,7 +55,7 @@ describe('App', () => {
   it('starts history backfill and renders its terminal summary', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
-      const body = path === '/api/datasets/backfill-history'
+      const body = path === '/api/history-backfill'
         ? { taskId: 'task-1', total: 5, threshold: 250 }
         : path === '/api/datasets/backfill-history/task-1'
           ? {

@@ -591,6 +591,7 @@ def create_app(
             "qualityEvents": events[:100],
         }
 
+    @app.post("/api/history-backfill", status_code=202)
     @app.post("/api/datasets/backfill-history", status_code=202)
     def start_history_backfill():
         nonlocal history_backfill_candidate_count

@@ -25,7 +25,7 @@ describe('API errors', () => {
     vi.stubGlobal('fetch', fetchMock)
     await api.startHistoryBackfill()
     await api.historyBackfillTask('task-1')
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/datasets/backfill-history')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/history-backfill')
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST', body: '{}' })
     expect(fetchMock.mock.calls[1][0]).toBe('/api/datasets/backfill-history/task-1')
   })
