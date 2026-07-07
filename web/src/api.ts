@@ -36,6 +36,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       if (typeof body.detail === 'string') message = body.detail
       else if (body.detail?.message) message = body.detail.message
     } catch { /* keep the status-based fallback */ }
+    const allowed = response.headers?.get('allow')
+    if (allowed) message += ` · Allow ${allowed}`
     throw new Error(message)
   }
   return response.json() as Promise<T>
@@ -51,8 +53,8 @@ export const api = {
     method: 'POST', body: JSON.stringify({ scope }),
   }),
   importTask: (taskId: string) => request<{ status: string; done: number; total: number; errors: unknown[]; currentSecurity?: string; stage?: string; speed?: number; etaSeconds?: number; directAvailable?: boolean }>(`/api/datasets/tasks/${taskId}`),
-  startHistoryBackfill: () => request<{ taskId: string; total: number; threshold: number }>('/api/history-backfill', {
-    method: 'POST', body: '{}',
+  startHistoryBackfill: () => request<{ taskId: string; total: number; threshold: number }>('/api/datasets/import', {
+    method: 'POST', body: JSON.stringify({ scope: 'history_backfill' }),
   }),
   historyBackfillTask: (taskId: string) => request<HistoryBackfillTask>(`/api/datasets/backfill-history/${taskId}`),
   quality: () => request<{ totalCached: number }>('/api/datasets/quality'),

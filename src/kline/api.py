@@ -511,8 +511,25 @@ def create_app(
             "securityCount": len(securities),
         }
 
+    def submit_history_backfill():
+        nonlocal history_backfill_candidate_count
+        history_backfill_tasks.active()
+        candidates = history_backfill_service.scan()
+        with history_backfill_scan_lock:
+            history_backfill_candidate_count = len(candidates)
+        task_id = history_backfill_tasks.submit(
+            history_backfill_service, candidates, date.today()
+        )
+        return {
+            "taskId": task_id,
+            "total": len(candidates),
+            "threshold": settings.history_backfill_min_days,
+        }
+
     @app.post("/api/datasets/import", status_code=202)
     def start_import(request: ImportRequest):
+        if request.scope == "history_backfill":
+            return submit_history_backfill()
         active = tasks.active()
         if active:
             raise HTTPException(
@@ -594,19 +611,7 @@ def create_app(
     @app.post("/api/history-backfill", status_code=202)
     @app.post("/api/datasets/backfill-history", status_code=202)
     def start_history_backfill():
-        nonlocal history_backfill_candidate_count
-        history_backfill_tasks.active()
-        candidates = history_backfill_service.scan()
-        with history_backfill_scan_lock:
-            history_backfill_candidate_count = len(candidates)
-        task_id = history_backfill_tasks.submit(
-            history_backfill_service, candidates, date.today()
-        )
-        return {
-            "taskId": task_id,
-            "total": len(candidates),
-            "threshold": settings.history_backfill_min_days,
-        }
+        return submit_history_backfill()
 
     @app.get("/api/datasets/backfill-history/{task_id}")
     def history_backfill_status(task_id: str):

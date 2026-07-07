@@ -215,6 +215,17 @@ def test_history_backfill_start_alias_uses_same_contract(tmp_path):
     assert response.json()["threshold"] == 250
 
 
+def test_history_backfill_can_start_through_import_command_bus(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/datasets/import", json={"scope": "history_backfill"}
+        )
+    assert response.status_code == 202
+    assert response.json()["total"] == 0
+    assert response.json()["threshold"] == 250
+
+
 def test_quality_reports_history_backfill_counts(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
     response = TestClient(app).get("/api/datasets/quality")
