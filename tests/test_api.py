@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 import pytest
 
+import kline.api as api_module
 from kline.api import create_app, dataframe_records
 from kline.config import Settings
 from kline.data.pipeline import DatasetPipeline
@@ -212,6 +213,24 @@ def test_quality_reports_history_backfill_counts(tmp_path):
     assert response.json()["shortHistoryCached"] == 0
     assert response.json()["listingHistoryShort"] == 0
     assert response.json()["historyBackfillFailed"] == 0
+
+
+def test_quality_caches_expensive_short_history_scan(tmp_path, monkeypatch):
+    calls = 0
+    original = api_module.HistoryBackfillService.scan
+
+    def counted_scan(self):
+        nonlocal calls
+        calls += 1
+        return original(self)
+
+    monkeypatch.setattr(api_module.HistoryBackfillService, "scan", counted_scan)
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    with TestClient(app) as client:
+        assert client.get("/api/datasets/quality").status_code == 200
+        assert client.get("/api/datasets/quality").status_code == 200
+
+    assert calls == 1
 
 
 def test_history_backfill_settings_are_positive():

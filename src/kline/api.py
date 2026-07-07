@@ -453,6 +453,8 @@ def create_app(
     history_backfill_tasks = HistoryBackfillTaskStore(
         coordinator, job_store, submission_lock
     )
+    history_backfill_scan_lock = threading.Lock()
+    history_backfill_candidate_count: int | None = None
     security_cache: list[dict[str, str]] | None = None
 
     def securities_list(refresh: bool = False) -> list[dict[str, str]]:
@@ -568,13 +570,17 @@ def create_app(
 
     @app.get("/api/datasets/quality")
     def quality():
+        nonlocal history_backfill_candidate_count
         cached = pipeline.cached_market_counts()
         events = pipeline.quality_events(limit=100_000)
+        with history_backfill_scan_lock:
+            if history_backfill_candidate_count is None:
+                history_backfill_candidate_count = len(history_backfill_service.scan())
         return {
             "source": "AkShare",
             "cachedSecurities": cached,
             "totalCached": sum(cached.values()),
-            "shortHistoryCached": len(history_backfill_service.scan()),
+            "shortHistoryCached": history_backfill_candidate_count,
             "listingHistoryShort": sum(
                 event["event_type"] == "listing-history-short" for event in events
             ),
@@ -587,8 +593,11 @@ def create_app(
 
     @app.post("/api/datasets/backfill-history", status_code=202)
     def start_history_backfill():
+        nonlocal history_backfill_candidate_count
         history_backfill_tasks.active()
         candidates = history_backfill_service.scan()
+        with history_backfill_scan_lock:
+            history_backfill_candidate_count = len(candidates)
         task_id = history_backfill_tasks.submit(
             history_backfill_service, candidates, date.today()
         )
