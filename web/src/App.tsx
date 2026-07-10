@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -22,6 +22,7 @@ export function App() {
   const [bars, setBars] = useState<Bar[]>([])
   const [audit, setAudit] = useState<Audit | null>(null)
   const [featureAudit, setFeatureAudit] = useState<FeatureAudit | null>(null)
+  const [scoreAudit, setScoreAudit] = useState<ScoreAudit | null>(null)
   const [message, setMessage] = useState('等待检查')
   const [busy, setBusy] = useState(false)
   const [cachedCount, setCachedCount] = useState<number | null>(null)
@@ -36,8 +37,8 @@ export function App() {
   async function runAudit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setMessage('正在读取本地行情并计算…')
     try {
-      const [nextBars, nextAudit, nextFeatures] = await Promise.all([api.bars(exchange, code), api.audit(exchange, code, signalDate), api.featureAudit(exchange, code, signalDate)])
-      setBars(nextBars); setAudit(nextAudit); setFeatureAudit(nextFeatures); setMessage(`已载入 ${nextBars.length} 个交易日`)
+      const [nextBars, nextAudit, nextFeatures, nextScore] = await Promise.all([api.bars(exchange, code), api.audit(exchange, code, signalDate), api.featureAudit(exchange, code, signalDate), api.scoreAudit(exchange, code, signalDate)])
+      setBars(nextBars); setAudit(nextAudit); setFeatureAudit(nextFeatures); setScoreAudit(nextScore); setMessage(`已载入 ${nextBars.length} 个交易日`)
     } catch (error) { setMessage(error instanceof Error ? error.message : '计算失败') }
     finally { setBusy(false) }
   }
@@ -119,6 +120,7 @@ export function App() {
       <div className="version"><span>标签版本</span><strong>{health?.versions.labelDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>交易规则</span><strong>{health?.versions.limitRuleVersion ?? '—'}</strong></div>
       <div className="version"><span>特征版本</span><strong>{health?.versions.featureDefinitionVersion ?? '—'}</strong></div>
+      <div className="version"><span>评分版本</span><strong>{health?.versions.scoreDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>行情策略</span><strong>{health?.versions.providerPolicyVersion ?? '—'}</strong></div>
       <button disabled={busy} onClick={() => startImport('representative')}>拉取代表样本</button>
       <button className="secondary" disabled={busy} onClick={() => startImport('all')}>高速下载全市场</button>
@@ -144,6 +146,26 @@ export function App() {
         <article><span>标签成熟日</span><strong>{audit.maturityDate ?? '—'}</strong><small>只允许成熟标签进入校准池</small></article>
         <article><span>数据与因子版本</span><strong>{audit.factorVersion?.slice(0, 18) ?? '—'}</strong><small>{audit.dataSnapshotVersion ?? '—'}</small></article>
       </div>}
+    </section>
+    <section className="panel">
+      <div className="section-title"><div><span className="eyebrow">P3 SCORE</span><h2>P3 结构评分</h2></div>{scoreAudit && <span className="message">{scoreAudit.score.version}</span>}</div>
+      {scoreAudit ? <div className="score-panel">
+        <article className={`score-card grade-${scoreAudit.score.grade.toLowerCase()}`}>
+          <span>结构分数</span>
+          <strong>{scoreAudit.score.score.toFixed(1)}</strong>
+          <small>{scoreAudit.score.grade} · {scoreAudit.score.usable ? '可用' : '需审计'} {scoreAudit.score.reasons.join(' · ')}</small>
+        </article>
+        <div className="score-components">
+          {(Object.keys(groupNames) as Array<keyof typeof groupNames>).map(group => {
+            const item = scoreAudit.score.components[group]
+            return <article key={group}>
+              <h3>{groupNames[group]}</h3>
+              <strong>{item.score.toFixed(1)} / {item.weight}</strong>
+              <small>{item.reasons.join(' · ') || '无可用特征'}</small>
+            </article>
+          })}
+        </div>
+      </div> : <p className="muted">执行上方审计后，展示 P2 特征驱动的可解释 P3 分数。</p>}
     </section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P2 AUDITOR</span><h2>P2 特征审计</h2></div>{featureAudit && <span className="message">历史 {featureAudit.availableHistory} 日 · {featureAudit.priceBasis}</span>}</div>

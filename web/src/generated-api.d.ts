@@ -106,6 +106,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/history-backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start History Backfill */
+        post: operations["start_history_backfill_api_history_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/datasets/backfill-history/{task_id}": {
         parameters: {
             query?: never;
@@ -253,6 +270,23 @@ export interface paths {
         put?: never;
         /** Feature Audit */
         post: operations["feature_audit_api_p2_audit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/p3/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Score Audit */
+        post: operations["score_audit_api_p3_audit_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -440,6 +474,26 @@ export interface operations {
         };
     };
     start_history_backfill_api_datasets_backfill_history_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    start_history_backfill_api_history_backfill_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -715,6 +769,39 @@ export interface operations {
         };
     };
     feature_audit_api_p2_audit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuditRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    score_audit_api_p3_audit_post: {
         parameters: {
             query?: never;
             header?: never;

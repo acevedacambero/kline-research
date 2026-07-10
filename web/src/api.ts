@@ -21,6 +21,17 @@ export type FeatureAudit = {
   reasons: string[]; priceBasis: string;
   versions: Record<string, string | null>;
 }
+export type ScoreComponent = { score: number; weight: number; available: boolean; reasons: string[] }
+export type ScoreAudit = {
+  exchange: string; code: string; date: string; availableHistory: number;
+  featureDefinitionVersion: string; priceBasis: string;
+  score: {
+    version: string; score: number; grade: string; usable: boolean;
+    components: Record<'trend' | 'position' | 'momentum' | 'volumePrice' | 'tradingBehavior', ScoreComponent>;
+    reasons: string[];
+  };
+  versions: Record<string, string | null>;
+}
 export type HistoryBackfillTask = {
   status: string; done: number; total: number; completed: number;
   listingHistoryShort: number; errors: unknown[]; currentSecurity?: string | null;
@@ -67,6 +78,9 @@ export const api = {
   }),
   featureTask: (taskId: string) => request<{ status: string; done: number; total: number; rows: number; errors: unknown[]; currentSecurity?: string }>(`/api/features/tasks/${taskId}`),
   featureAudit: (exchange: string, code: string, signalDate: string) => request<FeatureAudit>('/api/p2/audit', {
+    method: 'POST', body: JSON.stringify({ exchange, code, signal_date: signalDate }),
+  }),
+  scoreAudit: (exchange: string, code: string, signalDate: string) => request<ScoreAudit>('/api/p3/audit', {
     method: 'POST', body: JSON.stringify({ exchange, code, signal_date: signalDate }),
   }),
 }

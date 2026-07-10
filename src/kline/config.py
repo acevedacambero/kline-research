@@ -32,7 +32,7 @@ VERSIONS = {
     "algorithmVersion": "p1-v1",
     "rightsVersion": "akshare-factor-v1",
     "featureDefinitionVersion": "daily-features-v1",
-    "scoreDefinitionVersion": "not-applicable",
+    "scoreDefinitionVersion": "p3-rule-score-v1",
     "labelDefinitionVersion": "daily-v1",
     "limitRuleVersion": "cn-equity-v1",
     "gapRuleVersion": "calendar-10d-v1",

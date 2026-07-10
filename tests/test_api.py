@@ -102,6 +102,19 @@ def test_feature_build_task_and_point_in_time_audit(tmp_path):
         assert body["versions"]["featureDefinitionVersion"] == "daily-features-v1"
         assert body["availableHistory"] == 260
 
+        scored = client.post(
+            "/api/p3/audit",
+            json={"exchange": "sh", "code": "600000", "signal_date": "2024-09-16"},
+        )
+        assert scored.status_code == 200
+        score_body = scored.json()
+        assert score_body["versions"]["scoreDefinitionVersion"] == "p3-rule-score-v1"
+        assert 0 <= score_body["score"]["score"] <= 100
+        assert set(score_body["score"]["components"]) == {
+            "trend", "position", "momentum", "volumePrice", "tradingBehavior"
+        }
+        assert score_body["featureDefinitionVersion"] == "daily-features-v1"
+
 
 def test_feature_task_unknown_id_is_404(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())

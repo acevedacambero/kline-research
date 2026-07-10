@@ -11,6 +11,7 @@ describe('App', () => {
     expect(screen.getByText('P1 标签审计台')).toBeInTheDocument()
     expect(screen.getByLabelText('证券代码')).toBeInTheDocument()
     expect(screen.getByText('P2 特征审计')).toBeInTheDocument()
+    expect(screen.getByText('P3 结构评分')).toBeInTheDocument()
   })
 
   it('renders five P2 groups and explains unavailable history', async () => {
@@ -18,6 +19,24 @@ describe('App', () => {
       const path = String(input)
       const body = path.includes('/api/p2/audit')
         ? { groups: { trend: { ma60: null }, position: {}, momentum: {}, volumePrice: {}, tradingBehavior: {} }, availableHistory: 20, versions: {}, priceBasis: 'raw+qfq+total-return', reasons: [] }
+        : path.includes('/api/p3/audit')
+          ? {
+              availableHistory: 20,
+              featureDefinitionVersion: 'daily-features-v1',
+              priceBasis: 'raw+qfq+total-return',
+              score: {
+                version: 'p3-rule-score-v1', score: 72.5, grade: 'B', usable: true,
+                reasons: [],
+                components: {
+                  trend: { score: 20, weight: 25, available: true, reasons: ['多头均线排列'] },
+                  position: { score: 15, weight: 20, available: true, reasons: [] },
+                  momentum: { score: 18, weight: 25, available: true, reasons: [] },
+                  volumePrice: { score: 10, weight: 15, available: true, reasons: [] },
+                  tradingBehavior: { score: 9.5, weight: 15, available: true, reasons: [] },
+                },
+              },
+              versions: {},
+            }
         : path.includes('/api/p1/audit')
           ? { eligibility: { eligible: true, status: 'ok', reasons: [] }, entry: { status: 'normal' }, labels: {} }
           : path.includes('/bars') ? []
@@ -27,12 +46,14 @@ describe('App', () => {
     }))
     render(<App />)
     fireEvent.click(await screen.findByRole('button', { name: '计算并审计' }))
-    expect(await screen.findByText('趋势')).toBeInTheDocument()
-    expect(screen.getByText('位置')).toBeInTheDocument()
-    expect(screen.getByText('动量')).toBeInTheDocument()
-    expect(screen.getByText('量价')).toBeInTheDocument()
-    expect(screen.getByText('交易行为')).toBeInTheDocument()
+    expect((await screen.findAllByText('趋势')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('位置').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('动量').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('量价').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('交易行为').length).toBeGreaterThan(0)
     expect(screen.getByText('历史不足')).toBeInTheDocument()
+    expect(screen.getByText('72.5')).toBeInTheDocument()
+    expect(screen.getByText(/p3-rule-score-v1/)).toBeInTheDocument()
   })
 
   it('offers Shanghai and Shenzhen markets only', async () => {

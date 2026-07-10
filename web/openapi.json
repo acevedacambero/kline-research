@@ -142,6 +142,22 @@
         }
       }
     },
+    "/api/history-backfill": {
+      "post": {
+        "summary": "Start History Backfill",
+        "operationId": "start_history_backfill_api_history_backfill_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/datasets/backfill-history/{task_id}": {
       "get": {
         "summary": "History Backfill Status",
@@ -449,6 +465,42 @@
       "post": {
         "summary": "Feature Audit",
         "operationId": "feature_audit_api_p2_audit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/p3/audit": {
+      "post": {
+        "summary": "Score Audit",
+        "operationId": "score_audit_api_p3_audit_post",
         "requestBody": {
           "content": {
             "application/json": {

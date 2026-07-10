@@ -43,6 +43,7 @@ from .p1 import (
 )
 from .p1.batch import BatchLabelBuilder, LabelDatasetStore
 from .p1.market_rules import status_from_name
+from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 
 
 class _InjectedProviderAdapter:
@@ -982,6 +983,55 @@ def create_app(
                 "factorVersion": row.get("factor_version"),
                 "limitRuleVersion": VERSIONS["limitRuleVersion"],
                 "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
+            },
+        }
+
+    @app.post("/api/p3/audit")
+    def score_audit(request: AuditRequest):
+        frame = load_bars(request.exchange, request.code)
+        try:
+            name = next(
+                (
+                    item["name"]
+                    for item in securities_list()
+                    if item["exchange"] == request.exchange and item["code"] == request.code
+                ),
+                "",
+            )
+        except Exception:
+            name = ""
+        features = compute_daily_features(
+            frame,
+            exchange=request.exchange,
+            code=request.code,
+            st_status=status_from_name(name).is_st,
+        )
+        selected = features.loc[features["date"] == request.signal_date]
+        if selected.empty:
+            raise HTTPException(
+                422,
+                detail={
+                    "code": "SIGNAL_DATE_NOT_FOUND",
+                    "message": "audit date is not a valid trading day",
+                },
+            )
+        row = dataframe_records(selected)[0]
+        return {
+            "exchange": request.exchange,
+            "code": request.code,
+            "date": request.signal_date,
+            "availableHistory": row["available_history"],
+            "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
+            "priceBasis": row["price_basis"],
+            "score": compute_rule_score(row),
+            "versions": {
+                "snapshotVersion": pipeline.latest_snapshot_version(
+                    request.exchange, request.code
+                ),
+                "factorVersion": row.get("factor_version"),
+                "limitRuleVersion": VERSIONS["limitRuleVersion"],
+                "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
+                "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
             },
         }
 
