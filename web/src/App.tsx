@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -23,6 +23,7 @@ export function App() {
   const [audit, setAudit] = useState<Audit | null>(null)
   const [featureAudit, setFeatureAudit] = useState<FeatureAudit | null>(null)
   const [scoreAudit, setScoreAudit] = useState<ScoreAudit | null>(null)
+  const [validation, setValidation] = useState<SingleFactorValidation | null>(null)
   const [message, setMessage] = useState('等待检查')
   const [busy, setBusy] = useState(false)
   const [cachedCount, setCachedCount] = useState<number | null>(null)
@@ -128,6 +129,16 @@ export function App() {
     } catch (error) { setMessage(error instanceof Error ? error.message : '评分任务启动失败'); setBusy(false) }
   }
 
+  async function runValidation() {
+    setBusy(true)
+    try {
+      const result = await api.validateSingleFactor()
+      setValidation(result)
+      setMessage(`P4 单因子验证：${result.sampleCount} 个成熟样本`)
+    } catch (error) { setMessage(error instanceof Error ? error.message : '验证失败') }
+    finally { setBusy(false) }
+  }
+
   return <main>
     <header><div><span className="eyebrow">LOCAL RESEARCH SYSTEM</span><h1>K 线结构概率研究台</h1></div><span className={`health ${health?.status === 'ok' ? 'ok' : ''}`}>{health?.status === 'ok' ? '本地服务正常' : '正在连接'}</span></header>
     <section className="panel status-panel">
@@ -143,6 +154,7 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={startLabels}>生成 P1 标签</button>
       <button className="secondary" disabled={busy} onClick={startFeatures}>生成 P2 特征</button>
       <button className="secondary" disabled={busy} onClick={startScores}>生成 P3 评分</button>
+      <button className="secondary" disabled={busy} onClick={runValidation}>验证 P4 单因子</button>
     </section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P1 AUDITOR</span><h2>P1 标签审计台</h2></div><span className="message">{message}</span></div>
@@ -162,6 +174,18 @@ export function App() {
         <article><span>标签成熟日</span><strong>{audit.maturityDate ?? '—'}</strong><small>只允许成熟标签进入校准池</small></article>
         <article><span>数据与因子版本</span><strong>{audit.factorVersion?.slice(0, 18) ?? '—'}</strong><small>{audit.dataSnapshotVersion ?? '—'}</small></article>
       </div>}
+    </section>
+    <section className="panel">
+      <div className="section-title"><div><span className="eyebrow">P4 VALIDATION</span><h2>P4 单因子验证</h2></div>{validation && <span className="message">{validation.version}</span>}</div>
+      {validation ? <div className="validation-panel">
+        <article><span>样本数</span><strong>{validation.sampleCount}</strong><small>秩相关 {validation.rankCorrelation == null ? '—' : validation.rankCorrelation.toFixed(4)}</small></article>
+        <table>
+          <thead><tr><th>分桶</th><th>样本</th><th>平均分</th><th>P20 收益</th><th>胜率</th><th>路径成功</th></tr></thead>
+          <tbody>{validation.buckets.map(bucket => <tr key={bucket.bucket}>
+            <td>{bucket.bucket}</td><td>{bucket.count}</td><td>{bucket.avgFactor.toFixed(2)}</td><td>{pct(bucket.avgLabel)}</td><td>{pct(bucket.winRate)}</td><td>{pct(bucket.pathSuccessRate)}</td>
+          </tr>)}</tbody>
+        </table>
+      </div> : <p className="muted">生成 P1 标签和 P3 评分后，可验证 score 对 P20 可执行收益的分桶效果。</p>}
     </section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P3 SCORE</span><h2>P3 结构评分</h2></div>{scoreAudit && <span className="message">{scoreAudit.score.version}</span>}</div>

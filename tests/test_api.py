@@ -10,6 +10,7 @@ import kline.api as api_module
 from kline.api import create_app, dataframe_records
 from kline.config import Settings
 from kline.data.pipeline import DatasetPipeline
+from kline.validation import VALIDATION_DEFINITION_VERSION
 
 
 class FakeSource:
@@ -140,6 +141,67 @@ def test_score_task_unknown_id_is_404(tmp_path):
     response = TestClient(app).get("/api/scores/tasks/missing")
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "TASK_NOT_FOUND"
+
+
+def test_single_factor_validation_api_reads_local_score_and_label_files(tmp_path):
+    data_path = tmp_path / "data"
+    score_dir = (
+        data_path / "data-foundation-v1" / "scores" / "p3-rule-score-v1"
+        / "identity" / "sh"
+    )
+    label_dir = data_path / "data-foundation-v1" / "labels" / "snapshot-v1" / "sh"
+    score_dir.mkdir(parents=True)
+    label_dir.mkdir(parents=True)
+    score_dates = [date(2024, 1, 1) + timedelta(days=index) for index in range(20)]
+    pd.DataFrame(
+        [
+            {
+                "exchange": "sh", "code": "600000", "date": item,
+                "score": index * 5, "usable": True,
+            }
+            for index, item in enumerate(score_dates)
+        ]
+    ).to_parquet(score_dir / "600000.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "exchange": "sh", "code": "600000", "signal_date": item,
+                "p20_executable_return": -0.05 + index * 0.01,
+                "path_success_p20": index >= 10,
+                "max_drawdown_p20": -0.1,
+                "label_maturity_date": date(2024, 3, 1),
+            }
+            for index, item in enumerate(score_dates)
+        ]
+    ).to_parquet(label_dir / "600000.parquet", index=False)
+    app = create_app(Settings(data_path=data_path), FakeSource())
+
+    response = TestClient(app).post(
+        "/api/validation/single-factor",
+        json={
+            "factor_column": "score",
+            "label_column": "p20_executable_return",
+            "buckets": 4,
+            "as_of_date": "2024-03-01",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"] == VALIDATION_DEFINITION_VERSION
+    assert body["sampleCount"] == 20
+    assert len(body["buckets"]) == 4
+
+
+def test_single_factor_validation_api_returns_empty_when_files_are_missing(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    response = TestClient(app).post(
+        "/api/validation/single-factor",
+        json={"factor_column": "score", "label_column": "p20_executable_return"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sampleCount"] == 0
 
 
 def test_feature_task_unknown_id_is_404(tmp_path):

@@ -45,6 +45,7 @@ from .p1.batch import BatchLabelBuilder, LabelDatasetStore
 from .p1.market_rules import status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
+from .validation import validate_single_factor
 
 
 class _InjectedProviderAdapter:
@@ -82,6 +83,13 @@ class AuditRequest(BaseModel):
     exchange: str
     code: str
     signal_date: date
+
+
+class SingleFactorValidationRequest(BaseModel):
+    factor_column: str = "score"
+    label_column: str = "p20_executable_return"
+    buckets: int = 5
+    as_of_date: date | None = None
 
 
 def _task_response(job: Job) -> dict:
@@ -851,6 +859,29 @@ def create_app(
                 404, detail={"code": "TASK_NOT_FOUND", "message": "score task not found"}
             )
         return score_tasks.items[task_id]
+
+    def read_dataset_glob(pattern: str) -> pd.DataFrame:
+        frames = []
+        for path in settings.data_path.glob(pattern):
+            if path.name.endswith(".manifest.json"):
+                continue
+            frames.append(pd.read_parquet(path))
+        if not frames:
+            return pd.DataFrame()
+        return pd.concat(frames, ignore_index=True)
+
+    @app.post("/api/validation/single-factor")
+    def single_factor_validation(request: SingleFactorValidationRequest):
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
+        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet")
+        return validate_single_factor(
+            scores,
+            labels,
+            factor_column=request.factor_column,
+            label_column=request.label_column,
+            buckets=request.buckets,
+            as_of_date=request.as_of_date,
+        )
 
     @app.get("/api/securities")
     def securities(query: str = ""):

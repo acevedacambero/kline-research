@@ -32,6 +32,16 @@ export type ScoreAudit = {
   };
   versions: Record<string, string | null>;
 }
+export type ValidationBucket = {
+  bucket: number; count: number; minFactor: number; maxFactor: number;
+  avgFactor: number; avgLabel: number; medianLabel: number; winRate: number;
+  pathSuccessRate?: number | null; avgMaxDrawdown?: number | null;
+}
+export type SingleFactorValidation = {
+  version: string; factorColumn: string; labelColumn: string; bucketCount: number;
+  sampleCount: number; rankCorrelation?: number | null; buckets: ValidationBucket[];
+  missingColumns: string[]; dropped: Record<string, number>;
+}
 export type HistoryBackfillTask = {
   status: string; done: number; total: number; completed: number;
   listingHistoryShort: number; errors: unknown[]; currentSecurity?: string | null;
@@ -86,5 +96,8 @@ export const api = {
   }),
   scoreAudit: (exchange: string, code: string, signalDate: string) => request<ScoreAudit>('/api/p3/audit', {
     method: 'POST', body: JSON.stringify({ exchange, code, signal_date: signalDate }),
+  }),
+  validateSingleFactor: () => request<SingleFactorValidation>('/api/validation/single-factor', {
+    method: 'POST', body: JSON.stringify({ factor_column: 'score', label_column: 'p20_executable_return', buckets: 5 }),
   }),
 }

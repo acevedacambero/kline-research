@@ -117,4 +117,37 @@ describe('App', () => {
 
     expect(await screen.findByText(/P3 评分：2\/2，已生成 520 行/)).toBeInTheDocument()
   })
+
+  it('runs P4 single factor validation and renders bucket metrics', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      const body = path === '/api/validation/single-factor'
+        ? {
+            version: 'p4-single-factor-v1',
+            factorColumn: 'score',
+            labelColumn: 'p20_executable_return',
+            bucketCount: 2,
+            sampleCount: 10,
+            rankCorrelation: 0.42,
+            missingColumns: [],
+            dropped: {},
+            buckets: [
+              { bucket: 1, count: 5, minFactor: 1, maxFactor: 50, avgFactor: 25, avgLabel: 0.01, medianLabel: 0.01, winRate: 0.6, pathSuccessRate: 0.4, avgMaxDrawdown: -0.08 },
+              { bucket: 2, count: 5, minFactor: 51, maxFactor: 90, avgFactor: 70, avgLabel: 0.08, medianLabel: 0.07, winRate: 0.8, pathSuccessRate: 0.7, avgMaxDrawdown: -0.05 },
+            ],
+          }
+        : path.includes('/quality')
+          ? { totalCached: 2 }
+          : { status: 'ok', dataSource: 'AkShare', cachePath: 'data', versions: {} }
+      return { ok: true, json: async () => body }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '验证 P4 单因子' }))
+
+    expect(await screen.findByText('p4-single-factor-v1')).toBeInTheDocument()
+    expect(screen.getByText('10')).toBeInTheDocument()
+    expect(screen.getByText('8.00%')).toBeInTheDocument()
+  })
 })

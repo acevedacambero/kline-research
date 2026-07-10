@@ -31,6 +31,13 @@ describe('API errors', () => {
     expect(fetchMock.mock.calls[1][0]).toBe('/api/scores/tasks/task-1')
   })
 
+  it('uses the P4 single factor validation endpoint', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.validateSingleFactor()
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/validation/single-factor')
+  })
+
   it('uses the history backfill start and status endpoints', async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({}) }))
     vi.stubGlobal('fetch', fetchMock)
