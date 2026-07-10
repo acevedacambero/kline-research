@@ -22,6 +22,15 @@ describe('API errors', () => {
     expect(fetchMock.mock.calls[2][0]).toBe('/api/p3/audit')
   })
 
+  it('uses the P3 score build and task endpoints', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.buildScores('all')
+    await api.scoreTask('task-1')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/scores/build')
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/scores/tasks/task-1')
+  })
+
   it('uses the history backfill start and status endpoints', async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({}) }))
     vi.stubGlobal('fetch', fetchMock)

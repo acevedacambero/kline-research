@@ -116,6 +116,32 @@ def test_feature_build_task_and_point_in_time_audit(tmp_path):
         assert score_body["featureDefinitionVersion"] == "daily-features-v1"
 
 
+def test_score_build_task_is_pollable(tmp_path):
+    data_path = tmp_path / "data"
+    seed_security(data_path)
+    app = create_app(Settings(data_path=data_path), FakeSource())
+    with TestClient(app) as client:
+        started = client.post("/api/scores/build", json={"scope": "all"})
+        assert started.status_code == 202
+        task_id = started.json()["taskId"]
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            task = client.get(f"/api/scores/tasks/{task_id}").json()
+            if task["status"] not in {"queued", "running"}:
+                break
+            time.sleep(0.02)
+        assert task["status"] == "completed"
+        assert task["rows"] == 260
+        assert task["errors"] == []
+
+
+def test_score_task_unknown_id_is_404(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    response = TestClient(app).get("/api/scores/tasks/missing")
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "TASK_NOT_FOUND"
+
+
 def test_feature_task_unknown_id_is_404(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
     response = TestClient(app).get("/api/features/tasks/missing")

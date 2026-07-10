@@ -77,6 +77,10 @@ export const api = {
     method: 'POST', body: JSON.stringify({ scope }),
   }),
   featureTask: (taskId: string) => request<{ status: string; done: number; total: number; rows: number; errors: unknown[]; currentSecurity?: string }>(`/api/features/tasks/${taskId}`),
+  buildScores: (scope: 'representative' | 'all') => request<{ taskId: string; total: number }>('/api/scores/build', {
+    method: 'POST', body: JSON.stringify({ scope }),
+  }),
+  scoreTask: (taskId: string) => request<{ status: string; done: number; total: number; rows: number; errors: unknown[]; currentSecurity?: string }>(`/api/scores/tasks/${taskId}`),
   featureAudit: (exchange: string, code: string, signalDate: string) => request<FeatureAudit>('/api/p2/audit', {
     method: 'POST', body: JSON.stringify({ exchange, code, signal_date: signalDate }),
   }),

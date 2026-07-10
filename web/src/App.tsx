@@ -113,6 +113,21 @@ export function App() {
     } catch (error) { setMessage(error instanceof Error ? error.message : '特征任务启动失败'); setBusy(false) }
   }
 
+  async function startScores() {
+    setBusy(true)
+    try {
+      const result = await api.buildScores('all')
+      setMessage(`P3 评分任务 ${result.taskId.slice(0, 8)} 已启动`)
+      const poll = async () => {
+        const task = await api.scoreTask(result.taskId)
+        setMessage(`P3 评分：${task.done}/${task.total}，已生成 ${task.rows} 行`)
+        if (task.status === 'queued' || task.status === 'running') window.setTimeout(poll, 1000)
+        else { setBusy(false); if (task.errors.length) setMessage(`评分完成，但有 ${task.errors.length} 个错误`) }
+      }
+      await poll()
+    } catch (error) { setMessage(error instanceof Error ? error.message : '评分任务启动失败'); setBusy(false) }
+  }
+
   return <main>
     <header><div><span className="eyebrow">LOCAL RESEARCH SYSTEM</span><h1>K 线结构概率研究台</h1></div><span className={`health ${health?.status === 'ok' ? 'ok' : ''}`}>{health?.status === 'ok' ? '本地服务正常' : '正在连接'}</span></header>
     <section className="panel status-panel">
@@ -127,6 +142,7 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={startHistoryBackfill}>补全短历史</button>
       <button className="secondary" disabled={busy} onClick={startLabels}>生成 P1 标签</button>
       <button className="secondary" disabled={busy} onClick={startFeatures}>生成 P2 特征</button>
+      <button className="secondary" disabled={busy} onClick={startScores}>生成 P3 评分</button>
     </section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P1 AUDITOR</span><h2>P1 标签审计台</h2></div><span className="message">{message}</span></div>

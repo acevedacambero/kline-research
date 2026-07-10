@@ -44,6 +44,7 @@ from .p1 import (
 from .p1.batch import BatchLabelBuilder, LabelDatasetStore
 from .p1.market_rules import status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
+from .score.batch import BatchScoreBuilder, ScoreDatasetStore
 
 
 class _InjectedProviderAdapter:
@@ -295,6 +296,32 @@ class FeatureTaskStore(_TaskFacade):
         return self._submit("features", securities, operation)
 
 
+class ScoreTaskStore(_TaskFacade):
+    def __init__(self, coordinator, store, lock):
+        super().__init__(coordinator, store, lock, {"scores"})
+
+    def submit(self, securities, output_root) -> str:
+        def operation(payload, progress):
+            state = {"total": len(payload), "done": 0, "rows": 0, "errors": [],
+                     "currentSecurity": None}
+            builder = BatchScoreBuilder(ScoreDatasetStore(output_root))
+
+            def on_progress(security, report, error):
+                state["currentSecurity"] = security
+                state["done"] += 1
+                if report:
+                    state["rows"] += report.rows
+                if error:
+                    state["errors"].append({"security": security, "message": str(error)})
+                progress(state)
+
+            builder.build_many(payload, on_progress=on_progress)
+            state["currentSecurity"] = None
+            return state
+
+        return self._submit("scores", securities, operation)
+
+
 class HistoryBackfillTaskStore(_TaskFacade):
     def __init__(self, coordinator, store, lock):
         super().__init__(coordinator, store, lock, {"history_backfill"})
@@ -507,6 +534,7 @@ def create_app(
     tasks = TaskStore(coordinator, job_store, submission_lock, settings.download_workers)
     label_tasks = LabelTaskStore(coordinator, job_store, submission_lock)
     feature_tasks = FeatureTaskStore(coordinator, job_store, submission_lock)
+    score_tasks = ScoreTaskStore(coordinator, job_store, submission_lock)
     history_backfill_service = HistoryBackfillService(
         pipeline,
         download_source,
@@ -770,6 +798,59 @@ def create_app(
                 404, detail={"code": "TASK_NOT_FOUND", "message": "特征任务不存在"}
             )
         return feature_tasks.items[task_id]
+
+    @app.post("/api/scores/build", status_code=202)
+    def build_scores(request: ImportRequest):
+        active = score_tasks.active()
+        if active:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "SCORE_BUILD_ALREADY_RUNNING",
+                    "message": f'A score job is already running: {active["id"]}',
+                    "taskId": active["id"],
+                },
+            )
+        cached = [
+            item for item in pipeline.cached_securities()
+            if item["exchange"] in SUPPORTED_EXCHANGES
+        ]
+        if request.scope == "representative":
+            cached = cached[:3]
+        elif request.scope != "all":
+            raise HTTPException(
+                422,
+                detail={
+                    "code": "INVALID_SCORE_SCOPE",
+                    "message": "scope must be representative or all",
+                },
+            )
+        try:
+            names = {
+                f'{item["exchange"]}{item["code"]}': item["name"]
+                for item in securities_list()
+            }
+        except Exception:
+            names = {}
+        cached = [
+            {
+                **item,
+                "st_status": status_from_name(
+                    names.get(f'{item["exchange"]}{item["code"]}', "")
+                ).is_st,
+            }
+            for item in cached
+        ]
+        task_id = score_tasks.submit(cached, settings.data_path)
+        return {"taskId": task_id, "total": len(cached)}
+
+    @app.get("/api/scores/tasks/{task_id}")
+    def score_task_status(task_id: str):
+        if task_id not in score_tasks.items:
+            raise HTTPException(
+                404, detail={"code": "TASK_NOT_FOUND", "message": "score task not found"}
+            )
+        return score_tasks.items[task_id]
 
     @app.get("/api/securities")
     def securities(query: str = ""):

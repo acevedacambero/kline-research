@@ -97,4 +97,24 @@ describe('App', () => {
     expect(await screen.findByText(/已补全 3 · 新股 1 · 错误 1/)).toBeInTheDocument()
     expect(screen.getByText(/检查错误后，再手动生成 P1 和 P2/)).toBeInTheDocument()
   })
+
+  it('starts P3 score build and polls progress', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      const body = path === '/api/scores/build'
+        ? { taskId: 'score-task-1', total: 2 }
+        : path === '/api/scores/tasks/score-task-1'
+          ? { status: 'completed', done: 2, total: 2, rows: 520, errors: [] }
+          : path.includes('/quality')
+            ? { totalCached: 2 }
+            : { status: 'ok', dataSource: 'AkShare', cachePath: 'data', versions: {} }
+      return { ok: true, json: async () => body }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '生成 P3 评分' }))
+
+    expect(await screen.findByText(/P3 评分：2\/2，已生成 520 行/)).toBeInTheDocument()
+  })
 })
