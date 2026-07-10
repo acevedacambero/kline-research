@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
+import queue
 import threading
 import time
 
@@ -20,6 +21,7 @@ from .access import AccessDenied, CloudflareAccessVerifier
 from .data.akshare_source import AkShareSource
 from .data.history_backfill import (
     BackfillCandidate,
+    BackfillCoverageError,
     HistoryBackfillService,
 )
 from .data.provider_policy import (
@@ -296,7 +298,9 @@ class HistoryBackfillTaskStore(_TaskFacade):
     def __init__(self, coordinator, store, lock):
         super().__init__(coordinator, store, lock, {"history_backfill"})
 
-    def submit(self, service, candidates, as_of_date: date) -> str:
+    def submit(
+        self, service, candidates, as_of_date: date, timeout_seconds: float | None = None
+    ) -> str:
         payload = {
             "candidates": [
                 {
@@ -320,6 +324,63 @@ class HistoryBackfillTaskStore(_TaskFacade):
                 "etaSeconds": None,
             }
             started = time.monotonic()
+
+            def fetch_with_timeout(candidate, as_of_date):
+                if timeout_seconds is None:
+                    return service.fetch_history_bundle(
+                        candidate, as_of_date=as_of_date
+                    )
+                result_queue = queue.Queue(maxsize=1)
+
+                def fetch():
+                    try:
+                        result_queue.put_nowait(
+                            (
+                                "ok",
+                                service.fetch_history_bundle(
+                                    candidate, as_of_date=as_of_date
+                                ),
+                            )
+                        )
+                    except Exception as exc:
+                        result_queue.put_nowait(("error", exc))
+
+                thread = threading.Thread(
+                    target=fetch,
+                    name=f"history-fetch-{candidate.exchange}{candidate.code}",
+                    daemon=True,
+                )
+                thread.start()
+                thread.join(timeout_seconds)
+                if thread.is_alive():
+                    raise BackfillCoverageError(
+                        "HISTORY_FETCH_TIMEOUT",
+                        f"history fetch timed out after {timeout_seconds:g}s",
+                    )
+                status, result = result_queue.get_nowait()
+                if status == "error":
+                    raise result
+                return result
+
+            def run_backfill(candidate, as_of_date):
+                if not all(
+                    hasattr(service, name)
+                    for name in (
+                        "fetch_history_bundle",
+                        "apply_history_bundle",
+                        "record_failure",
+                    )
+                ):
+                    return service.backfill(candidate, as_of_date=as_of_date)
+                try:
+                    raw, factors = fetch_with_timeout(candidate, as_of_date)
+                    return service.apply_history_bundle(
+                        candidate, raw, factors, as_of_date=as_of_date
+                    )
+                except Exception as exc:
+                    service.record_failure(candidate, exc)
+                    raise exc
+
             for item in payload["candidates"]:
                 candidate = BackfillCandidate(
                     **{**item, "path": Path(item["path"])}
@@ -327,8 +388,9 @@ class HistoryBackfillTaskStore(_TaskFacade):
                 key = f"{candidate.exchange}{candidate.code}"
                 state["currentSecurity"] = key
                 try:
-                    result = service.backfill(
-                        candidate, as_of_date=date.fromisoformat(payload["asOfDate"])
+                    result = run_backfill(
+                        candidate,
+                        date.fromisoformat(payload["asOfDate"]),
                     )
                     if result.status == "listing_history_short":
                         state["listingHistoryShort"] += 1
@@ -518,7 +580,10 @@ def create_app(
         with history_backfill_scan_lock:
             history_backfill_candidate_count = len(candidates)
         task_id = history_backfill_tasks.submit(
-            history_backfill_service, candidates, date.today()
+            history_backfill_service,
+            candidates,
+            date.today(),
+            timeout_seconds=settings.security_fetch_timeout_seconds,
         )
         return {
             "taskId": task_id,

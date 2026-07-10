@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from pathlib import Path
 import threading
+import time
 
 import pandas as pd
 
@@ -172,4 +173,54 @@ def test_task_isolates_security_failure_and_keeps_processing(tmp_path):
             "code": "HISTORY_COVERAGE_INCOMPLETE",
             "message": "stale",
         }
+    ]
+
+
+def test_task_times_out_stuck_history_fetch_and_continues(tmp_path):
+    candidates = [
+        BackfillCandidate("sh", "600000", Path("a"), "s1", "h1", 90),
+        BackfillCandidate("sz", "000001", Path("b"), "s2", "h2", 100),
+    ]
+    failures = []
+
+    class Service:
+        def fetch_history_bundle(self, candidate, *, as_of_date):
+            if candidate.code == "600000":
+                time.sleep(1)
+            return bars(500), factors()
+
+        def apply_history_bundle(self, candidate, raw, factors, *, as_of_date):
+            return BackfillResult("completed", candidate.before_count, len(raw), "s3")
+
+        def record_failure(self, candidate, exc):
+            failures.append((candidate.exchange, candidate.code, exc.code, str(exc)))
+
+    store = JobStore(tmp_path / "jobs.duckdb")
+    coordinator = HeavyTaskCoordinator(store)
+    tasks = HistoryBackfillTaskStore(coordinator, store, threading.Lock())
+    task_id = tasks.submit(
+        Service(), candidates, date(2026, 7, 7), timeout_seconds=0.05
+    )
+
+    coordinator.shutdown()
+    result = store.get(task_id).result
+    store.close()
+
+    assert result["done"] == result["total"] == 2
+    assert result["completed"] == 1
+    assert result["errors"] == [
+        {
+            "security": "sh600000",
+            "stage": "history-fetch",
+            "code": "HISTORY_FETCH_TIMEOUT",
+            "message": "history fetch timed out after 0.05s",
+        }
+    ]
+    assert failures == [
+        (
+            "sh",
+            "600000",
+            "HISTORY_FETCH_TIMEOUT",
+            "history fetch timed out after 0.05s",
+        )
     ]

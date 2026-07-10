@@ -80,68 +80,89 @@ class HistoryBackfillService:
     def backfill(
         self, candidate: BackfillCandidate, *, as_of_date: date
     ) -> BackfillResult:
-        dataset_key = f"stock:{candidate.exchange}:{candidate.code}"
         try:
-            raw, factors = self.source.fetch_long_history_bundle(
-                candidate.exchange,
-                candidate.code,
-                date(1990, 1, 1),
-                as_of_date,
-            )
-            if raw.empty or "date" not in raw:
-                raise BackfillCoverageError(
-                    "HISTORY_EMPTY", "long-history provider returned no dated rows"
-                )
-            dates = pd.to_datetime(raw["date"], errors="raise").dt.date
-            after_count = int(dates.nunique())
-            latest_date = max(dates)
-            if after_count < self.min_days and latest_date < (
-                as_of_date - timedelta(days=self.freshness_days)
-            ):
-                raise BackfillCoverageError(
-                    "HISTORY_COVERAGE_INCOMPLETE",
-                    f"long history has {after_count} rows and ends at {latest_date}",
-                )
-            report = self.pipeline.import_security(
-                candidate.exchange, candidate.code, raw, factors
-            )
-            manifest = next(
-                item
-                for item in self.pipeline.dataset_manifest_rows()
-                if item["dataset_key"] == dataset_key
-            )
-            if after_count < self.min_days:
-                self.pipeline.record_quality_event(
-                    dataset_key,
-                    "listing-history-short",
-                    "info",
-                    f"listing history has {after_count} days through {latest_date}",
-                    content_hash=manifest["content_hash"],
-                )
-                status = "listing_history_short"
-            else:
-                self.pipeline.record_quality_event(
-                    dataset_key,
-                    "history-backfilled",
-                    "info",
-                    f"history backfilled {candidate.before_count} -> {after_count} via sina-akshare",
-                    content_hash=manifest["content_hash"],
-                )
-                status = "completed"
-            return BackfillResult(
-                status=status,
-                before_count=candidate.before_count,
-                after_count=after_count,
-                snapshot_version=report.snapshot_version,
+            raw, factors = self.fetch_history_bundle(candidate, as_of_date=as_of_date)
+            return self.apply_history_bundle(
+                candidate, raw, factors, as_of_date=as_of_date
             )
         except Exception as exc:
-            if not isinstance(exc, BackfillCoverageError):
-                exc = BackfillCoverageError("HISTORY_BACKFILL_FAILED", str(exc))
+            self.record_failure(candidate, exc)
+            raise exc
+
+    def fetch_history_bundle(
+        self, candidate: BackfillCandidate, *, as_of_date: date
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        return self.source.fetch_long_history_bundle(
+            candidate.exchange,
+            candidate.code,
+            date(1990, 1, 1),
+            as_of_date,
+        )
+
+    def apply_history_bundle(
+        self,
+        candidate: BackfillCandidate,
+        raw: pd.DataFrame,
+        factors: pd.DataFrame,
+        *,
+        as_of_date: date,
+    ) -> BackfillResult:
+        dataset_key = f"stock:{candidate.exchange}:{candidate.code}"
+        if raw.empty or "date" not in raw:
+            raise BackfillCoverageError(
+                "HISTORY_EMPTY", "long-history provider returned no dated rows"
+            )
+        dates = pd.to_datetime(raw["date"], errors="raise").dt.date
+        after_count = int(dates.nunique())
+        latest_date = max(dates)
+        if after_count < self.min_days and latest_date < (
+            as_of_date - timedelta(days=self.freshness_days)
+        ):
+            raise BackfillCoverageError(
+                "HISTORY_COVERAGE_INCOMPLETE",
+                f"long history has {after_count} rows and ends at {latest_date}",
+            )
+        report = self.pipeline.import_security(
+            candidate.exchange, candidate.code, raw, factors
+        )
+        manifest = next(
+            item
+            for item in self.pipeline.dataset_manifest_rows()
+            if item["dataset_key"] == dataset_key
+        )
+        if after_count < self.min_days:
             self.pipeline.record_quality_event(
                 dataset_key,
-                "history-backfill-failed",
-                "error",
-                f"{exc.code}: {exc}",
-                content_hash=candidate.content_hash,
+                "listing-history-short",
+                "info",
+                f"listing history has {after_count} days through {latest_date}",
+                content_hash=manifest["content_hash"],
             )
-            raise exc
+            status = "listing_history_short"
+        else:
+            self.pipeline.record_quality_event(
+                dataset_key,
+                "history-backfilled",
+                "info",
+                f"history backfilled {candidate.before_count} -> {after_count} via sina-akshare",
+                content_hash=manifest["content_hash"],
+            )
+            status = "completed"
+        return BackfillResult(
+            status=status,
+            before_count=candidate.before_count,
+            after_count=after_count,
+            snapshot_version=report.snapshot_version,
+        )
+
+    def record_failure(self, candidate: BackfillCandidate, exc: Exception) -> None:
+        if not isinstance(exc, BackfillCoverageError):
+            exc = BackfillCoverageError("HISTORY_BACKFILL_FAILED", str(exc))
+        dataset_key = f"stock:{candidate.exchange}:{candidate.code}"
+        self.pipeline.record_quality_event(
+            dataset_key,
+            "history-backfill-failed",
+            "error",
+            f"{exc.code}: {exc}",
+            content_hash=candidate.content_hash,
+        )
