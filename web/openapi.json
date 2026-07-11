@@ -922,6 +922,8 @@
           "label_column": {
             "type": "string",
             "enum": [
+              "p5_executable_return",
+              "p5_delayed_executable_return",
               "p10_executable_return",
               "p10_delayed_executable_return",
               "p20_executable_return",
@@ -953,6 +955,8 @@
           "label_column": {
             "type": "string",
             "enum": [
+              "p5_executable_return",
+              "p5_delayed_executable_return",
               "p10_executable_return",
               "p10_delayed_executable_return",
               "p20_executable_return",
@@ -1018,6 +1022,8 @@
           "label_column": {
             "type": "string",
             "enum": [
+              "p5_executable_return",
+              "p5_delayed_executable_return",
               "p10_executable_return",
               "p10_delayed_executable_return",
               "p20_executable_return",
@@ -1124,6 +1130,8 @@
           "label_column": {
             "type": "string",
             "enum": [
+              "p5_executable_return",
+              "p5_delayed_executable_return",
               "p10_executable_return",
               "p10_delayed_executable_return",
               "p20_executable_return",
@@ -1200,6 +1208,8 @@
           "label_column": {
             "type": "string",
             "enum": [
+              "p5_executable_return",
+              "p5_delayed_executable_return",
               "p10_executable_return",
               "p10_delayed_executable_return",
               "p20_executable_return",

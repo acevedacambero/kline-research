@@ -32,7 +32,7 @@ def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.D
     if merged.empty:
         return {**base, "warnings": ["没有可用成熟样本"]}
     fraction = max(0.01, min(1.0, float(top_fraction)))
-    horizon = next((value for value in (10, 20, 60) if f"p{value}_" in label_column), 20)
+    horizon = next((value for value in (5, 10, 20, 60) if f"p{value}_" in label_column), 20)
     if non_overlapping:
         dates = sorted(merged["date"].unique())
         selected_dates = set(dates[::horizon])

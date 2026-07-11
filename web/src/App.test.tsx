@@ -13,6 +13,7 @@ describe('App', () => {
     expect(screen.getByText('P2 特征审计')).toBeInTheDocument()
     expect(screen.getByText('P3 结构评分')).toBeInTheDocument()
     expect(screen.getAllByRole('option', { name: 'P20 可执行顺延卖出' })).toHaveLength(4)
+    expect(screen.getAllByRole('option', { name: 'P5 可执行顺延卖出' })).toHaveLength(4)
   })
 
   it('renders five P2 groups and explains unavailable history', async () => {

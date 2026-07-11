@@ -334,6 +334,15 @@ def test_validation_endpoints_reject_unknown_label_column(tmp_path):
     assert response.status_code == 422
 
 
+def test_validation_endpoints_accept_p5_delayed_label(tmp_path):
+    client = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource()))
+    response = client.post(
+        "/api/validation/portfolio",
+        json={"label_column": "p5_delayed_executable_return"},
+    )
+    assert response.status_code == 200
+
+
 def test_feature_task_unknown_id_is_404(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
     response = TestClient(app).get("/api/features/tasks/missing")

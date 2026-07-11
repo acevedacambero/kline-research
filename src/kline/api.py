@@ -91,6 +91,8 @@ class AuditRequest(BaseModel):
 
 
 LabelColumn = Literal[
+    "p5_executable_return",
+    "p5_delayed_executable_return",
     "p10_executable_return",
     "p10_delayed_executable_return",
     "p20_executable_return",
