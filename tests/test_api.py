@@ -251,6 +251,7 @@ def test_p7_feature_catalog_returns_empty_when_data_missing(tmp_path):
     assert response.status_code == 200
     assert response.json()["featureColumns"] == []
     assert "return_20" in response.json()["missingColumns"]
+    assert response.json()["ready"] is False
 
 
 def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):

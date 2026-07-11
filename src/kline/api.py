@@ -958,12 +958,14 @@ def create_app(
         expected = ["bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"]
         features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet")
         if features.empty:
-            return {"version": "daily-features-v1", "featureColumns": [], "missingColumns": expected, "securityCount": 0, "rowCount": 0}
+            return {"version": "daily-features-v1", "featureColumns": [], "missingColumns": expected, "securityCount": 0, "rowCount": 0, "ready": False}
         ignored = {"exchange", "code", "date"}
         columns = sorted(set(features.columns) - ignored)
-        return {"version": "daily-features-v1", "featureColumns": columns, "missingColumns": sorted(set(expected) - set(columns)),
-                "securityCount": int(features[["exchange", "code"]].drop_duplicates().shape[0]),
-                "rowCount": int(len(features))}
+        missing = sorted(set(expected) - set(columns))
+        security_count = int(features[["exchange", "code"]].drop_duplicates().shape[0])
+        return {"version": "daily-features-v1", "featureColumns": columns, "missingColumns": missing,
+                "securityCount": security_count, "rowCount": int(len(features)),
+                "ready": bool(security_count and not missing)}
 
     @app.post("/api/validation/portfolio")
     def portfolio_validation(request: PortfolioValidationRequest):
