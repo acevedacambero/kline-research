@@ -119,4 +119,5 @@ def test_top_score_portfolio_reports_excess_return():
     result = validate_top_score_portfolio(score_rows(20), label_rows(20), top_fraction=0.2)
     assert result["version"] == "p8-top-score-portfolio-v1"
     assert result["selectedCount"] > 0
+    assert result["tradingDayCount"] == 20
     assert result["excessReturn"] is not None
