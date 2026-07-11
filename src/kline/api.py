@@ -45,7 +45,7 @@ from .p1.batch import BatchLabelBuilder, LabelDatasetStore
 from .p1.market_rules import status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
-from .validation import calibrate_score, validate_single_factor
+from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
 from .model import train_score_baseline
 
 
@@ -109,6 +109,12 @@ class ScanRequest(BaseModel):
 class BaselineModelRequest(BaseModel):
     label_column: str = "p20_executable_return"
     train_until: date | None = None
+
+
+class PortfolioValidationRequest(BaseModel):
+    label_column: str = "p20_executable_return"
+    top_fraction: float = Field(0.1, ge=0.01, le=1)
+    as_of_date: date | None = None
 
 
 def _task_response(job: Job) -> dict:
@@ -946,6 +952,13 @@ def create_app(
         labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet")
         return train_score_baseline(scores, labels, label_column=request.label_column,
                                     train_until=request.train_until)
+
+    @app.post("/api/validation/portfolio")
+    def portfolio_validation(request: PortfolioValidationRequest):
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
+        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet")
+        return validate_top_score_portfolio(scores, labels, label_column=request.label_column,
+                                            top_fraction=request.top_fraction, as_of_date=request.as_of_date)
 
     @app.get("/api/securities")
     def securities(query: str = ""):

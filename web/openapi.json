@@ -558,6 +558,42 @@
         }
       }
     },
+    "/api/validation/portfolio": {
+      "post": {
+        "summary": "Portfolio Validation",
+        "operationId": "portfolio_validation_api_validation_portfolio_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PortfolioValidationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/securities": {
       "get": {
         "summary": "Securities",
@@ -856,6 +892,36 @@
         },
         "type": "object",
         "title": "ImportRequest"
+      },
+      "PortfolioValidationRequest": {
+        "properties": {
+          "label_column": {
+            "type": "string",
+            "title": "Label Column",
+            "default": "p20_executable_return"
+          },
+          "top_fraction": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.01,
+            "title": "Top Fraction",
+            "default": 0.1
+          },
+          "as_of_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Date"
+          }
+        },
+        "type": "object",
+        "title": "PortfolioValidationRequest"
       },
       "ScanRequest": {
         "properties": {

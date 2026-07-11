@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -33,6 +33,7 @@ export function App() {
   const [scanAsOfDate, setScanAsOfDate] = useState('')
   const [baseline, setBaseline] = useState<BaselineModel | null>(null)
   const [baselineTrainUntil, setBaselineTrainUntil] = useState('')
+  const [portfolio, setPortfolio] = useState<PortfolioValidation | null>(null)
   const [message, setMessage] = useState('等待检查')
   const [busy, setBusy] = useState(false)
   const [cachedCount, setCachedCount] = useState<number | null>(null)
@@ -169,6 +170,13 @@ export function App() {
     finally { setBusy(false) }
   }
 
+  async function runPortfolio() {
+    setBusy(true)
+    try { const result = await api.validatePortfolio(); setPortfolio(result); setMessage(`P8 组合验证：${result.selectedCount} 个入选样本`) }
+    catch (error) { setMessage(error instanceof Error ? error.message : '组合验证失败') }
+    finally { setBusy(false) }
+  }
+
   function exportScan() {
     if (!scan?.rows.length) return
     const csv = ['exchange,code,date,score,grade', ...scan.rows.map(row => [row.exchange, row.code, row.date, row.score, row.grade ?? ''].join(','))].join('\n')
@@ -196,7 +204,9 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={runCalibration}>运行 P5 概率校准</button>
       <button className="secondary" disabled={busy} onClick={runScan}>扫描 P6 高分样本</button>
       <button className="secondary" disabled={busy} onClick={runBaseline}>训练 P7 基线模型</button>
+      <button className="secondary" disabled={busy} onClick={runPortfolio}>验证 P8 高分组合</button>
     </section>
+    <section className="panel"><div className="section-title"><div><span className="eyebrow">P8 VALIDATION</span><h2>P8 高分组合验证</h2></div>{portfolio && <span className="message">{portfolio.version}</span>}</div>{portfolio ? <div className="validation-panel"><article><span>组合 / 全样本收益</span><strong>{pct(portfolio.averageReturn)} / {pct(portfolio.benchmarkReturn)}</strong><small>入选 {portfolio.selectedCount} / 样本 {portfolio.sampleCount}</small></article><article><span>超额收益</span><strong>{pct(portfolio.excessReturn)}</strong><small>胜率 {pct(portfolio.winRate)}</small></article><article><span>研究边界</span><strong>无成本</strong><small>{portfolio.warnings.join('；')}</small></article></div> : <p className="muted">按每日 P3 评分最高的 10% 证券构建研究组合，与全样本 P20 收益比较。</p>}</section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P1 AUDITOR</span><h2>P1 标签审计台</h2></div><span className="message">{message}</span></div>
       <form onSubmit={runAudit}>

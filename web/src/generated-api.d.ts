@@ -310,6 +310,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/validation/portfolio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Portfolio Validation */
+        post: operations["portfolio_validation_api_validation_portfolio_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/securities": {
         parameters: {
             query?: never;
@@ -453,6 +470,21 @@ export interface components {
              * @default false
              */
             refresh: boolean;
+        };
+        /** PortfolioValidationRequest */
+        PortfolioValidationRequest: {
+            /**
+             * Label Column
+             * @default p20_executable_return
+             */
+            label_column: string;
+            /**
+             * Top Fraction
+             * @default 0.1
+             */
+            top_fraction: number;
+            /** As Of Date */
+            as_of_date?: string | null;
         };
         /** ScanRequest */
         ScanRequest: {
@@ -1009,6 +1041,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["BaselineModelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    portfolio_validation_api_validation_portfolio_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PortfolioValidationRequest"];
             };
         };
         responses: {

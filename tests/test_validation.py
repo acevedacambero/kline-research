@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from kline.validation import calibrate_score, validate_single_factor
+from kline.validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
 from kline.model import train_score_baseline
 
 
@@ -113,3 +113,10 @@ def test_score_baseline_trains_time_split_model():
     assert result["trainCount"] == 28
     assert result["testCount"] == 12
     assert result["coefficient"] > 0
+
+
+def test_top_score_portfolio_reports_excess_return():
+    result = validate_top_score_portfolio(score_rows(20), label_rows(20), top_fraction=0.2)
+    assert result["version"] == "p8-top-score-portfolio-v1"
+    assert result["selectedCount"] > 0
+    assert result["excessReturn"] is not None
