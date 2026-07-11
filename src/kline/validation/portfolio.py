@@ -32,4 +32,7 @@ def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.D
     selected = merged.groupby("date", group_keys=False).apply(lambda frame: frame.nlargest(max(1, int(len(frame) * fraction)), "score"), include_groups=False)
     selected_returns = selected[label_column]
     benchmark = merged[label_column]
-    return {**base, "sampleCount": int(len(merged)), "selectedCount": int(len(selected)), "averageReturn": float(selected_returns.mean()), "benchmarkReturn": float(benchmark.mean()), "excessReturn": float(selected_returns.mean() - benchmark.mean()), "winRate": float((selected_returns > 0).mean()), "warnings": ["未计交易成本、滑点和卖出顺延"]}
+    warnings = ["未计交易成本、滑点和卖出顺延"]
+    if len(selected) < 20:
+        warnings.append("入选样本少于 20，仅供探索")
+    return {**base, "sampleCount": int(len(merged)), "selectedCount": int(len(selected)), "averageReturn": float(selected_returns.mean()), "benchmarkReturn": float(benchmark.mean()), "excessReturn": float(selected_returns.mean() - benchmark.mean()), "winRate": float((selected_returns > 0).mean()), "warnings": warnings}
