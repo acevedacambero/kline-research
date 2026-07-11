@@ -644,12 +644,25 @@ def create_app(
             rows += file_rows
             columns = set(parquet.schema.names)
             if "label_definition_version" in columns and file_rows:
-                versions = parquet.read(columns=["label_definition_version"]).to_pandas()[
-                    "label_definition_version"
-                ].fillna("unknown").astype(str)
-                for version, count in versions.value_counts().items():
-                    version_counts[version] = version_counts.get(version, 0) + int(count)
-                if set(versions.unique()) == {current_version}:
+                column_index = parquet.schema.names.index("label_definition_version")
+                file_versions: dict[str, int] = {}
+                metadata_complete = True
+                for index in range(parquet.metadata.num_row_groups):
+                    row_group = parquet.metadata.row_group(index)
+                    statistics = row_group.column(column_index).statistics
+                    if not statistics or not statistics.has_min_max or statistics.min != statistics.max:
+                        metadata_complete = False
+                        break
+                    version = str(statistics.min)
+                    file_versions[version] = file_versions.get(version, 0) + row_group.num_rows
+                if not metadata_complete:
+                    versions = parquet.read(columns=["label_definition_version"]).to_pandas()[
+                        "label_definition_version"
+                    ].fillna("unknown").astype(str)
+                    file_versions = {str(key): int(value) for key, value in versions.value_counts().items()}
+                for version, count in file_versions.items():
+                    version_counts[version] = version_counts.get(version, 0) + count
+                if set(file_versions) == {current_version}:
                     compatible_files += 1
             else:
                 version_counts["legacy-or-unknown"] = (
