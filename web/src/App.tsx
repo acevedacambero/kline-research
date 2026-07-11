@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -35,6 +35,7 @@ export function App() {
   const [baselineTrainUntil, setBaselineTrainUntil] = useState('')
   const [baselineLabel, setBaselineLabel] = useState('p20_executable_return')
   const [featureCatalog, setFeatureCatalog] = useState<FeatureCatalog | null>(null)
+  const [multifeature, setMultifeature] = useState<MultiFeatureModel | null>(null)
   const [portfolio, setPortfolio] = useState<PortfolioValidation | null>(null)
   const [portfolioFraction, setPortfolioFraction] = useState(10)
   const [portfolioLabel, setPortfolioLabel] = useState('p20_executable_return')
@@ -182,6 +183,13 @@ export function App() {
     finally { setBusy(false) }
   }
 
+  async function runMultifeature() {
+    setBusy(true)
+    try { const result = await api.trainMultifeature(baselineTrainUntil, baselineLabel); setMultifeature(result); setMessage(`P7 多特征模型：${result.status}`) }
+    catch (error) { setMessage(error instanceof Error ? error.message : '多特征训练失败') }
+    finally { setBusy(false) }
+  }
+
   function exportBaseline() {
     if (!baseline) return
     const csv = ['version,labelColumn,status,trainUntil,trainCount,testCount,positiveRate,testPositiveRate,accuracy,auc,coefficient,warnings', [baseline.version, baseline.labelColumn, baseline.status, baseline.trainUntil ?? '', baseline.trainCount, baseline.testCount, baseline.positiveRate ?? '', baseline.testPositiveRate ?? '', baseline.accuracy ?? '', baseline.auc ?? '', baseline.coefficient ?? '', `"${baseline.warnings.join(';')}"`].join(',')].join('\n')
@@ -230,8 +238,10 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={runScan}>扫描 P6 高分样本</button>
       <button className="secondary" disabled={busy} onClick={runBaseline}>训练 P7 基线模型</button>
       <button className="secondary" disabled={busy} onClick={checkFeatureCatalog}>检查 P2 特征覆盖</button>
+      <button className="secondary" disabled={busy} onClick={runMultifeature}>训练 P7 多特征模型</button>
       <button className="secondary" disabled={busy} onClick={runPortfolio}>验证 P8 高分组合</button>
     </section>
+    <section className="panel"><div className="section-title"><div><span className="eyebrow">P7 MULTI-FEATURE</span><h2>P7 多特征基线</h2></div>{multifeature && <span className="message">{multifeature.version}</span>}</div>{multifeature ? <div className="validation-panel"><article><span>训练 / 测试样本</span><strong>{multifeature.trainCount} / {multifeature.testCount}</strong><small>状态 {multifeature.status} · AUC {multifeature.auc == null ? '—' : multifeature.auc.toFixed(3)}</small></article><article><span>测试准确率</span><strong>{multifeature.accuracy == null ? '—' : `${(multifeature.accuracy * 100).toFixed(1)}%`}</strong><small>{multifeature.warnings.join('；') || '可用于基线比较'}</small></article><article><span>特征权重</span><strong>{Object.keys(multifeature.weights).length}</strong><small>{Object.entries(multifeature.weights).map(([key, value]) => `${key}:${value.toFixed(2)}`).join(' · ') || '暂无权重'}</small></article></div> : <p className="muted">通过 P7 特征 ready gate 后，训练 P2/P3 多特征基线模型。</p>}</section>
     <section className="panel"><div className="section-title"><div><span className="eyebrow">P8 VALIDATION</span><h2>P8 高分组合验证</h2></div>{portfolio && <span className="message">{portfolio.version}</span>}</div><div className="calibration-controls"><label>选取比例<input type="number" min="1" max="50" value={portfolioFraction} onChange={e => setPortfolioFraction(Math.max(1, Math.min(50, Number(e.target.value) || 10)))} />%</label><label>结果口径<input list="portfolio-horizons" value={portfolioLabel} onChange={e => setPortfolioLabel(e.target.value)} /><datalist id="portfolio-horizons"><option value="p10_executable_return" /><option value="p20_executable_return" /><option value="p60_executable_return" /></datalist></label><label>截至日期<input type="date" value={portfolioAsOfDate} onChange={e => setPortfolioAsOfDate(e.target.value)} /></label>{portfolio ? <button className="secondary" onClick={exportPortfolio}>导出 CSV</button> : null}</div>{portfolio ? <div className="validation-panel"><article><span>组合 / 全样本收益</span><strong>{pct(portfolio.averageReturn)} / {pct(portfolio.benchmarkReturn)}</strong><small>入选 {portfolio.selectedCount} / 样本 {portfolio.sampleCount} · {portfolio.tradingDayCount} 个交易日 · 前 {(portfolio.topFraction * 100).toFixed(0)}%</small></article><article><span>超额收益</span><strong>{pct(portfolio.excessReturn)}</strong><small>胜率 {pct(portfolio.winRate)} · 最大回撤 {pct(portfolio.maxDrawdown)}</small></article><article><span>研究边界</span><strong>无成本</strong><small>{portfolio.warnings.join('；')}</small></article></div> : <p className="muted">按每日 P3 评分最高的指定比例构建研究组合，与所选持有期的全样本收益比较。</p>}</section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P1 AUDITOR</span><h2>P1 标签审计台</h2></div><span className="message">{message}</span></div>
