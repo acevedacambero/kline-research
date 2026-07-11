@@ -162,3 +162,12 @@ def test_portfolio_excludes_labels_immature_at_as_of_date():
         score_rows(10), label_rows(10), as_of_date=date(2024, 1, 15)
     )
     assert result["sampleCount"] == 0
+
+
+def test_non_overlapping_portfolio_computes_drawdown():
+    result = validate_top_score_portfolio(
+        score_rows(40), label_rows(40), non_overlapping=True
+    )
+    assert result["nonOverlapping"] is True
+    assert result["tradingDayCount"] == 2
+    assert result["maxDrawdown"] is not None

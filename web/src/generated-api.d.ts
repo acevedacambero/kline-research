@@ -519,6 +519,11 @@ export interface components {
             top_fraction: number;
             /** As Of Date */
             as_of_date?: string | null;
+            /**
+             * Non Overlapping
+             * @default false
+             */
+            non_overlapping: boolean;
         };
         /** ScanRequest */
         ScanRequest: {

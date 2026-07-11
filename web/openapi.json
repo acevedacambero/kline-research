@@ -970,6 +970,11 @@
               }
             ],
             "title": "As Of Date"
+          },
+          "non_overlapping": {
+            "type": "boolean",
+            "title": "Non Overlapping",
+            "default": false
           }
         },
         "type": "object",
