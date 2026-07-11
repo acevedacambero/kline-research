@@ -1199,9 +1199,26 @@ def create_app(
                 detail={"code": "SIGNAL_DATE_NOT_FOUND", "message": "信号日不是有效交易日"},
             )
         signal_index = indices[request.signal_date]
+        try:
+            name = next(
+                (
+                    item["name"]
+                    for item in securities_list()
+                    if item["exchange"] == request.exchange
+                    and item["code"] == request.code
+                ),
+                "",
+            )
+        except Exception:
+            name = ""
+        security_status = status_from_name(name)
         eligibility = sample_eligibility(records, signal_index, rights_status="ok")
         entry = resolve_executable_entry(
-            records, signal_index, code=request.code, exchange=request.exchange
+            records,
+            signal_index,
+            code=request.code,
+            exchange=request.exchange,
+            st_status=security_status.is_st,
         )
         output = {
             "eligibility": asdict(eligibility), "entry": asdict(entry), "labels": {},
@@ -1211,6 +1228,7 @@ def create_app(
                 request.exchange, request.code
             ),
             "factorVersion": records[0].get("factor_version"),
+            "securityStatus": asdict(security_status),
         }
         if entry.executable and entry.entry_index is not None:
             benchmark = benchmark_bars(request.exchange)
@@ -1226,6 +1244,7 @@ def create_app(
                     entry.entry_index + horizon,
                     code=request.code,
                     exchange=request.exchange,
+                    st_status=security_status.is_st,
                 )
                 for horizon in labels
             }

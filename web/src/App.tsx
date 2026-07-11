@@ -95,7 +95,11 @@ export function App() {
         const task = await api.labelTask(result.taskId)
         setMessage(`P1 标签：${task.done}/${task.total}，已生成 ${task.rows} 条`)
         if (task.status === 'queued' || task.status === 'running') window.setTimeout(poll, 1000)
-        else { setBusy(false); if (task.errors.length) setMessage(`标签完成，但有 ${task.errors.length} 个错误`) }
+        else {
+          setBusy(false)
+          if (task.errors.length) setMessage(`标签完成，但有 ${task.errors.length} 个错误`)
+          api.labelStatus().then(setLabelStatus).catch(() => undefined)
+        }
       }
       await poll()
     } catch (error) { setMessage(error instanceof Error ? error.message : '标签任务启动失败'); setBusy(false) }
@@ -277,6 +281,7 @@ export function App() {
       {bars.length > 0 && <KlineChart bars={bars} />}
       {audit && <div className="audit-grid">
         <article><span>样本资格</span><strong>{audit.eligibility.status}</strong><small>{audit.eligibility.reasons.join(' · ') || '检查通过'}</small></article>
+        <article><span>交易状态</span><strong>{audit.securityStatus ? (audit.securityStatus.is_st ? 'ST' : '普通') : '—'}</strong><small>{audit.securityStatus?.is_approx ? `近似：${audit.securityStatus.reason}` : '正式规则'}</small></article>
         <article><span>可执行入口</span><strong>{audit.entry.status}</strong><small>{audit.entry.entry_date ?? '无入口'} {audit.entry.entry_price ? `@ ${audit.entry.entry_price}` : ''}</small></article>
         <article><span>P20 计划 / 顺延卖出</span><strong>{pct(audit.labels['20']?.executable_return)} / {pct(audit.labels['20']?.delayed_executable_return)}</strong><small>{audit.exits?.['20'] ? `${audit.exits['20'].status} · ${audit.exits['20'].exit_date ?? '无可执行卖出日'} · 顺延 ${audit.exits['20'].exit_delay ?? '—'} 日` : '等待卖出审计'}</small></article>
         <article><span>P20 最大回撤</span><strong>{pct(audit.drawdown?.max_drawdown)}</strong><small>{audit.drawdown?.hit_risk ? '触发 8% 风险线' : '未触发风险线'}</small></article>
