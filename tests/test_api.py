@@ -42,6 +42,8 @@ def test_health_exposes_all_version_keys(tmp_path):
     assert body["dataSource"] == "AkShare"
     assert body["versions"]["labelDefinitionVersion"] == "daily-v1"
     assert body["versions"]["limitRuleVersion"] == "cn-equity-v1"
+    assert body["versions"]["modelDefinitionVersion"] == "p7-score-logistic-v1"
+    assert body["versions"]["portfolioValidationVersion"] == "p8-top-score-portfolio-v1"
 
 
 def test_validate_akshare_reports_available_securities(tmp_path):
