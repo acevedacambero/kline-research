@@ -12,7 +12,7 @@ describe('App', () => {
     expect(screen.getByLabelText('证券代码')).toBeInTheDocument()
     expect(screen.getByText('P2 特征审计')).toBeInTheDocument()
     expect(screen.getByText('P3 结构评分')).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'P20 可执行顺延卖出' })).toHaveValue('p20_delayed_executable_return')
+    expect(screen.getAllByRole('option', { name: 'P20 可执行顺延卖出' })).toHaveLength(3)
   })
 
   it('renders five P2 groups and explains unavailable history', async () => {
