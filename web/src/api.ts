@@ -117,5 +117,5 @@ export const api = {
   trainMultifeature: (trainUntil?: string, labelColumn = 'p20_executable_return') => request<MultiFeatureModel>('/api/model/p7/multifeature', { method: 'POST', body: JSON.stringify({ label_column: labelColumn, train_until: trainUntil || undefined }) }),
   walkForward: (labelColumn = 'p20_executable_return', folds = 3) => request<WalkForwardResult>('/api/model/p7/walk-forward', { method: 'POST', body: JSON.stringify({ label_column: labelColumn, folds }) }),
   featureCatalog: () => request<FeatureCatalog>('/api/model/p7/features'),
-  validatePortfolio: (topFraction = 0.1, labelColumn = 'p20_executable_return', asOfDate?: string) => request<PortfolioValidation>('/api/validation/portfolio', { method: 'POST', body: JSON.stringify({ label_column: labelColumn, top_fraction: topFraction, as_of_date: asOfDate || undefined, non_overlapping: true, transaction_cost_bps: 10, slippage_bps: 5 }) }),
+  validatePortfolio: (topFraction = 0.1, labelColumn = 'p20_executable_return', asOfDate?: string, transactionCostBps = 10, slippageBps = 5) => request<PortfolioValidation>('/api/validation/portfolio', { method: 'POST', body: JSON.stringify({ label_column: labelColumn, top_fraction: topFraction, as_of_date: asOfDate || undefined, non_overlapping: true, transaction_cost_bps: transactionCostBps, slippage_bps: slippageBps }) }),
 }
