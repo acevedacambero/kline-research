@@ -10,7 +10,7 @@ PORTFOLIO_VALIDATION_VERSION = "p8-top-score-portfolio-v1"
 
 
 def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.DataFrame | list[dict], *, label_column: str = "p20_executable_return", top_fraction: float = 0.1, as_of_date: date | None = None) -> dict[str, Any]:
-    base = {"version": PORTFOLIO_VALIDATION_VERSION, "labelColumn": label_column, "topFraction": top_fraction, "sampleCount": 0, "selectedCount": 0, "averageReturn": None, "benchmarkReturn": None, "excessReturn": None, "winRate": None, "warnings": []}
+    base = {"version": PORTFOLIO_VALIDATION_VERSION, "labelColumn": label_column, "topFraction": top_fraction, "sampleCount": 0, "tradingDayCount": 0, "selectedCount": 0, "averageReturn": None, "benchmarkReturn": None, "excessReturn": None, "winRate": None, "warnings": []}
     sf, lf = pd.DataFrame(scores).copy(), pd.DataFrame(labels).copy()
     required = {"exchange", "code", "date", "score"} | {"signal_date", label_column}
     if not required.issubset(set(sf.columns) | set(lf.columns)) or not {"exchange", "code", "date", "score"}.issubset(sf.columns) or not {"exchange", "code", "signal_date", label_column}.issubset(lf.columns):
@@ -35,4 +35,4 @@ def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.D
     warnings = ["未计交易成本、滑点和卖出顺延"]
     if len(selected) < 20:
         warnings.append("入选样本少于 20，仅供探索")
-    return {**base, "sampleCount": int(len(merged)), "selectedCount": int(len(selected)), "averageReturn": float(selected_returns.mean()), "benchmarkReturn": float(benchmark.mean()), "excessReturn": float(selected_returns.mean() - benchmark.mean()), "winRate": float((selected_returns > 0).mean()), "warnings": warnings}
+    return {**base, "sampleCount": int(len(merged)), "tradingDayCount": int(merged["date"].nunique()), "selectedCount": int(len(selected)), "averageReturn": float(selected_returns.mean()), "benchmarkReturn": float(benchmark.mean()), "excessReturn": float(selected_returns.mean() - benchmark.mean()), "winRate": float((selected_returns > 0).mean()), "warnings": warnings}
