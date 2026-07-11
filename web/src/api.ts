@@ -8,7 +8,8 @@ export type Bar = {
 export type Audit = {
   eligibility: { eligible: boolean; status: string; reasons: string[] }
   entry: { status: string; entry_date?: string; entry_price?: number; entry_delay?: number }
-  labels: Record<string, { status: string; theoretical_return?: number; executable_return?: number; excess_executable_return?: number }>
+  labels: Record<string, { status: string; theoretical_return?: number; executable_return?: number; delayed_executable_return?: number | null; excess_executable_return?: number }>
+  exits: Record<string, { executable: boolean; status: string; exit_date?: string | null; exit_price?: number | null; exit_delay?: number | null; reason?: string }>
   path?: { success: boolean; reason: string }
   drawdown?: { max_drawdown: number; hit_risk: boolean }
   maturityDate?: string

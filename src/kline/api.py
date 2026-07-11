@@ -42,6 +42,7 @@ from .p1 import (
     compute_label_maturity_date,
     compute_path_label,
     resolve_executable_entry,
+    resolve_executable_exit,
     sample_eligibility,
 )
 from .p1.batch import BatchLabelBuilder, LabelDatasetStore
@@ -1204,6 +1205,7 @@ def create_app(
         )
         output = {
             "eligibility": asdict(eligibility), "entry": asdict(entry), "labels": {},
+            "exits": {},
             "path": None, "drawdown": None, "dataSource": "AkShare",
             "dataSnapshotVersion": pipeline.latest_snapshot_version(
                 request.exchange, request.code
@@ -1212,12 +1214,35 @@ def create_app(
         }
         if entry.executable and entry.entry_index is not None:
             benchmark = benchmark_bars(request.exchange)
-            output["labels"] = {
-                str(key): asdict(value)
-                for key, value in compute_forward_labels(
-                    records, benchmark, signal_index, entry.entry_index
-                ).items()
+            labels = compute_forward_labels(
+                records, benchmark, signal_index, entry.entry_index
+            )
+            entry_price = float(records[entry.entry_index].get(
+                "open_total_return", records[entry.entry_index]["open_qfq"]
+            ))
+            exits = {
+                horizon: resolve_executable_exit(
+                    records,
+                    entry.entry_index + horizon,
+                    code=request.code,
+                    exchange=request.exchange,
+                )
+                for horizon in labels
             }
+            output["exits"] = {
+                str(horizon): asdict(exit_result)
+                for horizon, exit_result in exits.items()
+            }
+            output["labels"] = {}
+            for horizon, label in labels.items():
+                label_record = asdict(label)
+                exit_result = exits[horizon]
+                label_record["delayed_executable_return"] = (
+                    exit_result.exit_price / entry_price - 1
+                    if exit_result.executable and exit_result.exit_price is not None
+                    else None
+                )
+                output["labels"][str(horizon)] = label_record
             path_start = records[entry.entry_index].get(
                 "open_total_return", records[entry.entry_index]["open_qfq"]
             )
@@ -1227,7 +1252,7 @@ def create_app(
             output["drawdown"] = asdict(
                 compute_drawdown_label(records, entry.entry_index, path_start, 20, 0.08)
             )
-            output["maturityDate"] = compute_label_maturity_date(
+            output["maturityDate"] = exits[20].exit_date or compute_label_maturity_date(
                 [row["date"] for row in records], entry.entry_index, 20
             )
         return output

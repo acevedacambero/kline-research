@@ -278,7 +278,7 @@ export function App() {
       {audit && <div className="audit-grid">
         <article><span>样本资格</span><strong>{audit.eligibility.status}</strong><small>{audit.eligibility.reasons.join(' · ') || '检查通过'}</small></article>
         <article><span>可执行入口</span><strong>{audit.entry.status}</strong><small>{audit.entry.entry_date ?? '无入口'} {audit.entry.entry_price ? `@ ${audit.entry.entry_price}` : ''}</small></article>
-        <article><span>P20 可执行收益</span><strong>{pct(audit.labels['20']?.executable_return)}</strong><small>超额 {pct(audit.labels['20']?.excess_executable_return)}</small></article>
+        <article><span>P20 计划 / 顺延卖出</span><strong>{pct(audit.labels['20']?.executable_return)} / {pct(audit.labels['20']?.delayed_executable_return)}</strong><small>{audit.exits?.['20'] ? `${audit.exits['20'].status} · ${audit.exits['20'].exit_date ?? '无可执行卖出日'} · 顺延 ${audit.exits['20'].exit_delay ?? '—'} 日` : '等待卖出审计'}</small></article>
         <article><span>P20 最大回撤</span><strong>{pct(audit.drawdown?.max_drawdown)}</strong><small>{audit.drawdown?.hit_risk ? '触发 8% 风险线' : '未触发风险线'}</small></article>
         <article><span>路径标签</span><strong>{audit.path?.success ? '成功' : '失败'}</strong><small>{audit.path?.reason ?? '—'}</small></article>
         <article><span>标签成熟日</span><strong>{audit.maturityDate ?? '—'}</strong><small>只允许成熟标签进入校准池</small></article>
