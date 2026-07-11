@@ -121,4 +121,9 @@ def test_top_score_portfolio_reports_excess_return():
     assert result["selectedCount"] > 0
     assert result["tradingDayCount"] == 20
     assert result["maxDrawdown"] is not None
+
+
+def test_top_score_portfolio_warns_on_small_selection():
+    result = validate_top_score_portfolio(score_rows(5), label_rows(5), top_fraction=0.2)
+    assert any("少于 20" in warning for warning in result["warnings"])
     assert result["excessReturn"] is not None
