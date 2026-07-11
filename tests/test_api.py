@@ -40,7 +40,7 @@ def test_health_exposes_all_version_keys(tmp_path):
     body = response.json()
     assert body["status"] == "ok"
     assert body["dataSource"] == "AkShare"
-    assert body["versions"]["labelDefinitionVersion"] == "daily-v1"
+    assert body["versions"]["labelDefinitionVersion"] == "daily-v2-exit-delay"
     assert body["versions"]["limitRuleVersion"] == "cn-equity-v1"
     assert body["versions"]["modelDefinitionVersion"] == "p7-score-logistic-v1"
     assert body["versions"]["multiFeatureModelDefinitionVersion"] == "p7-multifeature-logistic-v1"

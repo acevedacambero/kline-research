@@ -34,6 +34,17 @@ class EntryResult:
 
 
 @dataclass(frozen=True)
+class ExitResult:
+    executable: bool
+    status: str
+    exit_index: int | None = None
+    exit_date: date | str | None = None
+    exit_price: float | None = None
+    exit_delay: int | None = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class ForwardLabel:
     horizon: int
     theoretical_return: float | None
@@ -160,6 +171,44 @@ def resolve_executable_entry(
                 "opening gain below executable threshold",
             )
     return EntryResult(False, "abandoned", entry_reason="entry blocked through T+3")
+
+
+def resolve_executable_exit(
+    stock_series: list[dict[str, Any]],
+    target_index: int,
+    *,
+    code: str,
+    exchange: str,
+    st_status: bool = False,
+    max_delay: int = 3,
+) -> ExitResult:
+    for delay in range(max_delay + 1):
+        index = target_index + delay
+        if index >= len(stock_series):
+            return ExitResult(False, "insufficient-forward-data", reason="exit window incomplete")
+        current = stock_series[index]
+        previous = stock_series[index - 1] if index else current
+        if float(current.get("volume", 0) or 0) <= 0:
+            continue
+        suffix = "" if "high" in current and "close" in previous else "_qfq"
+        previous_close = float(previous[f"close{suffix}"])
+        high = float(current[f"high{suffix}"])
+        low = float(current[f"low{suffix}"])
+        rule = limit_rule(code, current["date"], exchange, st_status)
+        locked_limit_down = (
+            rule.executable_threshold is not None
+            and high / previous_close - 1 <= -float(rule.executable_threshold)
+            and abs(high - low) <= max(0.001, abs(high) * 1e-6)
+        )
+        if locked_limit_down:
+            continue
+        price_suffix = "_total_return" if "close_total_return" in current else "_qfq"
+        return ExitResult(
+            True, "executable" if delay == 0 else "delayed", index,
+            current["date"], float(current[f"close{price_suffix}"]), delay,
+            "target close executable" if delay == 0 else "exit delayed",
+        )
+    return ExitResult(False, "abandoned", exit_delay=max_delay, reason="exit blocked through delay window")
 
 
 def _date_index(series: list[dict[str, Any]]) -> dict[Any, int]:

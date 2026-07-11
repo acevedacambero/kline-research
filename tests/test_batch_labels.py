@@ -30,8 +30,12 @@ def test_batch_builder_emits_versioned_mature_multi_horizon_labels():
     assert first["signal_index"] == 250
     assert first["snapshot_version"] == "snapshot-test"
     assert first["factor_version"] == "factor-test"
+    assert first["label_definition_version"] == "daily-v2-exit-delay"
     assert first["p20_status"] == "ok"
     assert "p60_executable_return" in first
+    assert first["p20_exit_status"] == "executable"
+    assert first["p20_exit_delay"] == 0
+    assert first["p20_delayed_executable_return"] == first["p20_executable_return"]
     assert first["label_maturity_date"] > first["signal_date"]
 
 

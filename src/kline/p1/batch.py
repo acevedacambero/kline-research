@@ -13,6 +13,7 @@ from .core import (
     compute_label_maturity_date,
     compute_path_label,
     resolve_executable_entry,
+    resolve_executable_exit,
     sample_eligibility,
 )
 from .market_rules import is_no_limit_session
@@ -112,6 +113,13 @@ class BatchLabelBuilder:
                 bars, benchmark, signal_index, entry.entry_index, self.horizons,
                 benchmark_date_index,
             )
+            exits = {
+                horizon: resolve_executable_exit(
+                    bars, entry.entry_index + horizon, code=code,
+                    exchange=exchange, st_status=st_status,
+                )
+                for horizon in self.horizons
+            }
             maturity_dates = {
                 horizon: compute_label_maturity_date(
                     trading_dates, entry.entry_index, horizon
@@ -140,10 +148,13 @@ class BatchLabelBuilder:
                 "path_reason_p20": path.reason,
                 "max_drawdown_p20": drawdown.max_drawdown,
                 "drawdown_risk_p20": drawdown.hit_risk,
-                "label_maturity_date": maturity_dates[max_horizon],
+                "label_maturity_date": max(
+                    exit_result.exit_date or maturity_dates[horizon]
+                    for horizon, exit_result in exits.items()
+                ),
                 "snapshot_version": snapshot_version,
                 "factor_version": bars[0].get("factor_version", "unknown"),
-                "label_definition_version": "daily-v1",
+                "label_definition_version": "daily-v2-exit-delay",
                 "limit_rule_version": "cn-equity-v1",
                 "sample_step": self.sample_step,
                 "st_status_approx": st_status,
@@ -154,5 +165,18 @@ class BatchLabelBuilder:
                     if key != "horizon":
                         row[f"{prefix}_{key}"] = value
                 row[f"{prefix}_maturity_date"] = maturity_dates[horizon]
+                exit_result = exits[horizon]
+                row[f"{prefix}_exit_status"] = exit_result.status
+                row[f"{prefix}_exit_date"] = exit_result.exit_date
+                row[f"{prefix}_exit_delay"] = exit_result.exit_delay
+                row[f"{prefix}_delayed_executable_return"] = (
+                    exit_result.exit_price
+                    / float(bars[entry.entry_index].get(
+                        "open_total_return", bars[entry.entry_index]["open_qfq"]
+                    ))
+                    - 1
+                    if exit_result.executable and exit_result.exit_price is not None
+                    else None
+                )
             rows.append(row)
         return rows

@@ -9,8 +9,30 @@ from kline.p1 import (
     compute_path_label,
     limit_rule,
     resolve_executable_entry,
+    resolve_executable_exit,
     sample_eligibility,
 )
+
+
+def test_executable_exit_delays_locked_limit_down():
+    series = bars()
+    target = 260
+    series[target]["high_qfq"] = 9.0
+    series[target]["low_qfq"] = 9.0
+    series[target]["close_qfq"] = 9.0
+    result = resolve_executable_exit(series, target, code="600000", exchange="sh")
+    assert result.status == "delayed"
+    assert result.exit_index == target + 1
+    assert result.exit_delay == 1
+
+
+def test_executable_exit_skips_suspension():
+    series = bars()
+    target = 260
+    series[target]["volume"] = 0
+    result = resolve_executable_exit(series, target, code="600000", exchange="sh")
+    assert result.status == "delayed"
+    assert result.exit_index == target + 1
 
 
 def bars(count=280, start=10.0):

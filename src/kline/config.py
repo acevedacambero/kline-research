@@ -36,7 +36,7 @@ VERSIONS = {
     "modelDefinitionVersion": "p7-score-logistic-v1",
     "multiFeatureModelDefinitionVersion": "p7-multifeature-logistic-v1",
     "portfolioValidationVersion": "p8-top-score-portfolio-v1",
-    "labelDefinitionVersion": "daily-v1",
+    "labelDefinitionVersion": "daily-v2-exit-delay",
     "limitRuleVersion": "cn-equity-v1",
     "gapRuleVersion": "calendar-10d-v1",
     "labelMaturityRuleVersion": "trading-days-v1",
