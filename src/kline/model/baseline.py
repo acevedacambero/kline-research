@@ -62,8 +62,9 @@ def train_score_baseline(
     predicted = pred >= 0.5
     accuracy = float((predicted == yt).mean())
     rank = None if len(set(yt)) < 2 else pd.Series(pred).rank().corr(pd.Series(yt).rank())
-    return {**base, "status": "trained", "positiveRate": float(y.mean()),
+    warnings = [] if coefficient > 0 else ["分数系数非正，评分方向未获得样本外支持"]
+    return {**base, "status": "trained" if coefficient > 0 else "review", "positiveRate": float(y.mean()),
             "testPositiveRate": float(yt.mean()), "accuracy": accuracy,
             "auc": None if rank is None or pd.isna(rank) else float((rank + 1) / 2),
             "intercept": float(intercept), "coefficient": float(coefficient),
-            "trainUntil": train_until, "warnings": []}
+            "trainUntil": train_until, "warnings": warnings}
