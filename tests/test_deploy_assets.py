@@ -59,3 +59,4 @@ def test_release_install_uses_shared_runtime_healthcheck_and_rollback():
     assert "previous" in script
     assert "prune-releases.sh" in script
     assert "ln -sfn" in script
+    assert "old_previous" in script
