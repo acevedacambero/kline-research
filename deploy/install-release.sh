@@ -30,7 +30,7 @@ printf '%s\n' "${release}/src" > "${runtime}/lib/python3.12/site-packages/_edita
 ln -sfn "${old}" "${root}/previous"
 ln -sfn "${release}" "${root}/current"
 systemctl --user restart kline.service
-if ! "${release}/deploy/healthcheck.sh"; then
+if ! bash "${release}/deploy/healthcheck.sh"; then
   ln -sfn "${old}" "${root}/current"
   printf '%s\n' "${old}/src" > "${runtime}/lib/python3.12/site-packages/_editable_impl_kline_research.pth"
   systemctl --user restart kline.service
