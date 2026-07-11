@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -34,6 +34,7 @@ export function App() {
   const [baseline, setBaseline] = useState<BaselineModel | null>(null)
   const [baselineTrainUntil, setBaselineTrainUntil] = useState('')
   const [baselineLabel, setBaselineLabel] = useState('p20_executable_return')
+  const [featureCatalog, setFeatureCatalog] = useState<FeatureCatalog | null>(null)
   const [portfolio, setPortfolio] = useState<PortfolioValidation | null>(null)
   const [portfolioFraction, setPortfolioFraction] = useState(10)
   const [portfolioLabel, setPortfolioLabel] = useState('p20_executable_return')
@@ -174,6 +175,13 @@ export function App() {
     finally { setBusy(false) }
   }
 
+  async function checkFeatureCatalog() {
+    setBusy(true)
+    try { const result = await api.featureCatalog(); setFeatureCatalog(result); setMessage(`P7 特征门槛：${result.securityCount} 只证券`) }
+    catch (error) { setMessage(error instanceof Error ? error.message : '特征检查失败') }
+    finally { setBusy(false) }
+  }
+
   function exportBaseline() {
     if (!baseline) return
     const csv = ['version,labelColumn,status,trainUntil,trainCount,testCount,positiveRate,testPositiveRate,accuracy,auc,coefficient,warnings', [baseline.version, baseline.labelColumn, baseline.status, baseline.trainUntil ?? '', baseline.trainCount, baseline.testCount, baseline.positiveRate ?? '', baseline.testPositiveRate ?? '', baseline.accuracy ?? '', baseline.auc ?? '', baseline.coefficient ?? '', `"${baseline.warnings.join(';')}"`].join(',')].join('\n')
@@ -221,6 +229,7 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={runCalibration}>运行 P5 概率校准</button>
       <button className="secondary" disabled={busy} onClick={runScan}>扫描 P6 高分样本</button>
       <button className="secondary" disabled={busy} onClick={runBaseline}>训练 P7 基线模型</button>
+      <button className="secondary" disabled={busy} onClick={checkFeatureCatalog}>检查 P2 特征覆盖</button>
       <button className="secondary" disabled={busy} onClick={runPortfolio}>验证 P8 高分组合</button>
     </section>
     <section className="panel"><div className="section-title"><div><span className="eyebrow">P8 VALIDATION</span><h2>P8 高分组合验证</h2></div>{portfolio && <span className="message">{portfolio.version}</span>}</div><div className="calibration-controls"><label>选取比例<input type="number" min="1" max="50" value={portfolioFraction} onChange={e => setPortfolioFraction(Math.max(1, Math.min(50, Number(e.target.value) || 10)))} />%</label><label>结果口径<input list="portfolio-horizons" value={portfolioLabel} onChange={e => setPortfolioLabel(e.target.value)} /><datalist id="portfolio-horizons"><option value="p10_executable_return" /><option value="p20_executable_return" /><option value="p60_executable_return" /></datalist></label><label>截至日期<input type="date" value={portfolioAsOfDate} onChange={e => setPortfolioAsOfDate(e.target.value)} /></label>{portfolio ? <button className="secondary" onClick={exportPortfolio}>导出 CSV</button> : null}</div>{portfolio ? <div className="validation-panel"><article><span>组合 / 全样本收益</span><strong>{pct(portfolio.averageReturn)} / {pct(portfolio.benchmarkReturn)}</strong><small>入选 {portfolio.selectedCount} / 样本 {portfolio.sampleCount} · {portfolio.tradingDayCount} 个交易日 · 前 {(portfolio.topFraction * 100).toFixed(0)}%</small></article><article><span>超额收益</span><strong>{pct(portfolio.excessReturn)}</strong><small>胜率 {pct(portfolio.winRate)} · 最大回撤 {pct(portfolio.maxDrawdown)}</small></article><article><span>研究边界</span><strong>无成本</strong><small>{portfolio.warnings.join('；')}</small></article></div> : <p className="muted">按每日 P3 评分最高的指定比例构建研究组合，与所选持有期的全样本收益比较。</p>}</section>
@@ -282,6 +291,7 @@ export function App() {
         </div>
       </div> : <p className="muted">执行上方审计后，展示 P2 特征驱动的可解释 P3 分数。</p>}
     </section>
+    <section className="panel"><div className="section-title"><div><span className="eyebrow">P7 FEATURE GATE</span><h2>P7 多特征数据门槛</h2></div>{featureCatalog && <span className="message">{featureCatalog.version}</span>}</div>{featureCatalog ? <div className="validation-panel"><article><span>证券覆盖</span><strong>{featureCatalog.securityCount}</strong><small>{featureCatalog.rowCount} 行特征数据</small></article><article><span>可用特征</span><strong>{featureCatalog.featureColumns.length}</strong><small>{featureCatalog.featureColumns.slice(0, 5).join('、') || '暂无特征'}</small></article></div> : <p className="muted">检查 P2 特征文件覆盖后，再进入多特征模型训练。</p>}</section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P2 AUDITOR</span><h2>P2 特征审计</h2></div>{featureAudit && <span className="message">历史 {featureAudit.availableHistory} 日 · {featureAudit.priceBasis}</span>}</div>
       {featureAudit ? <div className="feature-groups">

@@ -47,6 +47,7 @@ export type ScoreCalibration = { version: string; labelColumn: string; bucketCou
 export type ScanRow = { exchange: string; code: string; date: string; score: number; grade?: string | null }
 export type ScanResult = { version: string; asOfDate?: string | null; exchange?: string | null; minScore: number; scannedCount: number; truncated: boolean; rows: ScanRow[] }
 export type BaselineModel = { version: string; labelColumn: string; status: string; trainCount: number; testCount: number; positiveRate?: number | null; testPositiveRate?: number | null; accuracy?: number | null; auc?: number | null; intercept?: number | null; coefficient?: number | null; trainUntil?: string | null; warnings: string[] }
+export type FeatureCatalog = { version: string; featureColumns: string[]; securityCount: number; rowCount: number }
 export type PortfolioValidation = { version: string; labelColumn: string; topFraction: number; sampleCount: number; tradingDayCount: number; selectedCount: number; averageReturn?: number | null; benchmarkReturn?: number | null; excessReturn?: number | null; winRate?: number | null; maxDrawdown?: number | null; warnings: string[] }
 export type HistoryBackfillTask = {
   status: string; done: number; total: number; completed: number;
@@ -111,5 +112,6 @@ export const api = {
   }),
   scanP3: (minScore = 70, exchange?: string, asOfDate?: string) => request<ScanResult>('/api/scan/p3', { method: 'POST', body: JSON.stringify({ min_score: minScore, exchange, as_of_date: asOfDate || undefined, limit: 50 }) }),
   trainBaseline: (trainUntil?: string, labelColumn = 'p20_executable_return') => request<BaselineModel>('/api/model/p7/baseline', { method: 'POST', body: JSON.stringify({ label_column: labelColumn, train_until: trainUntil || undefined }) }),
+  featureCatalog: () => request<FeatureCatalog>('/api/model/p7/features'),
   validatePortfolio: (topFraction = 0.1, labelColumn = 'p20_executable_return', asOfDate?: string) => request<PortfolioValidation>('/api/validation/portfolio', { method: 'POST', body: JSON.stringify({ label_column: labelColumn, top_fraction: topFraction, as_of_date: asOfDate || undefined }) }),
 }
