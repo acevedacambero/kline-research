@@ -109,5 +109,5 @@ export const api = {
     method: 'POST', body: JSON.stringify({ label_column: labelColumn, buckets }),
   }),
   scanP3: (minScore = 70, exchange?: string, asOfDate?: string) => request<ScanResult>('/api/scan/p3', { method: 'POST', body: JSON.stringify({ min_score: minScore, exchange, as_of_date: asOfDate || undefined, limit: 50 }) }),
-  trainBaseline: () => request<BaselineModel>('/api/model/p7/baseline', { method: 'POST', body: JSON.stringify({ label_column: 'p20_executable_return' }) }),
+  trainBaseline: (trainUntil?: string) => request<BaselineModel>('/api/model/p7/baseline', { method: 'POST', body: JSON.stringify({ label_column: 'p20_executable_return', train_until: trainUntil || undefined }) }),
 }
