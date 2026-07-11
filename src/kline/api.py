@@ -1070,15 +1070,26 @@ def create_app(
     @app.get("/api/model/p7/features")
     def p7_feature_catalog():
         expected = ["bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"]
-        features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet", ["exchange", "code", "date"])
-        if features.empty:
+        latest_paths: dict[tuple[str, str], Path] = {}
+        for path in sorted(
+            settings.data_path.glob("data-foundation-v1/features/*/*/*/*.parquet"),
+            key=lambda item: item.stat().st_mtime,
+        ):
+            latest_paths[(path.parent.name, path.stem)] = path
+        if not latest_paths:
             return {"version": "daily-features-v1", "featureColumns": [], "missingColumns": expected, "securityCount": 0, "rowCount": 0, "ready": False}
         ignored = {"exchange", "code", "date"}
-        columns = sorted(set(features.columns) - ignored)
+        columns: set[str] = set()
+        row_count = 0
+        for path in latest_paths.values():
+            parquet = pq.ParquetFile(path)
+            columns.update(parquet.schema.names)
+            row_count += parquet.metadata.num_rows
+        columns = set(columns) - ignored
         missing = sorted(set(expected) - set(columns))
-        security_count = int(features[["exchange", "code"]].drop_duplicates().shape[0])
-        return {"version": "daily-features-v1", "featureColumns": columns, "missingColumns": missing,
-                "securityCount": security_count, "rowCount": int(len(features)),
+        security_count = len(latest_paths)
+        return {"version": "daily-features-v1", "featureColumns": sorted(columns), "missingColumns": missing,
+                "securityCount": security_count, "rowCount": row_count,
                 "ready": bool(security_count and not missing)}
 
     @app.post("/api/model/p7/multifeature")
