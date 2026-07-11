@@ -43,3 +43,10 @@ def test_rollback_switches_release_symlink_without_touching_shared_data():
     assert "previous" in script
     assert "shared/data" not in script
     assert "rm -rf" not in script
+
+
+def test_release_pruning_retains_current_previous_and_shared_data():
+    script = read("prune-releases.sh")
+    assert '"${current}"|"${previous}"' in script
+    assert '"${releases}/"*' in script
+    assert "shared/data" not in script

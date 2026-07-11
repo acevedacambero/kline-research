@@ -17,3 +17,9 @@ the `shared/secrets` directory must be mode 700. The app listens only on
 Releases live under `releases/`. `current` selects the active release and
 `previous` selects the rollback release. Run `scripts/rollback.sh`; it refuses
 safely when no previous release exists and never modifies `shared/data`.
+
+The Python environment is shared at `shared/runtime-venv`; releases should
+symlink `.venv` to it instead of copying roughly 500 MB per release. After a
+successful deployment, run `deploy/prune-releases.sh` to retain only `current`
+and `previous`. The pruning script refuses targets outside `releases/` and does
+not touch `shared/data` or the shared runtime.
