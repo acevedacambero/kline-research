@@ -14,3 +14,4 @@ button { background: #55d6be; color: #07110f; border: 0; border-radius: 7px; pad
 .calibration-controls { display: flex; gap: 12px; margin-bottom: 12px; }.calibration-controls label { display: flex; gap: 8px; align-items: center; color: #9eb0c2; font-size: 12px; }.calibration-controls select, .calibration-controls input { background: #111a25; color: #d8e4ef; border: 1px solid #1c2a39; padding: 7px; border-radius: 5px; }
 .reliability-ok { color: #55d6be; }.reliability-review { color: #f0b45b; }
 .scan-table { width: 100%; border-collapse: collapse; background: #111a25; }.scan-table th, .scan-table td { padding: 9px; border-bottom: 1px solid #1c2a39; text-align: right; font-size: 12px; }.scan-table th:first-child, .scan-table td:first-child, .scan-table th:nth-child(2), .scan-table td:nth-child(2) { text-align: left; }
+.link-button { border: 0; background: transparent; color: #55d6be; padding: 0; cursor: pointer; }
