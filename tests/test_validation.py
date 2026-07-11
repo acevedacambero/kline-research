@@ -3,7 +3,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from kline.validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
-from kline.model import train_score_baseline
+from kline.model import train_multifeature_baseline, train_score_baseline
 
 
 def score_rows(count: int = 20) -> pd.DataFrame:
@@ -113,6 +113,19 @@ def test_score_baseline_trains_time_split_model():
     assert result["trainCount"] == 28
     assert result["testCount"] == 12
     assert result["coefficient"] > 0
+
+
+def test_multifeature_baseline_trains_with_p2_columns():
+    scores = score_rows(40)
+    features = scores[["exchange", "code", "date"]].copy()
+    features["bullish_alignment"] = True
+    features["return_20"] = features.index / 100
+    features["volume_ratio_5"] = 1.0
+    features["volatility_20"] = 0.1
+    result = train_multifeature_baseline(scores, label_rows(40), features, train_until=date(2024, 1, 28))
+    assert result["version"] == "p7-multifeature-logistic-v1"
+    assert result["trainCount"] == 28
+    assert set(result["weights"]) == {"score", "bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"}
 
 
 def test_top_score_portfolio_reports_excess_return():
