@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import Settings, VERSIONS
 from .access import AccessDenied, CloudflareAccessVerifier
@@ -101,8 +101,8 @@ class CalibrationRequest(BaseModel):
 class ScanRequest(BaseModel):
     as_of_date: date | None = None
     exchange: str | None = None
-    min_score: float = 70
-    limit: int = 50
+    min_score: float = Field(70, ge=0, le=100)
+    limit: int = Field(50, ge=1, le=200)
 
 
 def _task_response(job: Job) -> dict:
@@ -908,7 +908,7 @@ def create_app(
         scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
         if scores.empty:
             return {"version": SCORE_DEFINITION_VERSION, "asOfDate": request.as_of_date,
-                    "minScore": request.min_score, "rows": []}
+                    "minScore": request.min_score, "scannedCount": 0, "truncated": False, "rows": []}
         scores["date"] = pd.to_datetime(scores["date"]).dt.date
         if request.as_of_date is not None:
             scores = scores.loc[scores["date"] <= request.as_of_date]
@@ -923,12 +923,16 @@ def create_app(
         )
         scores = scores.loc[scores["score"] >= request.min_score].sort_values(
             ["score", "date"], ascending=[False, False]
-        ).head(max(1, min(200, request.limit)))
+        )
+        candidate_count = int(len(scores))
+        scores = scores.head(request.limit)
         rows = [{"exchange": row.exchange, "code": row.code, "date": row.date,
                  "score": float(row.score), "grade": getattr(row, "grade", None)}
                 for row in scores.itertuples(index=False)]
         return {"version": SCORE_DEFINITION_VERSION, "asOfDate": request.as_of_date,
-                "exchange": request.exchange, "minScore": request.min_score, "rows": rows}
+                "exchange": request.exchange, "minScore": request.min_score,
+                "scannedCount": candidate_count, "truncated": candidate_count > request.limit,
+                "rows": rows}
 
     @app.get("/api/securities")
     def securities(query: str = ""):

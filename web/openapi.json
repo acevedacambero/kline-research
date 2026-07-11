@@ -825,11 +825,15 @@
           },
           "min_score": {
             "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
             "title": "Min Score",
             "default": 70
           },
           "limit": {
             "type": "integer",
+            "maximum": 200.0,
+            "minimum": 1.0,
             "title": "Limit",
             "default": 50
           }
