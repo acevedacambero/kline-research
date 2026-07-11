@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react'
 import { beforeAll, expect, it, vi } from 'vitest'
 
-const { markerSpy } = vi.hoisted(() => ({ markerSpy: vi.fn() }))
+const { markerSpy, visibleRangeSpy } = vi.hoisted(() => ({ markerSpy: vi.fn(), visibleRangeSpy: vi.fn() }))
 
 vi.mock('lightweight-charts', () => ({
   CandlestickSeries: {}, HistogramSeries: {}, LineSeries: {},
@@ -9,7 +9,7 @@ vi.mock('lightweight-charts', () => ({
   createSeriesMarkers: (_series: unknown, markers: unknown[]) => markerSpy(markers),
   createChart: () => ({
     addSeries: () => ({ setData: vi.fn(), priceScale: () => ({ applyOptions: vi.fn() }) }),
-    timeScale: () => ({ fitContent: vi.fn() }),
+    timeScale: () => ({ fitContent: vi.fn(), setVisibleLogicalRange: visibleRangeSpy }),
     applyOptions: vi.fn(), remove: vi.fn(),
   }),
 }))
@@ -40,4 +40,5 @@ it('marks signal, entry, planned exit and delayed actual exit', () => {
     expect.objectContaining({ time: '2024-01-04', text: '计划卖出' }),
     expect.objectContaining({ time: '2024-01-05', text: '实际卖出' }),
   ]))
+  expect(visibleRangeSpy).toHaveBeenCalledWith({ from: 0, to: 3 })
 })

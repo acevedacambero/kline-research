@@ -46,7 +46,17 @@ export function KlineChart({ bars, events = {} }: { bars: Bar[]; events?: ChartE
       const line = chart.addSeries(LineSeries, { color: colors[index], lineWidth: 1, title: `MA${period}` })
       line.setData(bars.filter(b => b[`ma${period}`] != null).map(b => ({ time: b.date, value: b[`ma${period}`] as number })))
     })
-    chart.timeScale().fitContent()
+    const signalIndex = events.signalDate
+      ? bars.findIndex(bar => bar.date === events.signalDate)
+      : -1
+    if (signalIndex >= 0) {
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, signalIndex - 80),
+        to: Math.min(bars.length - 1, signalIndex + 80),
+      })
+    } else {
+      chart.timeScale().fitContent()
+    }
     const observer = new ResizeObserver(entries => chart.applyOptions({ width: entries[0].contentRect.width }))
     observer.observe(host.current)
     return () => { observer.disconnect(); chart.remove() }
