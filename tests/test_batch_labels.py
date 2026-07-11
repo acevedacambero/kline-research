@@ -36,6 +36,7 @@ def test_batch_builder_emits_versioned_mature_multi_horizon_labels():
     assert first["p20_exit_status"] == "executable"
     assert first["p20_exit_delay"] == 0
     assert first["p20_delayed_executable_return"] == first["p20_executable_return"]
+    assert all(row["p60_exit_status"] != "insufficient-forward-data" for row in rows)
     assert first["label_maturity_date"] > first["signal_date"]
 
 

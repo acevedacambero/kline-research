@@ -64,10 +64,12 @@ class BatchLabelBuilder:
         sample_step: int = 5,
         horizons: Iterable[int] = (5, 10, 20, 60),
         max_entry_delay: int = 3,
+        max_exit_delay: int = 3,
     ):
         self.sample_step = sample_step
         self.horizons = tuple(sorted(horizons))
         self.max_entry_delay = max_entry_delay
+        self.max_exit_delay = max_exit_delay
 
     def build(
         self,
@@ -92,7 +94,7 @@ class BatchLabelBuilder:
             for index, bar in enumerate(bars[:5])
             if is_no_limit_session(exchange, code, listing_date, index, bar["date"])
         }
-        stop = len(bars) - max_horizon - self.max_entry_delay
+        stop = len(bars) - max_horizon - self.max_entry_delay - self.max_exit_delay
         rows: list[dict[str, Any]] = []
         for signal_index in range(250, max(250, stop), self.sample_step):
             eligibility = sample_eligibility(bars, signal_index, rights_status="ok")
@@ -117,6 +119,7 @@ class BatchLabelBuilder:
                 horizon: resolve_executable_exit(
                     bars, entry.entry_index + horizon, code=code,
                     exchange=exchange, st_status=st_status,
+                    max_delay=self.max_exit_delay,
                 )
                 for horizon in self.horizons
             }
