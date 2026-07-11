@@ -99,3 +99,5 @@ def test_score_calibration_buckets_observed_positive_probability():
     assert result["sampleCount"] == 20
     assert len(result["buckets"]) == 4
     assert result["buckets"][0]["observedProbability"] < result["buckets"][-1]["observedProbability"]
+    assert result["reliability"]["status"] == "review"
+    assert result["reliability"]["warnings"]

@@ -43,7 +43,7 @@ export type SingleFactorValidation = {
   missingColumns: string[]; dropped: Record<string, number>;
 }
 export type CalibrationBucket = { bucket: number; count: number; minScore: number; maxScore: number; avgScore: number; observedProbability: number; avgLabel: number }
-export type ScoreCalibration = { version: string; labelColumn: string; bucketCount: number; sampleCount: number; buckets: CalibrationBucket[]; missingColumns: string[]; dropped: Record<string, number> }
+export type ScoreCalibration = { version: string; labelColumn: string; bucketCount: number; sampleCount: number; buckets: CalibrationBucket[]; missingColumns: string[]; dropped: Record<string, number>; reliability: { status: string; warnings: string[] } }
 export type HistoryBackfillTask = {
   status: string; done: number; total: number; completed: number;
   listingHistoryShort: number; errors: unknown[]; currentSecurity?: string | null;

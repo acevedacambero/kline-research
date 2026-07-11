@@ -32,6 +32,7 @@ def calibrate_score(
         "buckets": [],
         "missingColumns": missing,
         "dropped": {"unusable": 0, "immature": 0, "missing": 0},
+        "reliability": {"status": "insufficient_sample", "warnings": ["暂无可用成熟样本"]},
     }
     if missing:
         return base
@@ -71,5 +72,15 @@ def calibrate_score(
             "observedProbability": float((result > 0).mean()),
             "avgLabel": float(result.mean()),
         })
+    probabilities = [row["observedProbability"] for row in rows]
+    monotonic = all(left <= right for left, right in zip(probabilities, probabilities[1:]))
+    warnings = []
+    if len(merged) < 30:
+        warnings.append("样本少于 30，概率仅供探索")
+    if not monotonic:
+        warnings.append("分桶胜率非单调，暂不视为可靠校准")
+    reliability = {"status": "usable" if len(merged) >= 30 and monotonic else "review",
+                   "warnings": warnings}
     return {**base, "bucketCount": actual, "sampleCount": int(len(merged)),
-            "buckets": rows, "missingColumns": [], "dropped": dropped}
+            "buckets": rows, "missingColumns": [], "dropped": dropped,
+            "reliability": reliability}
