@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -27,6 +27,7 @@ export function App() {
   const [calibration, setCalibration] = useState<ScoreCalibration | null>(null)
   const [calibrationLabel, setCalibrationLabel] = useState('p20_executable_return')
   const [calibrationBuckets, setCalibrationBuckets] = useState(10)
+  const [scan, setScan] = useState<ScanResult | null>(null)
   const [message, setMessage] = useState('等待检查')
   const [busy, setBusy] = useState(false)
   const [cachedCount, setCachedCount] = useState<number | null>(null)
@@ -149,6 +150,13 @@ export function App() {
     finally { setBusy(false) }
   }
 
+  async function runScan() {
+    setBusy(true)
+    try { const result = await api.scanP3(); setScan(result); setMessage(`P6 扫描：${result.rows.length} 个高分样本`) }
+    catch (error) { setMessage(error instanceof Error ? error.message : '扫描失败') }
+    finally { setBusy(false) }
+  }
+
   return <main>
     <header><div><span className="eyebrow">LOCAL RESEARCH SYSTEM</span><h1>K 线结构概率研究台</h1></div><span className={`health ${health?.status === 'ok' ? 'ok' : ''}`}>{health?.status === 'ok' ? '本地服务正常' : '正在连接'}</span></header>
     <section className="panel status-panel">
@@ -166,6 +174,7 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={startScores}>生成 P3 评分</button>
       <button className="secondary" disabled={busy} onClick={runValidation}>验证 P4 单因子</button>
       <button className="secondary" disabled={busy} onClick={runCalibration}>运行 P5 概率校准</button>
+      <button className="secondary" disabled={busy} onClick={runScan}>扫描 P6 高分样本</button>
     </section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P1 AUDITOR</span><h2>P1 标签审计台</h2></div><span className="message">{message}</span></div>
@@ -198,6 +207,7 @@ export function App() {
         </table>
       </div> : <p className="muted">生成 P1 标签和 P3 评分后，可验证 score 对 P20 可执行收益的分桶效果。</p>}
     </section>
+    <section className="panel"><div className="section-title"><div><span className="eyebrow">P6 SCANNER</span><h2>P6 高分扫描</h2></div>{scan && <span className="message">最低分 {scan.minScore}</span>}</div>{scan ? <table className="scan-table"><thead><tr><th>市场</th><th>代码</th><th>评分日期</th><th>分数</th><th>等级</th></tr></thead><tbody>{scan.rows.map(row => <tr key={`${row.exchange}-${row.code}`}><td>{row.exchange === 'sh' ? '上海' : '深圳'}</td><td>{row.code}</td><td>{row.date}</td><td>{row.score.toFixed(1)}</td><td>{row.grade ?? '—'}</td></tr>)}</tbody></table> : <p className="muted">扫描每只证券最新可用 P3 评分，默认返回分数不低于 70 的前 50 个样本。</p>}</section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P5 CALIBRATION</span><h2>P5 概率校准</h2></div>{calibration && <span className="message">{calibration.version}</span>}</div>
       <div className="calibration-controls"><label>结果口径<select value={calibrationLabel} onChange={e => setCalibrationLabel(e.target.value)}><option value="p10_executable_return">P10 可执行收益</option><option value="p20_executable_return">P20 可执行收益</option><option value="p60_executable_return">P60 可执行收益</option></select></label><label>分桶数<input type="number" min="2" max="20" value={calibrationBuckets} onChange={e => setCalibrationBuckets(Math.max(2, Math.min(20, Number(e.target.value) || 10)))} /></label></div>

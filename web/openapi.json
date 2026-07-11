@@ -486,6 +486,42 @@
         }
       }
     },
+    "/api/scan/p3": {
+      "post": {
+        "summary": "Scan P3",
+        "operationId": "scan_p3_api_scan_p3_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/securities": {
       "get": {
         "summary": "Securities",
@@ -761,6 +797,34 @@
         },
         "type": "object",
         "title": "ImportRequest"
+      },
+      "ScanRequest": {
+        "properties": {
+          "as_of_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Date"
+          },
+          "min_score": {
+            "type": "number",
+            "title": "Min Score",
+            "default": 70
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 50
+          }
+        },
+        "type": "object",
+        "title": "ScanRequest"
       },
       "SingleFactorValidationRequest": {
         "properties": {

@@ -44,6 +44,8 @@ export type SingleFactorValidation = {
 }
 export type CalibrationBucket = { bucket: number; count: number; minScore: number; maxScore: number; avgScore: number; observedProbability: number; avgLabel: number }
 export type ScoreCalibration = { version: string; labelColumn: string; bucketCount: number; sampleCount: number; buckets: CalibrationBucket[]; missingColumns: string[]; dropped: Record<string, number>; reliability: { status: string; warnings: string[] } }
+export type ScanRow = { exchange: string; code: string; date: string; score: number; grade?: string | null }
+export type ScanResult = { version: string; asOfDate?: string | null; minScore: number; rows: ScanRow[] }
 export type HistoryBackfillTask = {
   status: string; done: number; total: number; completed: number;
   listingHistoryShort: number; errors: unknown[]; currentSecurity?: string | null;
@@ -105,4 +107,5 @@ export const api = {
   calibrateScore: (labelColumn = 'p20_executable_return', buckets = 10) => request<ScoreCalibration>('/api/validation/calibration', {
     method: 'POST', body: JSON.stringify({ label_column: labelColumn, buckets }),
   }),
+  scanP3: (minScore = 70) => request<ScanResult>('/api/scan/p3', { method: 'POST', body: JSON.stringify({ min_score: minScore, limit: 50 }) }),
 }

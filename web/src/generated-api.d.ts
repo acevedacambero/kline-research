@@ -276,6 +276,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scan/p3": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Scan P3 */
+        post: operations["scan_p3_api_scan_p3_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/securities": {
         parameters: {
             query?: never;
@@ -409,6 +426,21 @@ export interface components {
              * @default false
              */
             refresh: boolean;
+        };
+        /** ScanRequest */
+        ScanRequest: {
+            /** As Of Date */
+            as_of_date?: string | null;
+            /**
+             * Min Score
+             * @default 70
+             */
+            min_score: number;
+            /**
+             * Limit
+             * @default 50
+             */
+            limit: number;
         };
         /** SingleFactorValidationRequest */
         SingleFactorValidationRequest: {
@@ -882,6 +914,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["CalibrationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scan_p3_api_scan_p3_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScanRequest"];
             };
         };
         responses: {
