@@ -122,9 +122,9 @@ def test_multifeature_baseline_trains_with_p2_columns():
     features["return_20"] = features.index / 100
     features["volume_ratio_5"] = 1.0
     features["volatility_20"] = 0.1
-    result = train_multifeature_baseline(scores, label_rows(40), features, train_until=date(2024, 1, 28))
+    result = train_multifeature_baseline(scores, label_rows(40), features, train_until=date(2024, 1, 30))
     assert result["version"] == "p7-multifeature-logistic-v1"
-    assert result["trainCount"] == 28
+    assert result["trainCount"] == 30
     assert set(result["weights"]) == {"score", "bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"}
 
 
