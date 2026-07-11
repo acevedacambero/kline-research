@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -36,6 +36,7 @@ export function App() {
   const [baselineLabel, setBaselineLabel] = useState('p20_executable_return')
   const [featureCatalog, setFeatureCatalog] = useState<FeatureCatalog | null>(null)
   const [multifeature, setMultifeature] = useState<MultiFeatureModel | null>(null)
+  const [walkForward, setWalkForward] = useState<WalkForwardResult | null>(null)
   const [portfolio, setPortfolio] = useState<PortfolioValidation | null>(null)
   const [portfolioFraction, setPortfolioFraction] = useState(10)
   const [portfolioLabel, setPortfolioLabel] = useState('p20_executable_return')
@@ -190,6 +191,13 @@ export function App() {
     finally { setBusy(false) }
   }
 
+  async function runWalkForward() {
+    setBusy(true)
+    try { const result = await api.walkForward(baselineLabel, 3); setWalkForward(result); setMessage(`P7 walk-forward：${result.folds.length} 折`) }
+    catch (error) { setMessage(error instanceof Error ? error.message : 'walk-forward 失败') }
+    finally { setBusy(false) }
+  }
+
   function exportMultifeature() {
     if (!multifeature) return
     const csv = ['version,labelColumn,status,trainCount,testCount,accuracy,auc,feature,weight,warnings', ...Object.entries(multifeature.weights).map(([feature, weight]) => [multifeature.version, multifeature.labelColumn, multifeature.status, multifeature.trainCount, multifeature.testCount, multifeature.accuracy ?? '', multifeature.auc ?? '', feature, weight, `"${multifeature.warnings.join(';')}"`].join(','))].join('\n')
@@ -246,8 +254,10 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={runBaseline}>训练 P7 基线模型</button>
       <button className="secondary" disabled={busy} onClick={checkFeatureCatalog}>检查 P2 特征覆盖</button>
       <button className="secondary" disabled={busy || !featureCatalog?.ready} onClick={runMultifeature}>训练 P7 多特征模型</button>
+      <button className="secondary" disabled={busy} onClick={runWalkForward}>运行 P7 Walk-forward</button>
       <button className="secondary" disabled={busy} onClick={runPortfolio}>验证 P8 高分组合</button>
     </section>
+    <section className="panel"><div className="section-title"><div><span className="eyebrow">P7 WALK-FORWARD</span><h2>P7 多窗口验证</h2></div>{walkForward && <span className="message">{walkForward.version}</span>}</div>{walkForward ? <div className="validation-panel"><article><span>平均 AUC</span><strong>{walkForward.averageAuc == null ? '—' : walkForward.averageAuc.toFixed(3)}</strong><small>平均准确率 {walkForward.averageAccuracy == null ? '—' : `${(walkForward.averageAccuracy * 100).toFixed(1)}%`}</small></article><table><thead><tr><th>训练截止</th><th>状态</th><th>训练</th><th>测试</th><th>AUC</th><th>准确率</th></tr></thead><tbody>{walkForward.folds.map(fold => <tr key={fold.trainUntil}><td>{fold.trainUntil}</td><td>{fold.status}</td><td>{fold.trainCount}</td><td>{fold.testCount}</td><td>{fold.auc == null ? '—' : fold.auc.toFixed(3)}</td><td>{fold.accuracy == null ? '—' : `${(fold.accuracy * 100).toFixed(1)}%`}</td></tr>)}</tbody></table></div> : <p className="muted">使用多个训练截止日期滚动验证 P3 分数的样本外稳定性。</p>}</section>
     <section className="panel"><div className="section-title"><div><span className="eyebrow">P7 MULTI-FEATURE</span><h2>P7 多特征基线</h2></div>{multifeature && <span className="message">{multifeature.version}</span>}</div>{multifeature ? <div className="validation-panel"><article><span>训练 / 测试样本</span><strong>{multifeature.trainCount} / {multifeature.testCount}</strong><small>状态 {multifeature.status} · AUC {multifeature.auc == null ? '—' : multifeature.auc.toFixed(3)}</small></article><article><span>测试准确率</span><strong>{multifeature.accuracy == null ? '—' : `${(multifeature.accuracy * 100).toFixed(1)}%`}</strong><small>{multifeature.warnings.join('；') || '可用于基线比较'}</small></article><article><span>特征权重</span><strong>{Object.keys(multifeature.weights).length}</strong><small>{Object.entries(multifeature.weights).map(([key, value]) => `${key}:${value.toFixed(2)}`).join(' · ') || '暂无权重'}</small></article><button className="secondary" onClick={exportMultifeature}>导出 CSV</button></div> : <p className="muted">通过 P7 特征 ready gate 后，训练 P2/P3 多特征基线模型。</p>}</section>
     <section className="panel"><div className="section-title"><div><span className="eyebrow">P8 VALIDATION</span><h2>P8 高分组合验证</h2></div>{portfolio && <span className="message">{portfolio.version}</span>}</div><div className="calibration-controls"><label>选取比例<input type="number" min="1" max="50" value={portfolioFraction} onChange={e => setPortfolioFraction(Math.max(1, Math.min(50, Number(e.target.value) || 10)))} />%</label><label>结果口径<input list="portfolio-horizons" value={portfolioLabel} onChange={e => setPortfolioLabel(e.target.value)} /><datalist id="portfolio-horizons"><option value="p10_executable_return" /><option value="p20_executable_return" /><option value="p60_executable_return" /></datalist></label><label>截至日期<input type="date" value={portfolioAsOfDate} onChange={e => setPortfolioAsOfDate(e.target.value)} /></label>{portfolio ? <button className="secondary" onClick={exportPortfolio}>导出 CSV</button> : null}</div>{portfolio ? <div className="validation-panel"><article><span>净组合 / 全样本收益</span><strong>{pct(portfolio.netAverageReturn)} / {pct(portfolio.benchmarkReturn)}</strong><small>毛收益 {pct(portfolio.averageReturn)} · 成本 {portfolio.transactionCostBps + portfolio.slippageBps} bps · 入选 {portfolio.selectedCount}</small></article><article><span>净超额收益</span><strong>{pct(portfolio.netExcessReturn)}</strong><small>胜率 {pct(portfolio.winRate)} · 最大回撤 {pct(portfolio.maxDrawdown)}</small></article><article><span>回测口径</span><strong>非重叠</strong><small>{portfolio.warnings.join('；')}</small></article></div> : <p className="muted">按每日 P3 评分最高的指定比例构建研究组合，与所选持有期的全样本收益比较。</p>}</section>
     <section className="panel">
