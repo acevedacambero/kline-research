@@ -230,7 +230,7 @@ def test_p3_scan_returns_latest_usable_scores(tmp_path):
     ]).to_parquet(score_dir / "scores.parquet", index=False)
     response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post("/api/scan/p3", json={"as_of_date": "2024-01-02", "min_score": 70})
     assert response.status_code == 200
-    assert [row["code"] for row in response.json()["rows"]] == ["600001", "600000"]
+    assert [row["code"] for row in response.json()["rows"]] == ["000001", "600001", "600000"]
     response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post("/api/scan/p3", json={"exchange": "sh", "min_score": 80})
     assert [row["code"] for row in response.json()["rows"]] == ["600001", "600000"]
 
