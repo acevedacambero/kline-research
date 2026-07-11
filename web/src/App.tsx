@@ -25,6 +25,8 @@ export function App() {
   const [scoreAudit, setScoreAudit] = useState<ScoreAudit | null>(null)
   const [validation, setValidation] = useState<SingleFactorValidation | null>(null)
   const [calibration, setCalibration] = useState<ScoreCalibration | null>(null)
+  const [calibrationLabel, setCalibrationLabel] = useState('p20_executable_return')
+  const [calibrationBuckets, setCalibrationBuckets] = useState(10)
   const [message, setMessage] = useState('等待检查')
   const [busy, setBusy] = useState(false)
   const [cachedCount, setCachedCount] = useState<number | null>(null)
@@ -142,7 +144,7 @@ export function App() {
 
   async function runCalibration() {
     setBusy(true)
-    try { const result = await api.calibrateScore(); setCalibration(result); setMessage(`P5 校准：${result.sampleCount} 个成熟样本`) }
+    try { const result = await api.calibrateScore(calibrationLabel, calibrationBuckets); setCalibration(result); setMessage(`P5 校准：${result.sampleCount} 个成熟样本`) }
     catch (error) { setMessage(error instanceof Error ? error.message : '校准失败') }
     finally { setBusy(false) }
   }
@@ -198,7 +200,8 @@ export function App() {
     </section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P5 CALIBRATION</span><h2>P5 概率校准</h2></div>{calibration && <span className="message">{calibration.version}</span>}</div>
-      {calibration ? <div className="validation-panel"><article><span>成熟样本</span><strong>{calibration.sampleCount}</strong><small>按 P3 分数分桶观察胜率</small></article><table><thead><tr><th>分桶</th><th>样本</th><th>平均分</th><th>观察胜率</th><th>平均 P20 收益</th></tr></thead><tbody>{calibration.buckets.map(bucket => <tr key={bucket.bucket}><td>{bucket.bucket}</td><td>{bucket.count}</td><td>{bucket.avgScore.toFixed(1)}</td><td>{pct(bucket.observedProbability)}</td><td>{pct(bucket.avgLabel)}</td></tr>)}</tbody></table></div> : <p className="muted">生成 P1 标签和 P3 评分后，运行概率校准查看分数与 P20 结果的对应关系。</p>}
+      <div className="calibration-controls"><label>结果口径<select value={calibrationLabel} onChange={e => setCalibrationLabel(e.target.value)}><option value="p10_executable_return">P10 可执行收益</option><option value="p20_executable_return">P20 可执行收益</option><option value="p60_executable_return">P60 可执行收益</option></select></label><label>分桶数<input type="number" min="2" max="20" value={calibrationBuckets} onChange={e => setCalibrationBuckets(Math.max(2, Math.min(20, Number(e.target.value) || 10)))} /></label></div>
+      {calibration ? <div className="validation-panel"><article><span>成熟样本</span><strong>{calibration.sampleCount}</strong><small>{calibration.labelColumn} · 按 P3 分数分桶</small></article><table><thead><tr><th>分桶</th><th>样本</th><th>平均分</th><th>观察胜率</th><th>平均收益</th></tr></thead><tbody>{calibration.buckets.map(bucket => <tr key={bucket.bucket}><td>{bucket.bucket}</td><td>{bucket.count}</td><td>{bucket.avgScore.toFixed(1)}</td><td>{pct(bucket.observedProbability)}</td><td>{pct(bucket.avgLabel)}</td></tr>)}</tbody></table></div> : <p className="muted">生成 P1 标签和 P3 评分后，运行概率校准查看分数与所选结果口径的对应关系。</p>}
     </section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P3 SCORE</span><h2>P3 结构评分</h2></div>{scoreAudit && <span className="message">{scoreAudit.score.version}</span>}</div>

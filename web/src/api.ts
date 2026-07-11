@@ -102,7 +102,7 @@ export const api = {
   validateSingleFactor: () => request<SingleFactorValidation>('/api/validation/single-factor', {
     method: 'POST', body: JSON.stringify({ factor_column: 'score', label_column: 'p20_executable_return', buckets: 5 }),
   }),
-  calibrateScore: () => request<ScoreCalibration>('/api/validation/calibration', {
-    method: 'POST', body: JSON.stringify({ label_column: 'p20_executable_return', buckets: 10 }),
+  calibrateScore: (labelColumn = 'p20_executable_return', buckets = 10) => request<ScoreCalibration>('/api/validation/calibration', {
+    method: 'POST', body: JSON.stringify({ label_column: labelColumn, buckets }),
   }),
 }
