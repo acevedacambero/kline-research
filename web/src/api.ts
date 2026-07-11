@@ -111,5 +111,5 @@ export const api = {
   }),
   scanP3: (minScore = 70, exchange?: string, asOfDate?: string) => request<ScanResult>('/api/scan/p3', { method: 'POST', body: JSON.stringify({ min_score: minScore, exchange, as_of_date: asOfDate || undefined, limit: 50 }) }),
   trainBaseline: (trainUntil?: string) => request<BaselineModel>('/api/model/p7/baseline', { method: 'POST', body: JSON.stringify({ label_column: 'p20_executable_return', train_until: trainUntil || undefined }) }),
-  validatePortfolio: (topFraction = 0.1) => request<PortfolioValidation>('/api/validation/portfolio', { method: 'POST', body: JSON.stringify({ label_column: 'p20_executable_return', top_fraction: topFraction }) }),
+  validatePortfolio: (topFraction = 0.1, labelColumn = 'p20_executable_return', asOfDate?: string) => request<PortfolioValidation>('/api/validation/portfolio', { method: 'POST', body: JSON.stringify({ label_column: labelColumn, top_fraction: topFraction, as_of_date: asOfDate || undefined }) }),
 }
