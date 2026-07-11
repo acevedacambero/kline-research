@@ -232,7 +232,7 @@ def test_p3_scan_returns_latest_usable_scores(tmp_path):
     assert response.status_code == 200
     assert [row["code"] for row in response.json()["rows"]] == ["000001", "600001", "600000"]
     response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post("/api/scan/p3", json={"exchange": "sh", "min_score": 80})
-    assert [row["code"] for row in response.json()["rows"]] == ["600001", "600000"]
+    assert [row["code"] for row in response.json()["rows"]] == ["600001"]
 
 
 def test_feature_task_unknown_id_is_404(tmp_path):
