@@ -1183,15 +1183,37 @@ def create_app(
             )
         return pd.read_parquet(normalized)
 
-    def benchmark_bars(exchange: str) -> list[dict]:
+    benchmark_cache: dict[str, pd.DataFrame] = {}
+    benchmark_cache_lock = threading.Lock()
+
+    def benchmark_bars(exchange: str, required_end: date) -> list[dict]:
         exchange = require_supported_market(exchange)
+        required_end = pd.Timestamp(required_end).date()
+        cache_path = (
+            settings.data_path / "data-foundation-v1" / "benchmarks" / f"{exchange}.parquet"
+        )
+        with benchmark_cache_lock:
+            cached = benchmark_cache.get(exchange)
+            if cached is None and cache_path.exists():
+                cached = pd.read_parquet(cache_path)
+                benchmark_cache[exchange] = cached
+            if cached is not None and not cached.empty:
+                cached_end = pd.to_datetime(cached["date"]).dt.date.max()
+                if cached_end >= required_end:
+                    return cached.to_dict("records")
         start = date.fromisoformat(f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-{settings.history_start_date[6:]}")
         try:
             frame = download_source.index_history(exchange, start, date.today())
         except Exception:
-            return []
+            return cached.to_dict("records") if cached is not None else []
         for column in ("open", "high", "low", "close"):
             frame[f"{column}_qfq"] = frame[column]
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = cache_path.with_suffix(f".{threading.get_ident()}.tmp.parquet")
+        frame.to_parquet(temporary, index=False)
+        temporary.replace(cache_path)
+        with benchmark_cache_lock:
+            benchmark_cache[exchange] = frame
         return frame.to_dict("records")
 
     @app.get("/api/securities/{exchange}/{code}/bars")
@@ -1242,7 +1264,7 @@ def create_app(
             "securityStatus": asdict(security_status),
         }
         if entry.executable and entry.entry_index is not None:
-            benchmark = benchmark_bars(request.exchange)
+            benchmark = benchmark_bars(request.exchange, records[-1]["date"])
             labels = compute_forward_labels(
                 records, benchmark, signal_index, entry.entry_index
             )
