@@ -6,6 +6,8 @@ from typing import Any, Sequence
 import numpy as np
 import pandas as pd
 
+from .baseline import binary_auc
+
 MULTI_FEATURE_MODEL_VERSION = "p7-multifeature-logistic-v1"
 DEFAULT_FEATURE_COLUMNS = ("score", "bullish_alignment", "return_20", "volume_ratio_5", "volatility_20")
 
@@ -65,7 +67,6 @@ def train_multifeature_baseline(scores: pd.DataFrame | list[dict], labels: pd.Da
         weights += 0.02 * (error[:, None] * x).mean(axis=0)
     prediction = 1 / (1 + np.exp(np.clip(-(intercept + xt @ weights), -35, 35)))
     accuracy = float(((prediction >= 0.5) == yt).mean())
-    rank = None if len(set(yt)) < 2 else pd.Series(prediction).rank().corr(pd.Series(yt).rank())
-    auc = None if rank is None or pd.isna(rank) else float((rank + 1) / 2)
+    auc = binary_auc(yt, prediction)
     warnings = ["样本外 AUC 低于 0.5，需要复核"] if auc is not None and auc < 0.5 else []
     return {**base, "status": "trained" if not warnings else "review", "trainUntil": train_until, "accuracy": accuracy, "auc": auc, "weights": {column: float(weight) for column, weight in zip(feature_columns, weights)}, "warnings": warnings}

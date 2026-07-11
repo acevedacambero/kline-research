@@ -10,6 +10,19 @@ import pandas as pd
 BASELINE_MODEL_VERSION = "p7-score-logistic-v1"
 
 
+def binary_auc(labels: np.ndarray, predictions: np.ndarray) -> float | None:
+    positives = labels == 1
+    positive_count = int(positives.sum())
+    negative_count = int((~positives).sum())
+    if not positive_count or not negative_count:
+        return None
+    ranks = pd.Series(predictions).rank(method="average").to_numpy()
+    rank_sum = float(ranks[positives].sum())
+    return (rank_sum - positive_count * (positive_count + 1) / 2) / (
+        positive_count * negative_count
+    )
+
+
 def train_score_baseline(
     scores: pd.DataFrame | list[dict],
     labels: pd.DataFrame | list[dict],
@@ -61,8 +74,7 @@ def train_score_baseline(
     pred = 1.0 / (1.0 + np.exp(np.clip(-(intercept + coefficient * xt), -35, 35)))
     predicted = pred >= 0.5
     accuracy = float((predicted == yt).mean())
-    rank = None if len(set(yt)) < 2 else pd.Series(pred).rank().corr(pd.Series(yt).rank())
-    auc = None if rank is None or pd.isna(rank) else float((rank + 1) / 2)
+    auc = binary_auc(yt, pred)
     warnings = []
     if coefficient <= 0:
         warnings.append("分数系数非正，评分方向未获得样本外支持")

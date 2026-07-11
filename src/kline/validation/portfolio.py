@@ -31,11 +31,8 @@ def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.D
     fraction = max(0.01, min(1.0, float(top_fraction)))
     selected = merged.groupby("date", group_keys=False).apply(lambda frame: frame.nlargest(max(1, int(len(frame) * fraction)), "score"), include_groups=False)
     selected_returns = selected[label_column]
-    daily_returns = selected_returns.groupby(level=0).mean()
-    curve = (1 + daily_returns).cumprod()
-    max_drawdown = float((curve / curve.cummax() - 1).min()) if not curve.empty else None
     benchmark = merged[label_column]
-    warnings = ["未计交易成本、滑点和卖出顺延"]
+    warnings = ["未计交易成本、滑点和卖出顺延", "前瞻收益窗口存在重叠，暂不计算组合最大回撤"]
     if len(selected) < 20:
         warnings.append("入选样本少于 20，仅供探索")
-    return {**base, "sampleCount": int(len(merged)), "tradingDayCount": int(merged["date"].nunique()), "selectedCount": int(len(selected)), "averageReturn": float(selected_returns.mean()), "benchmarkReturn": float(benchmark.mean()), "excessReturn": float(selected_returns.mean() - benchmark.mean()), "winRate": float((selected_returns > 0).mean()), "maxDrawdown": max_drawdown, "warnings": warnings}
+    return {**base, "sampleCount": int(len(merged)), "tradingDayCount": int(merged["date"].nunique()), "selectedCount": int(len(selected)), "averageReturn": float(selected_returns.mean()), "benchmarkReturn": float(benchmark.mean()), "excessReturn": float(selected_returns.mean() - benchmark.mean()), "winRate": float((selected_returns > 0).mean()), "maxDrawdown": None, "warnings": warnings}

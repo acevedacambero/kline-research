@@ -4,6 +4,7 @@ import pandas as pd
 
 from kline.validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
 from kline.model import train_multifeature_baseline, train_score_baseline
+from kline.model.baseline import binary_auc
 
 
 def score_rows(count: int = 20) -> pd.DataFrame:
@@ -115,6 +116,10 @@ def test_score_baseline_trains_time_split_model():
     assert result["coefficient"] > 0
 
 
+def test_binary_auc_matches_perfect_ranking():
+    assert binary_auc(pd.Series([0, 0, 1, 1]).to_numpy(), pd.Series([0.1, 0.2, 0.8, 0.9]).to_numpy()) == 1.0
+
+
 def test_multifeature_baseline_trains_with_p2_columns():
     scores = score_rows(40)
     features = scores[["exchange", "code", "date"]].copy()
@@ -133,7 +138,8 @@ def test_top_score_portfolio_reports_excess_return():
     assert result["version"] == "p8-top-score-portfolio-v1"
     assert result["selectedCount"] > 0
     assert result["tradingDayCount"] == 20
-    assert result["maxDrawdown"] is not None
+    assert result["maxDrawdown"] is None
+    assert any("重叠" in warning for warning in result["warnings"])
 
 
 def test_top_score_portfolio_warns_on_small_selection():
