@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -31,6 +31,7 @@ export function App() {
   const [scanExchange, setScanExchange] = useState('')
   const [scanMinScore, setScanMinScore] = useState(70)
   const [scanAsOfDate, setScanAsOfDate] = useState('')
+  const [baseline, setBaseline] = useState<BaselineModel | null>(null)
   const [message, setMessage] = useState('等待检查')
   const [busy, setBusy] = useState(false)
   const [cachedCount, setCachedCount] = useState<number | null>(null)
@@ -160,6 +161,13 @@ export function App() {
     finally { setBusy(false) }
   }
 
+  async function runBaseline() {
+    setBusy(true)
+    try { const result = await api.trainBaseline(); setBaseline(result); setMessage(`P7 基线模型：${result.status}`) }
+    catch (error) { setMessage(error instanceof Error ? error.message : '模型训练失败') }
+    finally { setBusy(false) }
+  }
+
   function exportScan() {
     if (!scan?.rows.length) return
     const csv = ['exchange,code,date,score,grade', ...scan.rows.map(row => [row.exchange, row.code, row.date, row.score, row.grade ?? ''].join(','))].join('\n')
@@ -185,6 +193,7 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={runValidation}>验证 P4 单因子</button>
       <button className="secondary" disabled={busy} onClick={runCalibration}>运行 P5 概率校准</button>
       <button className="secondary" disabled={busy} onClick={runScan}>扫描 P6 高分样本</button>
+      <button className="secondary" disabled={busy} onClick={runBaseline}>训练 P7 基线模型</button>
     </section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P1 AUDITOR</span><h2>P1 标签审计台</h2></div><span className="message">{message}</span></div>
@@ -223,6 +232,7 @@ export function App() {
       <div className="calibration-controls"><label>结果口径<select value={calibrationLabel} onChange={e => setCalibrationLabel(e.target.value)}><option value="p10_executable_return">P10 可执行收益</option><option value="p20_executable_return">P20 可执行收益</option><option value="p60_executable_return">P60 可执行收益</option></select></label><label>分桶数<input type="number" min="2" max="20" value={calibrationBuckets} onChange={e => setCalibrationBuckets(Math.max(2, Math.min(20, Number(e.target.value) || 10)))} /></label></div>
       {calibration ? <div className="validation-panel"><article><span>成熟样本</span><strong>{calibration.sampleCount}</strong><small>{calibration.labelColumn} · 按 P3 分数分桶</small><small className={calibration.reliability.status === 'usable' ? 'reliability-ok' : 'reliability-review'}>{calibration.reliability.status === 'usable' ? '可用于研究' : '需要复核'}{calibration.reliability.warnings.length ? ` · ${calibration.reliability.warnings.join('；')}` : ''}</small></article><table><thead><tr><th>分桶</th><th>样本</th><th>平均分</th><th>观察胜率</th><th>平均收益</th></tr></thead><tbody>{calibration.buckets.map(bucket => <tr key={bucket.bucket}><td>{bucket.bucket}</td><td>{bucket.count}</td><td>{bucket.avgScore.toFixed(1)}</td><td>{pct(bucket.observedProbability)}</td><td>{pct(bucket.avgLabel)}</td></tr>)}</tbody></table></div> : <p className="muted">生成 P1 标签和 P3 评分后，运行概率校准查看分数与所选结果口径的对应关系。</p>}
     </section>
+    <section className="panel"><div className="section-title"><div><span className="eyebrow">P7 BASELINE</span><h2>P7 轻量基线模型</h2></div>{baseline && <span className="message">{baseline.version}</span>}</div>{baseline ? <div className="validation-panel"><article><span>训练 / 测试样本</span><strong>{baseline.trainCount} / {baseline.testCount}</strong><small>时间切分，标签：{baseline.labelColumn}</small></article><article><span>测试准确率</span><strong>{baseline.accuracy == null ? '—' : `${(baseline.accuracy * 100).toFixed(1)}%`}</strong><small>AUC 近似 {baseline.auc == null ? '—' : baseline.auc.toFixed(3)}</small></article><article><span>模型系数</span><strong>{baseline.coefficient == null ? '—' : baseline.coefficient.toFixed(4)}</strong><small>{baseline.warnings.join('；') || '可用于基线比较'}</small></article></div> : <p className="muted">使用 P3 分数预测 P20 正收益，按时间切分输出样本外基线指标。</p>}</section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P3 SCORE</span><h2>P3 结构评分</h2></div>{scoreAudit && <span className="message">{scoreAudit.score.version}</span>}</div>
       {scoreAudit ? <div className="score-panel">

@@ -522,6 +522,42 @@
         }
       }
     },
+    "/api/model/p7/baseline": {
+      "post": {
+        "summary": "P7 Baseline",
+        "operationId": "p7_baseline_api_model_p7_baseline_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaselineModelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/securities": {
       "get": {
         "summary": "Securities",
@@ -740,6 +776,29 @@
           "signal_date"
         ],
         "title": "AuditRequest"
+      },
+      "BaselineModelRequest": {
+        "properties": {
+          "label_column": {
+            "type": "string",
+            "title": "Label Column",
+            "default": "p20_executable_return"
+          },
+          "train_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Train Until"
+          }
+        },
+        "type": "object",
+        "title": "BaselineModelRequest"
       },
       "CalibrationRequest": {
         "properties": {

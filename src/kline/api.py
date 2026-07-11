@@ -46,6 +46,7 @@ from .p1.market_rules import status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
 from .validation import calibrate_score, validate_single_factor
+from .model import train_score_baseline
 
 
 class _InjectedProviderAdapter:
@@ -103,6 +104,11 @@ class ScanRequest(BaseModel):
     exchange: str | None = None
     min_score: float = Field(70, ge=0, le=100)
     limit: int = Field(50, ge=1, le=200)
+
+
+class BaselineModelRequest(BaseModel):
+    label_column: str = "p20_executable_return"
+    train_until: date | None = None
 
 
 def _task_response(job: Job) -> dict:
@@ -933,6 +939,13 @@ def create_app(
                 "exchange": request.exchange, "minScore": request.min_score,
                 "scannedCount": candidate_count, "truncated": candidate_count > request.limit,
                 "rows": rows}
+
+    @app.post("/api/model/p7/baseline")
+    def p7_baseline(request: BaselineModelRequest):
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
+        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet")
+        return train_score_baseline(scores, labels, label_column=request.label_column,
+                                    train_until=request.train_until)
 
     @app.get("/api/securities")
     def securities(query: str = ""):

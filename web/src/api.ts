@@ -46,6 +46,7 @@ export type CalibrationBucket = { bucket: number; count: number; minScore: numbe
 export type ScoreCalibration = { version: string; labelColumn: string; bucketCount: number; sampleCount: number; buckets: CalibrationBucket[]; missingColumns: string[]; dropped: Record<string, number>; reliability: { status: string; warnings: string[] } }
 export type ScanRow = { exchange: string; code: string; date: string; score: number; grade?: string | null }
 export type ScanResult = { version: string; asOfDate?: string | null; exchange?: string | null; minScore: number; scannedCount: number; truncated: boolean; rows: ScanRow[] }
+export type BaselineModel = { version: string; labelColumn: string; status: string; trainCount: number; testCount: number; positiveRate?: number | null; testPositiveRate?: number | null; accuracy?: number | null; auc?: number | null; intercept?: number | null; coefficient?: number | null; trainUntil?: string | null; warnings: string[] }
 export type HistoryBackfillTask = {
   status: string; done: number; total: number; completed: number;
   listingHistoryShort: number; errors: unknown[]; currentSecurity?: string | null;
@@ -108,4 +109,5 @@ export const api = {
     method: 'POST', body: JSON.stringify({ label_column: labelColumn, buckets }),
   }),
   scanP3: (minScore = 70, exchange?: string, asOfDate?: string) => request<ScanResult>('/api/scan/p3', { method: 'POST', body: JSON.stringify({ min_score: minScore, exchange, as_of_date: asOfDate || undefined, limit: 50 }) }),
+  trainBaseline: () => request<BaselineModel>('/api/model/p7/baseline', { method: 'POST', body: JSON.stringify({ label_column: 'p20_executable_return' }) }),
 }

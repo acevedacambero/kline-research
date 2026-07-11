@@ -293,6 +293,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/model/p7/baseline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** P7 Baseline */
+        post: operations["p7_baseline_api_model_p7_baseline_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/securities": {
         parameters: {
             query?: never;
@@ -393,6 +410,16 @@ export interface components {
              * Format: date
              */
             signal_date: string;
+        };
+        /** BaselineModelRequest */
+        BaselineModelRequest: {
+            /**
+             * Label Column
+             * @default p20_executable_return
+             */
+            label_column: string;
+            /** Train Until */
+            train_until?: string | null;
         };
         /** CalibrationRequest */
         CalibrationRequest: {
@@ -949,6 +976,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ScanRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    p7_baseline_api_model_p7_baseline_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BaselineModelRequest"];
             };
         };
         responses: {

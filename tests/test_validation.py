@@ -3,6 +3,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from kline.validation import calibrate_score, validate_single_factor
+from kline.model import train_score_baseline
 
 
 def score_rows(count: int = 20) -> pd.DataFrame:
@@ -101,3 +102,14 @@ def test_score_calibration_buckets_observed_positive_probability():
     assert result["buckets"][0]["observedProbability"] < result["buckets"][-1]["observedProbability"]
     assert result["reliability"]["status"] == "review"
     assert result["reliability"]["warnings"]
+
+
+def test_score_baseline_trains_time_split_model():
+    scores = score_rows(40)
+    labels = label_rows(40)
+    result = train_score_baseline(scores, labels, train_until=date(2024, 1, 28))
+    assert result["version"] == "p7-score-logistic-v1"
+    assert result["status"] == "trained"
+    assert result["trainCount"] == 28
+    assert result["testCount"] == 12
+    assert result["coefficient"] > 0
