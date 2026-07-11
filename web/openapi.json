@@ -812,6 +812,17 @@
             ],
             "title": "As Of Date"
           },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
           "min_score": {
             "type": "number",
             "title": "Min Score",

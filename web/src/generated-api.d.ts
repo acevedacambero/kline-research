@@ -431,6 +431,8 @@ export interface components {
         ScanRequest: {
             /** As Of Date */
             as_of_date?: string | null;
+            /** Exchange */
+            exchange?: string | null;
             /**
              * Min Score
              * @default 70

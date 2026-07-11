@@ -226,9 +226,12 @@ def test_p3_scan_returns_latest_usable_scores(tmp_path):
         {"exchange": "sh", "code": "600000", "date": date(2024, 1, 1), "score": 80, "grade": "A", "usable": True},
         {"exchange": "sh", "code": "600000", "date": date(2024, 1, 2), "score": 75, "grade": "B", "usable": True},
         {"exchange": "sh", "code": "600001", "date": date(2024, 1, 2), "score": 90, "grade": "A", "usable": True},
+        {"exchange": "sz", "code": "000001", "date": date(2024, 1, 2), "score": 95, "grade": "A", "usable": True},
     ]).to_parquet(score_dir / "scores.parquet", index=False)
     response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post("/api/scan/p3", json={"as_of_date": "2024-01-02", "min_score": 70})
     assert response.status_code == 200
+    assert [row["code"] for row in response.json()["rows"]] == ["600001", "600000"]
+    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post("/api/scan/p3", json={"exchange": "sh", "min_score": 80})
     assert [row["code"] for row in response.json()["rows"]] == ["600001", "600000"]
 
 

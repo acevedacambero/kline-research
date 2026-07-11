@@ -100,6 +100,7 @@ class CalibrationRequest(BaseModel):
 
 class ScanRequest(BaseModel):
     as_of_date: date | None = None
+    exchange: str | None = None
     min_score: float = 70
     limit: int = 50
 
@@ -911,6 +912,8 @@ def create_app(
         scores["date"] = pd.to_datetime(scores["date"]).dt.date
         if request.as_of_date is not None:
             scores = scores.loc[scores["date"] <= request.as_of_date]
+        if request.exchange in {"sh", "sz"}:
+            scores = scores.loc[scores["exchange"] == request.exchange]
         if "usable" in scores:
             scores = scores.loc[scores["usable"].fillna(False).astype(bool)]
         scores["score"] = pd.to_numeric(scores["score"], errors="coerce")
@@ -925,7 +928,7 @@ def create_app(
                  "score": float(row.score), "grade": getattr(row, "grade", None)}
                 for row in scores.itertuples(index=False)]
         return {"version": SCORE_DEFINITION_VERSION, "asOfDate": request.as_of_date,
-                "minScore": request.min_score, "rows": rows}
+                "exchange": request.exchange, "minScore": request.min_score, "rows": rows}
 
     @app.get("/api/securities")
     def securities(query: str = ""):
