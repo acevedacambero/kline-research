@@ -10,6 +10,7 @@ import threading
 import time
 
 import pandas as pd
+import pyarrow.parquet as pq
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -623,8 +624,14 @@ def create_app(
             "versions": VERSIONS,
         }
 
+    label_status_cache: dict[str, object] = {"expires": 0.0, "value": None}
+    label_status_lock = threading.Lock()
+
     @app.get("/api/labels/status")
     def label_dataset_status():
+        with label_status_lock:
+            if time.monotonic() < float(label_status_cache["expires"]):
+                return label_status_cache["value"]
         current_version = VERSIONS["labelDefinitionVersion"]
         paths = sorted(settings.data_path.glob("data-foundation-v1/labels/*/*/*.parquet"))
         version_counts: dict[str, int] = {}
@@ -632,21 +639,25 @@ def create_app(
         compatible_files = 0
         delayed_exit_files = 0
         for path in paths:
-            frame = pd.read_parquet(path)
-            rows += len(frame)
-            if "label_definition_version" in frame.columns and not frame.empty:
-                versions = frame["label_definition_version"].fillna("unknown").astype(str)
+            parquet = pq.ParquetFile(path)
+            file_rows = parquet.metadata.num_rows
+            rows += file_rows
+            columns = set(parquet.schema.names)
+            if "label_definition_version" in columns and file_rows:
+                versions = parquet.read(columns=["label_definition_version"]).to_pandas()[
+                    "label_definition_version"
+                ].fillna("unknown").astype(str)
                 for version, count in versions.value_counts().items():
                     version_counts[version] = version_counts.get(version, 0) + int(count)
                 if set(versions.unique()) == {current_version}:
                     compatible_files += 1
             else:
                 version_counts["legacy-or-unknown"] = (
-                    version_counts.get("legacy-or-unknown", 0) + len(frame)
+                    version_counts.get("legacy-or-unknown", 0) + file_rows
                 )
-            if "p20_delayed_executable_return" in frame.columns:
+            if "p20_delayed_executable_return" in columns:
                 delayed_exit_files += 1
-        return {
+        result = {
             "currentVersion": current_version,
             "files": len(paths),
             "rows": rows,
@@ -655,6 +666,9 @@ def create_app(
             "staleFiles": len(paths) - compatible_files,
             "delayedExitReady": bool(paths) and delayed_exit_files == len(paths),
         }
+        with label_status_lock:
+            label_status_cache.update(value=result, expires=time.monotonic() + 60)
+        return result
 
     @app.get("/healthz", include_in_schema=False)
     def healthz():
