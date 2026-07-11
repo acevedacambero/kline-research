@@ -3,7 +3,7 @@ from datetime import date, timedelta
 import pandas as pd
 
 from kline.validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
-from kline.model import train_multifeature_baseline, train_score_baseline
+from kline.model import train_multifeature_baseline, train_score_baseline, walk_forward_score_baseline
 from kline.model.baseline import binary_auc
 
 
@@ -140,6 +140,14 @@ def test_score_baseline_excludes_labels_immature_at_training_cutoff():
     result = train_score_baseline(score_rows(40), label_rows(40), train_until=date(2024, 1, 28))
     assert result["trainCount"] == 0
     assert result["status"] == "insufficient_data"
+
+
+def test_walk_forward_returns_multiple_time_folds():
+    labels = label_rows(80)
+    labels["label_maturity_date"] = labels["signal_date"]
+    result = walk_forward_score_baseline(score_rows(80), labels, folds=3)
+    assert result["version"] == "p7-walk-forward-v1"
+    assert len(result["folds"]) == 3
 
 
 def test_top_score_portfolio_reports_excess_return():

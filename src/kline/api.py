@@ -46,7 +46,7 @@ from .p1.market_rules import status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
 from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
-from .model import train_multifeature_baseline, train_score_baseline
+from .model import train_multifeature_baseline, train_score_baseline, walk_forward_score_baseline
 
 
 class _InjectedProviderAdapter:
@@ -109,6 +109,11 @@ class ScanRequest(BaseModel):
 class BaselineModelRequest(BaseModel):
     label_column: str = "p20_executable_return"
     train_until: date | None = None
+
+
+class WalkForwardRequest(BaseModel):
+    label_column: str = "p20_executable_return"
+    folds: int = Field(3, ge=2, le=5)
 
 
 class PortfolioValidationRequest(BaseModel):
@@ -982,6 +987,14 @@ def create_app(
         return train_multifeature_baseline(scores, labels, features,
                                             label_column=request.label_column,
                                             train_until=request.train_until)
+
+    @app.post("/api/model/p7/walk-forward")
+    def p7_walk_forward(request: WalkForwardRequest):
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"])
+        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"])
+        return walk_forward_score_baseline(scores, labels,
+                                           label_column=request.label_column,
+                                           folds=request.folds)
 
     @app.post("/api/validation/portfolio")
     def portfolio_validation(request: PortfolioValidationRequest):

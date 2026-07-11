@@ -23,6 +23,41 @@ def binary_auc(labels: np.ndarray, predictions: np.ndarray) -> float | None:
     )
 
 
+def walk_forward_score_baseline(
+    scores: pd.DataFrame | list[dict],
+    labels: pd.DataFrame | list[dict],
+    *,
+    label_column: str = "p20_executable_return",
+    folds: int = 3,
+) -> dict[str, Any]:
+    sf = pd.DataFrame(scores).copy()
+    if "date" not in sf:
+        return {"version": "p7-walk-forward-v1", "folds": [], "averageAuc": None,
+                "averageAccuracy": None, "warnings": ["缺少评分日期"]}
+    dates = sorted(pd.to_datetime(sf["date"]).dt.date.unique())
+    fold_count = max(2, min(5, int(folds)))
+    cutoffs = []
+    for index in range(fold_count):
+        position = int(len(dates) * (0.5 + index * 0.3 / max(1, fold_count - 1)))
+        if dates:
+            cutoffs.append(dates[min(len(dates) - 1, position)])
+    rows = []
+    for cutoff in dict.fromkeys(cutoffs):
+        result = train_score_baseline(
+            scores, labels, label_column=label_column, train_until=cutoff
+        )
+        rows.append({"trainUntil": cutoff, "status": result["status"],
+                     "trainCount": result["trainCount"],
+                     "testCount": result["testCount"], "auc": result["auc"],
+                     "accuracy": result["accuracy"]})
+    aucs = [row["auc"] for row in rows if row["auc"] is not None]
+    accuracies = [row["accuracy"] for row in rows if row["accuracy"] is not None]
+    return {"version": "p7-walk-forward-v1", "folds": rows,
+            "averageAuc": float(np.mean(aucs)) if aucs else None,
+            "averageAccuracy": float(np.mean(accuracies)) if accuracies else None,
+            "warnings": [] if aucs else ["没有足够成熟样本完成 walk-forward"]}
+
+
 def train_score_baseline(
     scores: pd.DataFrame | list[dict],
     labels: pd.DataFrame | list[dict],

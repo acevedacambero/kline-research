@@ -344,6 +344,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/model/p7/walk-forward": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** P7 Walk Forward */
+        post: operations["p7_walk_forward_api_model_p7_walk_forward_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/validation/portfolio": {
         parameters: {
             query?: never;
@@ -584,6 +601,19 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WalkForwardRequest */
+        WalkForwardRequest: {
+            /**
+             * Label Column
+             * @default p20_executable_return
+             */
+            label_column: string;
+            /**
+             * Folds
+             * @default 3
+             */
+            folds: number;
         };
     };
     responses: never;
@@ -1143,6 +1173,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["BaselineModelRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    p7_walk_forward_api_model_p7_walk_forward_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WalkForwardRequest"];
             };
         };
         responses: {

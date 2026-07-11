@@ -610,6 +610,42 @@
         }
       }
     },
+    "/api/model/p7/walk-forward": {
+      "post": {
+        "summary": "P7 Walk Forward",
+        "operationId": "p7_walk_forward_api_model_p7_walk_forward_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WalkForwardRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/validation/portfolio": {
       "post": {
         "summary": "Portfolio Validation",
@@ -1109,6 +1145,24 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WalkForwardRequest": {
+        "properties": {
+          "label_column": {
+            "type": "string",
+            "title": "Label Column",
+            "default": "p20_executable_return"
+          },
+          "folds": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 2.0,
+            "title": "Folds",
+            "default": 3
+          }
+        },
+        "type": "object",
+        "title": "WalkForwardRequest"
       }
     }
   }
