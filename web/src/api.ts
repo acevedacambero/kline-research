@@ -49,7 +49,7 @@ export type ScanResult = { version: string; asOfDate?: string | null; exchange?:
 export type BaselineModel = { version: string; labelColumn: string; status: string; trainCount: number; testCount: number; positiveRate?: number | null; testPositiveRate?: number | null; accuracy?: number | null; auc?: number | null; intercept?: number | null; coefficient?: number | null; trainUntil?: string | null; warnings: string[] }
 export type MultiFeatureModel = { version: string; labelColumn: string; featureColumns: string[]; status: string; trainCount: number; testCount: number; accuracy?: number | null; auc?: number | null; weights: Record<string, number>; warnings: string[] }
 export type FeatureCatalog = { version: string; featureColumns: string[]; missingColumns: string[]; securityCount: number; rowCount: number; ready: boolean }
-export type PortfolioValidation = { version: string; labelColumn: string; topFraction: number; sampleCount: number; tradingDayCount: number; selectedCount: number; averageReturn?: number | null; benchmarkReturn?: number | null; excessReturn?: number | null; winRate?: number | null; maxDrawdown?: number | null; nonOverlapping: boolean; warnings: string[] }
+export type PortfolioValidation = { version: string; labelColumn: string; topFraction: number; sampleCount: number; tradingDayCount: number; selectedCount: number; averageReturn?: number | null; netAverageReturn?: number | null; benchmarkReturn?: number | null; excessReturn?: number | null; netExcessReturn?: number | null; winRate?: number | null; maxDrawdown?: number | null; nonOverlapping: boolean; transactionCostBps: number; slippageBps: number; totalCostRate: number; warnings: string[] }
 export type HistoryBackfillTask = {
   status: string; done: number; total: number; completed: number;
   listingHistoryShort: number; errors: unknown[]; currentSecurity?: string | null;
@@ -115,5 +115,5 @@ export const api = {
   trainBaseline: (trainUntil?: string, labelColumn = 'p20_executable_return') => request<BaselineModel>('/api/model/p7/baseline', { method: 'POST', body: JSON.stringify({ label_column: labelColumn, train_until: trainUntil || undefined }) }),
   trainMultifeature: (trainUntil?: string, labelColumn = 'p20_executable_return') => request<MultiFeatureModel>('/api/model/p7/multifeature', { method: 'POST', body: JSON.stringify({ label_column: labelColumn, train_until: trainUntil || undefined }) }),
   featureCatalog: () => request<FeatureCatalog>('/api/model/p7/features'),
-  validatePortfolio: (topFraction = 0.1, labelColumn = 'p20_executable_return', asOfDate?: string) => request<PortfolioValidation>('/api/validation/portfolio', { method: 'POST', body: JSON.stringify({ label_column: labelColumn, top_fraction: topFraction, as_of_date: asOfDate || undefined, non_overlapping: true }) }),
+  validatePortfolio: (topFraction = 0.1, labelColumn = 'p20_executable_return', asOfDate?: string) => request<PortfolioValidation>('/api/validation/portfolio', { method: 'POST', body: JSON.stringify({ label_column: labelColumn, top_fraction: topFraction, as_of_date: asOfDate || undefined, non_overlapping: true, transaction_cost_bps: 10, slippage_bps: 5 }) }),
 }

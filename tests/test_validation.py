@@ -171,3 +171,12 @@ def test_non_overlapping_portfolio_computes_drawdown():
     assert result["nonOverlapping"] is True
     assert result["tradingDayCount"] == 2
     assert result["maxDrawdown"] is not None
+
+
+def test_portfolio_reports_net_returns_after_costs():
+    result = validate_top_score_portfolio(
+        score_rows(40), label_rows(40), non_overlapping=True,
+        transaction_cost_bps=10, slippage_bps=5,
+    )
+    assert result["totalCostRate"] == 0.0015
+    assert result["netAverageReturn"] < result["averageReturn"]

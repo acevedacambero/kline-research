@@ -975,6 +975,20 @@
             "type": "boolean",
             "title": "Non Overlapping",
             "default": false
+          },
+          "transaction_cost_bps": {
+            "type": "number",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Transaction Cost Bps",
+            "default": 0
+          },
+          "slippage_bps": {
+            "type": "number",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Slippage Bps",
+            "default": 0
           }
         },
         "type": "object",

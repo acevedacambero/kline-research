@@ -116,6 +116,8 @@ class PortfolioValidationRequest(BaseModel):
     top_fraction: float = Field(0.1, ge=0.01, le=1)
     as_of_date: date | None = None
     non_overlapping: bool = False
+    transaction_cost_bps: float = Field(0, ge=0, le=1000)
+    slippage_bps: float = Field(0, ge=0, le=1000)
 
 
 def _task_response(job: Job) -> dict:
@@ -987,7 +989,9 @@ def create_app(
         labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"])
         return validate_top_score_portfolio(scores, labels, label_column=request.label_column,
                                             top_fraction=request.top_fraction, as_of_date=request.as_of_date,
-                                            non_overlapping=request.non_overlapping)
+                                            non_overlapping=request.non_overlapping,
+                                            transaction_cost_bps=request.transaction_cost_bps,
+                                            slippage_bps=request.slippage_bps)
 
     @app.get("/api/securities")
     def securities(query: str = ""):

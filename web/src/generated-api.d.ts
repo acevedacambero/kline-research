@@ -524,6 +524,16 @@ export interface components {
              * @default false
              */
             non_overlapping: boolean;
+            /**
+             * Transaction Cost Bps
+             * @default 0
+             */
+            transaction_cost_bps: number;
+            /**
+             * Slippage Bps
+             * @default 0
+             */
+            slippage_bps: number;
         };
         /** ScanRequest */
         ScanRequest: {
