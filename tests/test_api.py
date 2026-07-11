@@ -235,6 +235,15 @@ def test_p3_scan_returns_latest_usable_scores(tmp_path):
     assert [row["code"] for row in response.json()["rows"]] == ["600001"]
 
 
+def test_p7_baseline_endpoint_returns_version_when_data_missing(tmp_path):
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).post(
+        "/api/model/p7/baseline", json={"label_column": "p20_executable_return"}
+    )
+    assert response.status_code == 200
+    assert response.json()["version"] == "p7-score-logistic-v1"
+    assert response.json()["status"] == "insufficient_data"
+
+
 def test_feature_task_unknown_id_is_404(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
     response = TestClient(app).get("/api/features/tasks/missing")
