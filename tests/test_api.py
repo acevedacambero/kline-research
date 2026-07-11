@@ -253,6 +253,13 @@ def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
     assert response.json()["sampleCount"] == 0
 
 
+def test_p8_portfolio_rejects_invalid_fraction(tmp_path):
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).post(
+        "/api/validation/portfolio", json={"top_fraction": 0}
+    )
+    assert response.status_code == 422
+
+
 def test_feature_task_unknown_id_is_404(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
     response = TestClient(app).get("/api/features/tasks/missing")
