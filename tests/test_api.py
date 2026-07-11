@@ -244,6 +244,15 @@ def test_p7_baseline_endpoint_returns_version_when_data_missing(tmp_path):
     assert response.json()["status"] == "insufficient_data"
 
 
+def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).post(
+        "/api/validation/portfolio", json={"label_column": "p20_executable_return", "top_fraction": 0.1}
+    )
+    assert response.status_code == 200
+    assert response.json()["version"] == "p8-top-score-portfolio-v1"
+    assert response.json()["sampleCount"] == 0
+
+
 def test_feature_task_unknown_id_is_404(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
     response = TestClient(app).get("/api/features/tasks/missing")
