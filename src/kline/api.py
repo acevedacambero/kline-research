@@ -955,11 +955,13 @@ def create_app(
 
     @app.get("/api/model/p7/features")
     def p7_feature_catalog():
+        expected = ["bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"]
         features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet")
         if features.empty:
-            return {"version": "daily-features-v1", "featureColumns": [], "securityCount": 0, "rowCount": 0}
+            return {"version": "daily-features-v1", "featureColumns": [], "missingColumns": expected, "securityCount": 0, "rowCount": 0}
         ignored = {"exchange", "code", "date"}
-        return {"version": "daily-features-v1", "featureColumns": sorted(set(features.columns) - ignored),
+        columns = sorted(set(features.columns) - ignored)
+        return {"version": "daily-features-v1", "featureColumns": columns, "missingColumns": sorted(set(expected) - set(columns)),
                 "securityCount": int(features[["exchange", "code"]].drop_duplicates().shape[0]),
                 "rowCount": int(len(features))}
 

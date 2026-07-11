@@ -250,6 +250,7 @@ def test_p7_feature_catalog_returns_empty_when_data_missing(tmp_path):
     response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get("/api/model/p7/features")
     assert response.status_code == 200
     assert response.json()["featureColumns"] == []
+    assert "return_20" in response.json()["missingColumns"]
 
 
 def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
