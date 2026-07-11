@@ -108,8 +108,8 @@ export const api = {
   scoreAudit: (exchange: string, code: string, signalDate: string) => request<ScoreAudit>('/api/p3/audit', {
     method: 'POST', body: JSON.stringify({ exchange, code, signal_date: signalDate }),
   }),
-  validateSingleFactor: () => request<SingleFactorValidation>('/api/validation/single-factor', {
-    method: 'POST', body: JSON.stringify({ factor_column: 'score', label_column: 'p20_executable_return', buckets: 5 }),
+  validateSingleFactor: (labelColumn = 'p20_executable_return') => request<SingleFactorValidation>('/api/validation/single-factor', {
+    method: 'POST', body: JSON.stringify({ factor_column: 'score', label_column: labelColumn, buckets: 5 }),
   }),
   calibrateScore: (labelColumn = 'p20_executable_return', buckets = 10) => request<ScoreCalibration>('/api/validation/calibration', {
     method: 'POST', body: JSON.stringify({ label_column: labelColumn, buckets }),

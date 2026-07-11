@@ -501,8 +501,9 @@ export interface components {
             /**
              * Label Column
              * @default p20_executable_return
+             * @enum {string}
              */
-            label_column: string;
+            label_column: "p10_executable_return" | "p10_delayed_executable_return" | "p20_executable_return" | "p20_delayed_executable_return" | "p60_executable_return" | "p60_delayed_executable_return";
             /** Train Until */
             train_until?: string | null;
         };
@@ -511,8 +512,9 @@ export interface components {
             /**
              * Label Column
              * @default p20_executable_return
+             * @enum {string}
              */
-            label_column: string;
+            label_column: "p10_executable_return" | "p10_delayed_executable_return" | "p20_executable_return" | "p20_delayed_executable_return" | "p60_executable_return" | "p60_delayed_executable_return";
             /**
              * Buckets
              * @default 10
@@ -544,8 +546,9 @@ export interface components {
             /**
              * Label Column
              * @default p20_executable_return
+             * @enum {string}
              */
-            label_column: string;
+            label_column: "p10_executable_return" | "p10_delayed_executable_return" | "p20_executable_return" | "p20_delayed_executable_return" | "p60_executable_return" | "p60_delayed_executable_return";
             /**
              * Top Fraction
              * @default 0.1
@@ -596,8 +599,9 @@ export interface components {
             /**
              * Label Column
              * @default p20_executable_return
+             * @enum {string}
              */
-            label_column: string;
+            label_column: "p10_executable_return" | "p10_delayed_executable_return" | "p20_executable_return" | "p20_delayed_executable_return" | "p60_executable_return" | "p60_delayed_executable_return";
             /**
              * Buckets
              * @default 5
@@ -624,8 +628,9 @@ export interface components {
             /**
              * Label Column
              * @default p20_executable_return
+             * @enum {string}
              */
-            label_column: string;
+            label_column: "p10_executable_return" | "p10_delayed_executable_return" | "p20_executable_return" | "p20_delayed_executable_return" | "p60_executable_return" | "p60_delayed_executable_return";
             /**
              * Folds
              * @default 3

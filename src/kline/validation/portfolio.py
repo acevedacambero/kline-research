@@ -42,7 +42,9 @@ def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.D
     total_cost_rate = (max(0.0, transaction_cost_bps) + max(0.0, slippage_bps)) / 10_000
     net_returns = selected_returns - total_cost_rate
     benchmark = merged[label_column]
-    warnings = ["未计交易成本、滑点和卖出顺延"]
+    warnings = []
+    if "delayed_executable_return" not in label_column:
+        warnings.append("卖出使用计划持有期收盘，未模拟不可卖顺延")
     max_drawdown = None
     if non_overlapping:
         period_returns = net_returns.groupby(level=0).mean()

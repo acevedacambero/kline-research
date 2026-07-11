@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
+from typing import Literal
 import json
 import queue
 import threading
@@ -88,15 +89,25 @@ class AuditRequest(BaseModel):
     signal_date: date
 
 
+LabelColumn = Literal[
+    "p10_executable_return",
+    "p10_delayed_executable_return",
+    "p20_executable_return",
+    "p20_delayed_executable_return",
+    "p60_executable_return",
+    "p60_delayed_executable_return",
+]
+
+
 class SingleFactorValidationRequest(BaseModel):
     factor_column: str = "score"
-    label_column: str = "p20_executable_return"
+    label_column: LabelColumn = "p20_executable_return"
     buckets: int = 5
     as_of_date: date | None = None
 
 
 class CalibrationRequest(BaseModel):
-    label_column: str = "p20_executable_return"
+    label_column: LabelColumn = "p20_executable_return"
     buckets: int = 10
     as_of_date: date | None = None
 
@@ -109,17 +120,17 @@ class ScanRequest(BaseModel):
 
 
 class BaselineModelRequest(BaseModel):
-    label_column: str = "p20_executable_return"
+    label_column: LabelColumn = "p20_executable_return"
     train_until: date | None = None
 
 
 class WalkForwardRequest(BaseModel):
-    label_column: str = "p20_executable_return"
+    label_column: LabelColumn = "p20_executable_return"
     folds: int = Field(3, ge=2, le=5)
 
 
 class PortfolioValidationRequest(BaseModel):
-    label_column: str = "p20_executable_return"
+    label_column: LabelColumn = "p20_executable_return"
     top_fraction: float = Field(0.1, ge=0.01, le=1)
     as_of_date: date | None = None
     non_overlapping: bool = False

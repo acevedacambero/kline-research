@@ -25,6 +25,7 @@ export function App() {
   const [featureAudit, setFeatureAudit] = useState<FeatureAudit | null>(null)
   const [scoreAudit, setScoreAudit] = useState<ScoreAudit | null>(null)
   const [validation, setValidation] = useState<SingleFactorValidation | null>(null)
+  const [validationLabel, setValidationLabel] = useState('p20_executable_return')
   const [calibration, setCalibration] = useState<ScoreCalibration | null>(null)
   const [calibrationLabel, setCalibrationLabel] = useState('p20_executable_return')
   const [calibrationBuckets, setCalibrationBuckets] = useState(10)
@@ -153,7 +154,7 @@ export function App() {
   async function runValidation() {
     setBusy(true)
     try {
-      const result = await api.validateSingleFactor()
+      const result = await api.validateSingleFactor(validationLabel)
       setValidation(result)
       setMessage(`P4 单因子验证：${result.sampleCount} 个成熟样本`)
     } catch (error) { setMessage(error instanceof Error ? error.message : '验证失败') }
@@ -286,15 +287,16 @@ export function App() {
     </section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P4 VALIDATION</span><h2>P4 单因子验证</h2></div>{validation && <span className="message">{validation.version}</span>}</div>
+      <div className="calibration-controls"><label>结果口径<select value={validationLabel} onChange={e => setValidationLabel(e.target.value)}><option value="p10_executable_return">P10 计划收盘卖出</option><option value="p10_delayed_executable_return">P10 可执行顺延卖出</option><option value="p20_executable_return">P20 计划收盘卖出</option><option value="p20_delayed_executable_return">P20 可执行顺延卖出</option><option value="p60_executable_return">P60 计划收盘卖出</option><option value="p60_delayed_executable_return">P60 可执行顺延卖出</option></select></label></div>
       {validation ? <div className="validation-panel">
         <article><span>样本数</span><strong>{validation.sampleCount}</strong><small>秩相关 {validation.rankCorrelation == null ? '—' : validation.rankCorrelation.toFixed(4)}</small></article>
         <table>
-          <thead><tr><th>分桶</th><th>样本</th><th>平均分</th><th>P20 收益</th><th>胜率</th><th>路径成功</th></tr></thead>
+          <thead><tr><th>分桶</th><th>样本</th><th>平均分</th><th>所选口径收益</th><th>胜率</th><th>路径成功</th></tr></thead>
           <tbody>{validation.buckets.map(bucket => <tr key={bucket.bucket}>
             <td>{bucket.bucket}</td><td>{bucket.count}</td><td>{bucket.avgFactor.toFixed(2)}</td><td>{pct(bucket.avgLabel)}</td><td>{pct(bucket.winRate)}</td><td>{pct(bucket.pathSuccessRate)}</td>
           </tr>)}</tbody>
         </table>
-      </div> : <p className="muted">生成 P1 标签和 P3 评分后，可验证 score 对 P20 可执行收益的分桶效果。</p>}
+      </div> : <p className="muted">生成 P1 标签和 P3 评分后，可验证 score 对所选收益口径的分桶效果。</p>}
     </section>
     <section className="panel"><div className="section-title"><div><span className="eyebrow">P6 SCANNER</span><h2>P6 高分扫描</h2></div>{scan && <span className="message">最低分 {scan.minScore} · {scan.scannedCount} 条</span>}</div><div className="calibration-controls"><label>市场<select value={scanExchange} onChange={e => setScanExchange(e.target.value)}><option value="">全部</option><option value="sh">上海</option><option value="sz">深圳</option></select></label><label>最低分<input type="number" min="0" max="100" value={scanMinScore} onChange={e => setScanMinScore(Math.max(0, Math.min(100, Number(e.target.value) || 0)))} /></label><label>截至日期<input type="date" value={scanAsOfDate} onChange={e => setScanAsOfDate(e.target.value)} /></label>{scan?.rows.length ? <button className="secondary" onClick={exportScan}>导出 CSV</button> : null}</div>{scan ? <table className="scan-table"><thead><tr><th>市场</th><th>代码</th><th>评分日期</th><th>分数</th><th>等级</th><th>操作</th></tr></thead><tbody>{scan.rows.map(row => <tr key={`${row.exchange}-${row.code}`}><td>{row.exchange === 'sh' ? '上海' : '深圳'}</td><td>{row.code}</td><td>{row.date}</td><td>{row.score.toFixed(1)}</td><td>{row.grade ?? '—'}</td><td><button className="link-button" onClick={() => { setExchange(row.exchange); setCode(row.code); setSignalDate(row.date); setMessage(`已带入 ${row.exchange === 'sh' ? '上海' : '深圳'} ${row.code}，点击上方审计`); window.scrollTo({ top: 0, behavior: 'smooth' }) }}>审计</button></td></tr>)}</tbody></table> : <p className="muted">扫描每只证券最新可用 P3 评分，默认返回分数不低于 70 的前 50 个样本。</p>}</section>
     <section className="panel">

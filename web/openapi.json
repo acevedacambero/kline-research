@@ -921,6 +921,14 @@
         "properties": {
           "label_column": {
             "type": "string",
+            "enum": [
+              "p10_executable_return",
+              "p10_delayed_executable_return",
+              "p20_executable_return",
+              "p20_delayed_executable_return",
+              "p60_executable_return",
+              "p60_delayed_executable_return"
+            ],
             "title": "Label Column",
             "default": "p20_executable_return"
           },
@@ -944,6 +952,14 @@
         "properties": {
           "label_column": {
             "type": "string",
+            "enum": [
+              "p10_executable_return",
+              "p10_delayed_executable_return",
+              "p20_executable_return",
+              "p20_delayed_executable_return",
+              "p60_executable_return",
+              "p60_delayed_executable_return"
+            ],
             "title": "Label Column",
             "default": "p20_executable_return"
           },
@@ -1001,6 +1017,14 @@
         "properties": {
           "label_column": {
             "type": "string",
+            "enum": [
+              "p10_executable_return",
+              "p10_delayed_executable_return",
+              "p20_executable_return",
+              "p20_delayed_executable_return",
+              "p60_executable_return",
+              "p60_delayed_executable_return"
+            ],
             "title": "Label Column",
             "default": "p20_executable_return"
           },
@@ -1098,6 +1122,14 @@
           },
           "label_column": {
             "type": "string",
+            "enum": [
+              "p10_executable_return",
+              "p10_delayed_executable_return",
+              "p20_executable_return",
+              "p20_delayed_executable_return",
+              "p60_executable_return",
+              "p60_delayed_executable_return"
+            ],
             "title": "Label Column",
             "default": "p20_executable_return"
           },
@@ -1166,6 +1198,14 @@
         "properties": {
           "label_column": {
             "type": "string",
+            "enum": [
+              "p10_executable_return",
+              "p10_delayed_executable_return",
+              "p20_executable_return",
+              "p20_delayed_executable_return",
+              "p60_executable_return",
+              "p60_delayed_executable_return"
+            ],
             "title": "Label Column",
             "default": "p20_executable_return"
           },

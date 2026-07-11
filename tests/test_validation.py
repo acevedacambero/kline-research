@@ -160,6 +160,16 @@ def test_top_score_portfolio_reports_excess_return():
     assert any("重叠" in warning for warning in result["warnings"])
 
 
+def test_delayed_exit_portfolio_does_not_claim_exit_delay_is_ignored():
+    labels = label_rows(20).rename(
+        columns={"p20_executable_return": "p20_delayed_executable_return"}
+    )
+    result = validate_top_score_portfolio(
+        score_rows(20), labels, label_column="p20_delayed_executable_return"
+    )
+    assert not any("未模拟不可卖顺延" in warning for warning in result["warnings"])
+
+
 def test_top_score_portfolio_warns_on_small_selection():
     result = validate_top_score_portfolio(score_rows(5), label_rows(5), top_fraction=0.2)
     assert any("少于 20" in warning for warning in result["warnings"])
