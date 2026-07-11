@@ -254,6 +254,15 @@ def test_p7_feature_catalog_returns_empty_when_data_missing(tmp_path):
     assert response.json()["ready"] is False
 
 
+def test_p7_feature_catalog_reports_ready_columns(tmp_path):
+    path = tmp_path / "data" / "data-foundation-v1" / "features" / "daily-features-v1" / "identity" / "sh"
+    path.mkdir(parents=True)
+    pd.DataFrame([{"exchange": "sh", "code": "600000", "date": date(2024, 1, 1), "bullish_alignment": True, "return_20": 0.1, "volume_ratio_5": 1.2, "volatility_20": 0.02}]).to_parquet(path / "600000.parquet", index=False)
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get("/api/model/p7/features")
+    assert response.json()["ready"] is True
+    assert response.json()["securityCount"] == 1
+
+
 def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
     response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).post(
         "/api/validation/portfolio", json={"label_column": "p20_executable_return", "top_fraction": 0.1}
