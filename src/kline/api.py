@@ -1288,6 +1288,12 @@ def create_app(
             output["labels"] = {}
             for horizon, label in labels.items():
                 label_record = asdict(label)
+                planned_index = entry.entry_index + horizon
+                label_record["planned_exit_date"] = (
+                    records[planned_index]["date"]
+                    if planned_index < len(records)
+                    else None
+                )
                 exit_result = exits[horizon]
                 label_record["delayed_executable_return"] = (
                     exit_result.exit_price / entry_price - 1

@@ -1,8 +1,19 @@
 import { useEffect, useRef } from 'react'
-import { CandlestickSeries, ColorType, HistogramSeries, LineSeries, createChart } from 'lightweight-charts'
+import { CandlestickSeries, ColorType, HistogramSeries, LineSeries, createChart, createSeriesMarkers, type SeriesMarker, type Time } from 'lightweight-charts'
 import type { Bar } from './api'
 
-export function KlineChart({ bars }: { bars: Bar[] }) {
+export type ChartEvents = {
+  signalDate?: string
+  entryDate?: string | null
+  plannedExitDate?: string | null
+  actualExitDate?: string | null
+  pathHitDate?: string | null
+  pathFailDate?: string | null
+  drawdownPeakDate?: string | null
+  drawdownTroughDate?: string | null
+}
+
+export function KlineChart({ bars, events = {} }: { bars: Bar[]; events?: ChartEvents }) {
   const host = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!host.current || !bars.length) return
@@ -13,6 +24,20 @@ export function KlineChart({ bars }: { bars: Bar[] }) {
     })
     const candles = chart.addSeries(CandlestickSeries, { upColor: '#ef5350', downColor: '#26a69a', borderVisible: false, wickUpColor: '#ef5350', wickDownColor: '#26a69a' })
     candles.setData(bars.map(b => ({ time: b.date, open: b.open_qfq, high: b.high_qfq, low: b.low_qfq, close: b.close_qfq })))
+    const markers: SeriesMarker<Time>[] = []
+    const addMarker = (time: string | null | undefined, position: 'aboveBar' | 'belowBar' | 'inBar', color: string, shape: 'circle' | 'square' | 'arrowUp' | 'arrowDown', text: string) => {
+      if (time && bars.some(bar => bar.date === time)) markers.push({ time: time as Time, position, color, shape, text })
+    }
+    addMarker(events.signalDate, 'aboveBar', '#ffd166', 'circle', '信号')
+    addMarker(events.entryDate, 'belowBar', '#55d6be', 'arrowUp', '买入')
+    addMarker(events.plannedExitDate, 'aboveBar', '#82aaff', 'square', '计划卖出')
+    addMarker(events.actualExitDate, 'aboveBar', '#ef5350', 'arrowDown', '实际卖出')
+    addMarker(events.pathHitDate, 'aboveBar', '#55d6be', 'circle', '路径成功')
+    addMarker(events.pathFailDate, 'belowBar', '#ef5350', 'circle', '路径失败')
+    addMarker(events.drawdownPeakDate, 'aboveBar', '#c792ea', 'circle', '回撤峰值')
+    addMarker(events.drawdownTroughDate, 'belowBar', '#f78c6c', 'circle', '回撤谷值')
+    markers.sort((left, right) => String(left.time).localeCompare(String(right.time)))
+    createSeriesMarkers(candles, markers)
     const volume = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: 'volume', color: '#506178' })
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } })
     volume.setData(bars.map(b => ({ time: b.date, value: b.volume, color: b.close_qfq >= b.open_qfq ? '#ef535080' : '#26a69a80' })))
@@ -25,6 +50,6 @@ export function KlineChart({ bars }: { bars: Bar[] }) {
     const observer = new ResizeObserver(entries => chart.applyOptions({ width: entries[0].contentRect.width }))
     observer.observe(host.current)
     return () => { observer.disconnect(); chart.remove() }
-  }, [bars])
+  }, [bars, events.signalDate, events.entryDate, events.plannedExitDate, events.actualExitDate, events.pathHitDate, events.pathFailDate, events.drawdownPeakDate, events.drawdownTroughDate])
   return <div className="chart" ref={host} aria-label="前复权K线图" />
 }

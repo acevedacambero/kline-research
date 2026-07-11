@@ -278,7 +278,7 @@ export function App() {
         <label>信号日<input type="date" value={signalDate} onChange={e => setSignalDate(e.target.value)} /></label>
         <button disabled={busy}>计算并审计</button>
       </form>
-      {bars.length > 0 && <KlineChart bars={bars} />}
+      {bars.length > 0 && <KlineChart bars={bars} events={{ signalDate, entryDate: audit?.entry.entry_date, plannedExitDate: audit?.labels['20']?.planned_exit_date, actualExitDate: audit?.exits?.['20']?.exit_date, pathHitDate: audit?.path?.hit_date, pathFailDate: audit?.path?.fail_date, drawdownPeakDate: audit?.drawdown?.peak_date, drawdownTroughDate: audit?.drawdown?.hit_date }} />}
       {audit && <div className="audit-grid">
         <article><span>样本资格</span><strong>{audit.eligibility.status}</strong><small>{audit.eligibility.reasons.join(' · ') || '检查通过'}</small></article>
         <article><span>交易状态</span><strong>{audit.securityStatus ? (audit.securityStatus.is_st ? 'ST' : '普通') : '—'}</strong><small>{audit.securityStatus?.is_approx ? `近似：${audit.securityStatus.reason}` : '正式规则'}</small></article>
