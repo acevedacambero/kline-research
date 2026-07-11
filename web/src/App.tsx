@@ -294,7 +294,7 @@ export function App() {
       <div className="section-title"><div><span className="eyebrow">P4 VALIDATION</span><h2>P4 单因子验证</h2></div>{validation && <span className="message">{validation.version}</span>}</div>
       <div className="calibration-controls"><label>结果口径<select value={validationLabel} onChange={e => setValidationLabel(e.target.value)}><option value="p10_executable_return">P10 计划收盘卖出</option><option value="p10_delayed_executable_return">P10 可执行顺延卖出</option><option value="p20_executable_return">P20 计划收盘卖出</option><option value="p20_delayed_executable_return">P20 可执行顺延卖出</option><option value="p60_executable_return">P60 计划收盘卖出</option><option value="p60_delayed_executable_return">P60 可执行顺延卖出</option></select></label></div>
       {validation ? <div className="validation-panel">
-        <article><span>样本数</span><strong>{validation.sampleCount}</strong><small>秩相关 {validation.rankCorrelation == null ? '—' : validation.rankCorrelation.toFixed(4)}</small></article>
+        <article><span>样本 / 独立时段</span><strong>{validation.sampleCount} / {validation.independentPeriodCount}</strong><small>七个自然日两步聚类 · 秩相关 {validation.rankCorrelation == null ? '—' : validation.rankCorrelation.toFixed(4)}</small></article>
         <table>
           <thead><tr><th>分桶</th><th>样本</th><th>平均分</th><th>所选口径收益</th><th>胜率</th><th>路径成功</th></tr></thead>
           <tbody>{validation.buckets.map(bucket => <tr key={bucket.bucket}>

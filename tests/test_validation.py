@@ -55,6 +55,8 @@ def test_single_factor_validation_buckets_scores_against_mature_labels():
     assert result["factorColumn"] == "score"
     assert result["labelColumn"] == "p20_executable_return"
     assert result["sampleCount"] == 20
+    assert result["independentPeriodCount"] == 1
+    assert result["independenceGapDays"] == 7
     assert len(result["buckets"]) == 4
     assert result["buckets"][0]["count"] == 5
     assert result["buckets"][0]["avgLabel"] < result["buckets"][-1]["avgLabel"]

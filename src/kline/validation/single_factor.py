@@ -5,8 +5,10 @@ from typing import Any
 
 import pandas as pd
 
+from ..p1.core import cluster_independent_periods
 
-VALIDATION_DEFINITION_VERSION = "p4-single-factor-v1"
+
+VALIDATION_DEFINITION_VERSION = "p4-single-factor-v2-independent"
 
 
 def _empty_result(
@@ -23,6 +25,8 @@ def _empty_result(
         "labelColumn": label_column,
         "bucketCount": buckets,
         "sampleCount": 0,
+        "independentPeriodCount": 0,
+        "independenceGapDays": 7,
         "rankCorrelation": None,
         "buckets": [],
         "missingColumns": missing_columns or [],
@@ -129,12 +133,22 @@ def validate_single_factor(
             }
         )
     correlation = merged[factor_column].rank().corr(merged[label_column].rank())
+    independent = cluster_independent_periods([
+        {
+            "stock": f"{row.exchange}:{row.code}",
+            "condition": "all",
+            "end_date": row.signal_date,
+        }
+        for row in merged.itertuples(index=False)
+    ])
     return {
         "version": VALIDATION_DEFINITION_VERSION,
         "factorColumn": factor_column,
         "labelColumn": label_column,
         "bucketCount": actual_buckets,
         "sampleCount": int(len(merged)),
+        "independentPeriodCount": independent.independent_n,
+        "independenceGapDays": 7,
         "rankCorrelation": None if pd.isna(correlation) else float(correlation),
         "buckets": bucket_rows,
         "missingColumns": [],

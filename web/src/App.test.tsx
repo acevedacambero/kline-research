@@ -123,11 +123,11 @@ describe('App', () => {
       const path = String(input)
       const body = path === '/api/validation/single-factor'
         ? {
-            version: 'p4-single-factor-v1',
+            version: 'p4-single-factor-v2-independent',
             factorColumn: 'score',
             labelColumn: 'p20_executable_return',
             bucketCount: 2,
-            sampleCount: 10,
+            sampleCount: 10, independentPeriodCount: 4, independenceGapDays: 7,
             rankCorrelation: 0.42,
             missingColumns: [],
             dropped: {},
@@ -146,8 +146,8 @@ describe('App', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '验证 P4 单因子' }))
 
-    expect(await screen.findByText('p4-single-factor-v1')).toBeInTheDocument()
-    expect(screen.getByText('10')).toBeInTheDocument()
+    expect(await screen.findByText('p4-single-factor-v2-independent')).toBeInTheDocument()
+    expect(screen.getByText('10 / 4')).toBeInTheDocument()
     expect(screen.getByText('8.00%')).toBeInTheDocument()
   })
 })

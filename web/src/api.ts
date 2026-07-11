@@ -42,7 +42,7 @@ export type ValidationBucket = {
 }
 export type SingleFactorValidation = {
   version: string; factorColumn: string; labelColumn: string; bucketCount: number;
-  sampleCount: number; rankCorrelation?: number | null; buckets: ValidationBucket[];
+  sampleCount: number; independentPeriodCount: number; independenceGapDays: number; rankCorrelation?: number | null; buckets: ValidationBucket[];
   missingColumns: string[]; dropped: Record<string, number>;
 }
 export type CalibrationBucket = { bucket: number; count: number; minScore: number; maxScore: number; avgScore: number; observedProbability: number; avgLabel: number }
