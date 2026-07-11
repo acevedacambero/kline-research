@@ -953,6 +953,16 @@ def create_app(
         return train_score_baseline(scores, labels, label_column=request.label_column,
                                     train_until=request.train_until)
 
+    @app.get("/api/model/p7/features")
+    def p7_feature_catalog():
+        features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet")
+        if features.empty:
+            return {"version": "daily-features-v1", "featureColumns": [], "securityCount": 0, "rowCount": 0}
+        ignored = {"exchange", "code", "date"}
+        return {"version": "daily-features-v1", "featureColumns": sorted(set(features.columns) - ignored),
+                "securityCount": int(features[["exchange", "code"]].drop_duplicates().shape[0]),
+                "rowCount": int(len(features))}
+
     @app.post("/api/validation/portfolio")
     def portfolio_validation(request: PortfolioValidationRequest):
         scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")

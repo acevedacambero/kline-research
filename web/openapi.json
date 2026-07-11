@@ -558,6 +558,22 @@
         }
       }
     },
+    "/api/model/p7/features": {
+      "get": {
+        "summary": "P7 Feature Catalog",
+        "operationId": "p7_feature_catalog_api_model_p7_features_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/validation/portfolio": {
       "post": {
         "summary": "Portfolio Validation",

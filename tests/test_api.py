@@ -246,6 +246,12 @@ def test_p7_baseline_endpoint_returns_version_when_data_missing(tmp_path):
     assert response.json()["status"] == "insufficient_data"
 
 
+def test_p7_feature_catalog_returns_empty_when_data_missing(tmp_path):
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get("/api/model/p7/features")
+    assert response.status_code == 200
+    assert response.json()["featureColumns"] == []
+
+
 def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
     response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).post(
         "/api/validation/portfolio", json={"label_column": "p20_executable_return", "top_fraction": 0.1}
