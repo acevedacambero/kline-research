@@ -263,6 +263,14 @@ def test_p7_feature_catalog_reports_ready_columns(tmp_path):
     assert response.json()["securityCount"] == 1
 
 
+def test_p7_multifeature_endpoint_returns_version_when_data_missing(tmp_path):
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).post(
+        "/api/model/p7/multifeature", json={"label_column": "p20_executable_return"}
+    )
+    assert response.status_code == 200
+    assert response.json()["version"] == "p7-multifeature-logistic-v1"
+
+
 def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
     response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).post(
         "/api/validation/portfolio", json={"label_column": "p20_executable_return", "top_fraction": 0.1}

@@ -574,6 +574,42 @@
         }
       }
     },
+    "/api/model/p7/multifeature": {
+      "post": {
+        "summary": "P7 Multifeature",
+        "operationId": "p7_multifeature_api_model_p7_multifeature_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaselineModelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/validation/portfolio": {
       "post": {
         "summary": "Portfolio Validation",

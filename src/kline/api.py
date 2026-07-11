@@ -46,7 +46,7 @@ from .p1.market_rules import status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
 from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
-from .model import train_score_baseline
+from .model import train_multifeature_baseline, train_score_baseline
 
 
 class _InjectedProviderAdapter:
@@ -966,6 +966,15 @@ def create_app(
         return {"version": "daily-features-v1", "featureColumns": columns, "missingColumns": missing,
                 "securityCount": security_count, "rowCount": int(len(features)),
                 "ready": bool(security_count and not missing)}
+
+    @app.post("/api/model/p7/multifeature")
+    def p7_multifeature(request: BaselineModelRequest):
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
+        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet")
+        features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet")
+        return train_multifeature_baseline(scores, labels, features,
+                                            label_column=request.label_column,
+                                            train_until=request.train_until)
 
     @app.post("/api/validation/portfolio")
     def portfolio_validation(request: PortfolioValidationRequest):
