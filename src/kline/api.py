@@ -885,20 +885,24 @@ def create_app(
             )
         return score_tasks.items[task_id]
 
-    def read_dataset_glob(pattern: str) -> pd.DataFrame:
+    def read_dataset_glob(pattern: str, unique_keys: list[str] | None = None) -> pd.DataFrame:
         frames = []
-        for path in settings.data_path.glob(pattern):
+        paths = sorted(settings.data_path.glob(pattern), key=lambda path: path.stat().st_mtime)
+        for path in paths:
             if path.name.endswith(".manifest.json"):
                 continue
             frames.append(pd.read_parquet(path))
         if not frames:
             return pd.DataFrame()
-        return pd.concat(frames, ignore_index=True)
+        result = pd.concat(frames, ignore_index=True)
+        if unique_keys and set(unique_keys).issubset(result.columns):
+            result = result.drop_duplicates(unique_keys, keep="last")
+        return result
 
     @app.post("/api/validation/single-factor")
     def single_factor_validation(request: SingleFactorValidationRequest):
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
-        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet")
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"])
+        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"])
         return validate_single_factor(
             scores,
             labels,
@@ -910,14 +914,14 @@ def create_app(
 
     @app.post("/api/validation/calibration")
     def score_calibration(request: CalibrationRequest):
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
-        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet")
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"])
+        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"])
         return calibrate_score(scores, labels, label_column=request.label_column,
                                buckets=request.buckets, as_of_date=request.as_of_date)
 
     @app.post("/api/scan/p3")
     def scan_p3(request: ScanRequest):
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"])
         if scores.empty:
             return {"version": SCORE_DEFINITION_VERSION, "asOfDate": request.as_of_date,
                     "minScore": request.min_score, "scannedCount": 0, "truncated": False, "rows": []}
@@ -948,15 +952,15 @@ def create_app(
 
     @app.post("/api/model/p7/baseline")
     def p7_baseline(request: BaselineModelRequest):
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
-        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet")
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"])
+        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"])
         return train_score_baseline(scores, labels, label_column=request.label_column,
                                     train_until=request.train_until)
 
     @app.get("/api/model/p7/features")
     def p7_feature_catalog():
         expected = ["bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"]
-        features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet")
+        features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet", ["exchange", "code", "date"])
         if features.empty:
             return {"version": "daily-features-v1", "featureColumns": [], "missingColumns": expected, "securityCount": 0, "rowCount": 0, "ready": False}
         ignored = {"exchange", "code", "date"}
@@ -969,17 +973,17 @@ def create_app(
 
     @app.post("/api/model/p7/multifeature")
     def p7_multifeature(request: BaselineModelRequest):
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
-        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet")
-        features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet")
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"])
+        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"])
+        features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet", ["exchange", "code", "date"])
         return train_multifeature_baseline(scores, labels, features,
                                             label_column=request.label_column,
                                             train_until=request.train_until)
 
     @app.post("/api/validation/portfolio")
     def portfolio_validation(request: PortfolioValidationRequest):
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
-        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet")
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"])
+        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"])
         return validate_top_score_portfolio(scores, labels, label_column=request.label_column,
                                             top_fraction=request.top_fraction, as_of_date=request.as_of_date)
 
