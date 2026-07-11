@@ -120,4 +120,5 @@ def test_top_score_portfolio_reports_excess_return():
     assert result["version"] == "p8-top-score-portfolio-v1"
     assert result["selectedCount"] > 0
     assert result["tradingDayCount"] == 20
+    assert result["maxDrawdown"] is not None
     assert result["excessReturn"] is not None

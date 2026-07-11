@@ -189,7 +189,7 @@ export function App() {
 
   function exportPortfolio() {
     if (!portfolio) return
-    const csv = ['version,labelColumn,topFraction,tradingDayCount,sampleCount,selectedCount,averageReturn,benchmarkReturn,excessReturn,winRate,warnings', [portfolio.version, portfolio.labelColumn, portfolio.topFraction, portfolio.tradingDayCount, portfolio.sampleCount, portfolio.selectedCount, portfolio.averageReturn ?? '', portfolio.benchmarkReturn ?? '', portfolio.excessReturn ?? '', portfolio.winRate ?? '', `"${portfolio.warnings.join(';')}"`].join(',')].join('\n')
+    const csv = ['version,labelColumn,topFraction,tradingDayCount,sampleCount,selectedCount,averageReturn,benchmarkReturn,excessReturn,winRate,maxDrawdown,warnings', [portfolio.version, portfolio.labelColumn, portfolio.topFraction, portfolio.tradingDayCount, portfolio.sampleCount, portfolio.selectedCount, portfolio.averageReturn ?? '', portfolio.benchmarkReturn ?? '', portfolio.excessReturn ?? '', portfolio.winRate ?? '', portfolio.maxDrawdown ?? '', `"${portfolio.warnings.join(';')}"`].join(',')].join('\n')
     const url = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = 'p8-portfolio-validation.csv'; link.click(); URL.revokeObjectURL(url)
   }
 

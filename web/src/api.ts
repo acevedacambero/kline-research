@@ -47,7 +47,7 @@ export type ScoreCalibration = { version: string; labelColumn: string; bucketCou
 export type ScanRow = { exchange: string; code: string; date: string; score: number; grade?: string | null }
 export type ScanResult = { version: string; asOfDate?: string | null; exchange?: string | null; minScore: number; scannedCount: number; truncated: boolean; rows: ScanRow[] }
 export type BaselineModel = { version: string; labelColumn: string; status: string; trainCount: number; testCount: number; positiveRate?: number | null; testPositiveRate?: number | null; accuracy?: number | null; auc?: number | null; intercept?: number | null; coefficient?: number | null; trainUntil?: string | null; warnings: string[] }
-export type PortfolioValidation = { version: string; labelColumn: string; topFraction: number; sampleCount: number; tradingDayCount: number; selectedCount: number; averageReturn?: number | null; benchmarkReturn?: number | null; excessReturn?: number | null; winRate?: number | null; warnings: string[] }
+export type PortfolioValidation = { version: string; labelColumn: string; topFraction: number; sampleCount: number; tradingDayCount: number; selectedCount: number; averageReturn?: number | null; benchmarkReturn?: number | null; excessReturn?: number | null; winRate?: number | null; maxDrawdown?: number | null; warnings: string[] }
 export type HistoryBackfillTask = {
   status: string; done: number; total: number; completed: number;
   listingHistoryShort: number; errors: unknown[]; currentSecurity?: string | null;
