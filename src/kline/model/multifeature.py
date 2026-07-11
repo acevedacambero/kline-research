@@ -15,7 +15,7 @@ def train_multifeature_baseline(scores: pd.DataFrame | list[dict], labels: pd.Da
     ff = pd.DataFrame(features).copy()
     lf = pd.DataFrame(labels).copy()
     base = {"version": MULTI_FEATURE_MODEL_VERSION, "labelColumn": label_column, "featureColumns": list(feature_columns), "status": "insufficient_data", "trainCount": 0, "testCount": 0, "accuracy": None, "auc": None, "weights": {}, "warnings": []}
-    if not {"exchange", "code", "date", *feature_columns}.issubset(sf.columns | ff.columns):
+    if not {"exchange", "code", "date", *feature_columns}.issubset(set(sf.columns) | set(ff.columns)):
         base["warnings"] = ["缺少 P2/P3 特征字段"]
         return base
     if not {"exchange", "code", "signal_date", label_column}.issubset(lf.columns):
