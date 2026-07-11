@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import date
 from pathlib import Path
+import json
 import queue
 import threading
 import time
@@ -626,6 +627,7 @@ def create_app(
 
     label_status_cache: dict[str, object] = {"expires": 0.0, "value": None}
     label_status_lock = threading.Lock()
+    label_status_path = settings.data_path / ".label-status.json"
 
     @app.get("/api/labels/status")
     def label_dataset_status():
@@ -633,6 +635,17 @@ def create_app(
             if time.monotonic() < float(label_status_cache["expires"]):
                 return label_status_cache["value"]
         current_version = VERSIONS["labelDefinitionVersion"]
+        if label_status_path.exists():
+            try:
+                persisted = json.loads(label_status_path.read_text(encoding="utf-8"))
+                if persisted.get("currentVersion") == current_version:
+                    with label_status_lock:
+                        label_status_cache.update(
+                            value=persisted, expires=time.monotonic() + 60
+                        )
+                    return persisted
+            except (OSError, ValueError, AttributeError):
+                pass
         paths = sorted(settings.data_path.glob("data-foundation-v1/labels/*/*/*.parquet"))
         version_counts: dict[str, int] = {}
         rows = 0
@@ -681,6 +694,9 @@ def create_app(
         }
         with label_status_lock:
             label_status_cache.update(value=result, expires=time.monotonic() + 60)
+            temporary = label_status_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(label_status_path)
         return result
 
     @app.get("/healthz", include_in_schema=False)
@@ -926,6 +942,9 @@ def create_app(
                     "message": "scope must be representative or all",
                 },
             )
+        label_status_path.unlink(missing_ok=True)
+        with label_status_lock:
+            label_status_cache.update(value=None, expires=0.0)
         try:
             names = {
                 f'{item["exchange"]}{item["code"]}': item["name"]
