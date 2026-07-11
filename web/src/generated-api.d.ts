@@ -242,6 +242,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/validation/single-factor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Single Factor Validation */
+        post: operations["single_factor_validation_api_validation_single_factor_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/validation/calibration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Score Calibration */
+        post: operations["score_calibration_api_validation_calibration_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/securities": {
         parameters: {
             query?: never;
@@ -343,6 +377,21 @@ export interface components {
              */
             signal_date: string;
         };
+        /** CalibrationRequest */
+        CalibrationRequest: {
+            /**
+             * Label Column
+             * @default p20_executable_return
+             */
+            label_column: string;
+            /**
+             * Buckets
+             * @default 10
+             */
+            buckets: number;
+            /** As Of Date */
+            as_of_date?: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -360,6 +409,26 @@ export interface components {
              * @default false
              */
             refresh: boolean;
+        };
+        /** SingleFactorValidationRequest */
+        SingleFactorValidationRequest: {
+            /**
+             * Factor Column
+             * @default score
+             */
+            factor_column: string;
+            /**
+             * Label Column
+             * @default p20_executable_return
+             */
+            label_column: string;
+            /**
+             * Buckets
+             * @default 5
+             */
+            buckets: number;
+            /** As Of Date */
+            as_of_date?: string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -749,6 +818,72 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    single_factor_validation_api_validation_single_factor_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SingleFactorValidationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    score_calibration_api_validation_calibration_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalibrationRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

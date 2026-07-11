@@ -450,6 +450,42 @@
         }
       }
     },
+    "/api/validation/calibration": {
+      "post": {
+        "summary": "Score Calibration",
+        "operationId": "score_calibration_api_validation_calibration_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalibrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/securities": {
       "get": {
         "summary": "Securities",
@@ -668,6 +704,34 @@
           "signal_date"
         ],
         "title": "AuditRequest"
+      },
+      "CalibrationRequest": {
+        "properties": {
+          "label_column": {
+            "type": "string",
+            "title": "Label Column",
+            "default": "p20_executable_return"
+          },
+          "buckets": {
+            "type": "integer",
+            "title": "Buckets",
+            "default": 10
+          },
+          "as_of_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Date"
+          }
+        },
+        "type": "object",
+        "title": "CalibrationRequest"
       },
       "HTTPValidationError": {
         "properties": {

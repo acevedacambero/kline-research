@@ -42,6 +42,8 @@ export type SingleFactorValidation = {
   sampleCount: number; rankCorrelation?: number | null; buckets: ValidationBucket[];
   missingColumns: string[]; dropped: Record<string, number>;
 }
+export type CalibrationBucket = { bucket: number; count: number; minScore: number; maxScore: number; avgScore: number; observedProbability: number; avgLabel: number }
+export type ScoreCalibration = { version: string; labelColumn: string; bucketCount: number; sampleCount: number; buckets: CalibrationBucket[]; missingColumns: string[]; dropped: Record<string, number> }
 export type HistoryBackfillTask = {
   status: string; done: number; total: number; completed: number;
   listingHistoryShort: number; errors: unknown[]; currentSecurity?: string | null;
@@ -99,5 +101,8 @@ export const api = {
   }),
   validateSingleFactor: () => request<SingleFactorValidation>('/api/validation/single-factor', {
     method: 'POST', body: JSON.stringify({ factor_column: 'score', label_column: 'p20_executable_return', buckets: 5 }),
+  }),
+  calibrateScore: () => request<ScoreCalibration>('/api/validation/calibration', {
+    method: 'POST', body: JSON.stringify({ label_column: 'p20_executable_return', buckets: 10 }),
   }),
 }

@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from kline.validation import validate_single_factor
+from kline.validation import calibrate_score, validate_single_factor
 
 
 def score_rows(count: int = 20) -> pd.DataFrame:
@@ -91,3 +91,11 @@ def test_single_factor_validation_reports_missing_columns():
     assert result["sampleCount"] == 0
     assert "score.score" in result["missingColumns"]
     assert "label.p20_executable_return" in result["missingColumns"]
+
+
+def test_score_calibration_buckets_observed_positive_probability():
+    result = calibrate_score(score_rows(), label_rows(), buckets=4, as_of_date=date(2024, 3, 1))
+    assert result["version"] == "p5-score-calibration-v1"
+    assert result["sampleCount"] == 20
+    assert len(result["buckets"]) == 4
+    assert result["buckets"][0]["observedProbability"] < result["buckets"][-1]["observedProbability"]

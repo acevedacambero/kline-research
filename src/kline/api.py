@@ -45,7 +45,7 @@ from .p1.batch import BatchLabelBuilder, LabelDatasetStore
 from .p1.market_rules import status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
-from .validation import validate_single_factor
+from .validation import calibrate_score, validate_single_factor
 
 
 class _InjectedProviderAdapter:
@@ -89,6 +89,12 @@ class SingleFactorValidationRequest(BaseModel):
     factor_column: str = "score"
     label_column: str = "p20_executable_return"
     buckets: int = 5
+    as_of_date: date | None = None
+
+
+class CalibrationRequest(BaseModel):
+    label_column: str = "p20_executable_return"
+    buckets: int = 10
     as_of_date: date | None = None
 
 
@@ -882,6 +888,13 @@ def create_app(
             buckets=request.buckets,
             as_of_date=request.as_of_date,
         )
+
+    @app.post("/api/validation/calibration")
+    def score_calibration(request: CalibrationRequest):
+        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet")
+        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet")
+        return calibrate_score(scores, labels, label_column=request.label_column,
+                               buckets=request.buckets, as_of_date=request.as_of_date)
 
     @app.get("/api/securities")
     def securities(query: str = ""):

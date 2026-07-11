@@ -204,6 +204,20 @@ def test_single_factor_validation_api_returns_empty_when_files_are_missing(tmp_p
     assert response.json()["sampleCount"] == 0
 
 
+def test_score_calibration_api_reads_local_files(tmp_path):
+    data_path = tmp_path / "data"
+    score_dir = data_path / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
+    label_dir = data_path / "data-foundation-v1" / "labels" / "snapshot-v1" / "sh"
+    score_dir.mkdir(parents=True)
+    label_dir.mkdir(parents=True)
+    dates = [date(2024, 1, 1) + timedelta(days=i) for i in range(4)]
+    pd.DataFrame([{"exchange": "sh", "code": "600000", "date": d, "score": i * 30, "usable": True} for i, d in enumerate(dates)]).to_parquet(score_dir / "600000.parquet", index=False)
+    pd.DataFrame([{"exchange": "sh", "code": "600000", "signal_date": d, "p20_executable_return": -0.1 + i * 0.1, "label_maturity_date": date(2024, 3, 1)} for i, d in enumerate(dates)]).to_parquet(label_dir / "600000.parquet", index=False)
+    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post("/api/validation/calibration", json={"buckets": 2, "as_of_date": "2024-03-01"})
+    assert response.status_code == 200
+    assert response.json()["version"] == "p5-score-calibration-v1"
+
+
 def test_feature_task_unknown_id_is_404(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
     response = TestClient(app).get("/api/features/tasks/missing")

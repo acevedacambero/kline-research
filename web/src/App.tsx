@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -24,6 +24,7 @@ export function App() {
   const [featureAudit, setFeatureAudit] = useState<FeatureAudit | null>(null)
   const [scoreAudit, setScoreAudit] = useState<ScoreAudit | null>(null)
   const [validation, setValidation] = useState<SingleFactorValidation | null>(null)
+  const [calibration, setCalibration] = useState<ScoreCalibration | null>(null)
   const [message, setMessage] = useState('等待检查')
   const [busy, setBusy] = useState(false)
   const [cachedCount, setCachedCount] = useState<number | null>(null)
@@ -139,6 +140,13 @@ export function App() {
     finally { setBusy(false) }
   }
 
+  async function runCalibration() {
+    setBusy(true)
+    try { const result = await api.calibrateScore(); setCalibration(result); setMessage(`P5 校准：${result.sampleCount} 个成熟样本`) }
+    catch (error) { setMessage(error instanceof Error ? error.message : '校准失败') }
+    finally { setBusy(false) }
+  }
+
   return <main>
     <header><div><span className="eyebrow">LOCAL RESEARCH SYSTEM</span><h1>K 线结构概率研究台</h1></div><span className={`health ${health?.status === 'ok' ? 'ok' : ''}`}>{health?.status === 'ok' ? '本地服务正常' : '正在连接'}</span></header>
     <section className="panel status-panel">
@@ -155,6 +163,7 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={startFeatures}>生成 P2 特征</button>
       <button className="secondary" disabled={busy} onClick={startScores}>生成 P3 评分</button>
       <button className="secondary" disabled={busy} onClick={runValidation}>验证 P4 单因子</button>
+      <button className="secondary" disabled={busy} onClick={runCalibration}>运行 P5 概率校准</button>
     </section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P1 AUDITOR</span><h2>P1 标签审计台</h2></div><span className="message">{message}</span></div>
@@ -186,6 +195,10 @@ export function App() {
           </tr>)}</tbody>
         </table>
       </div> : <p className="muted">生成 P1 标签和 P3 评分后，可验证 score 对 P20 可执行收益的分桶效果。</p>}
+    </section>
+    <section className="panel">
+      <div className="section-title"><div><span className="eyebrow">P5 CALIBRATION</span><h2>P5 概率校准</h2></div>{calibration && <span className="message">{calibration.version}</span>}</div>
+      {calibration ? <div className="validation-panel"><article><span>成熟样本</span><strong>{calibration.sampleCount}</strong><small>按 P3 分数分桶观察胜率</small></article><table><thead><tr><th>分桶</th><th>样本</th><th>平均分</th><th>观察胜率</th><th>平均 P20 收益</th></tr></thead><tbody>{calibration.buckets.map(bucket => <tr key={bucket.bucket}><td>{bucket.bucket}</td><td>{bucket.count}</td><td>{bucket.avgScore.toFixed(1)}</td><td>{pct(bucket.observedProbability)}</td><td>{pct(bucket.avgLabel)}</td></tr>)}</tbody></table></div> : <p className="muted">生成 P1 标签和 P3 评分后，运行概率校准查看分数与 P20 结果的对应关系。</p>}
     </section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P3 SCORE</span><h2>P3 结构评分</h2></div>{scoreAudit && <span className="message">{scoreAudit.score.version}</span>}</div>
