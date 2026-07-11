@@ -34,6 +34,7 @@ VERSIONS = {
     "featureDefinitionVersion": "daily-features-v1",
     "scoreDefinitionVersion": "p3-rule-score-v1",
     "modelDefinitionVersion": "p7-score-logistic-v1",
+    "portfolioValidationVersion": "p8-top-score-portfolio-v1",
     "labelDefinitionVersion": "daily-v1",
     "limitRuleVersion": "cn-equity-v1",
     "gapRuleVersion": "calendar-10d-v1",
