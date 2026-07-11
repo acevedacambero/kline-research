@@ -231,6 +231,7 @@ export function App() {
       <div className="version"><span>特征版本</span><strong>{health?.versions.featureDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>评分版本</span><strong>{health?.versions.scoreDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>模型版本</span><strong>{health?.versions.modelDefinitionVersion ?? '—'}</strong></div>
+      <div className="version"><span>多特征模型</span><strong>{health?.versions.multiFeatureModelDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>组合验证版本</span><strong>{health?.versions.portfolioValidationVersion ?? '—'}</strong></div>
       <div className="version"><span>行情策略</span><strong>{health?.versions.providerPolicyVersion ?? '—'}</strong></div>
       <button disabled={busy} onClick={() => startImport('representative')}>拉取代表样本</button>

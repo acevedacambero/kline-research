@@ -43,6 +43,7 @@ def test_health_exposes_all_version_keys(tmp_path):
     assert body["versions"]["labelDefinitionVersion"] == "daily-v1"
     assert body["versions"]["limitRuleVersion"] == "cn-equity-v1"
     assert body["versions"]["modelDefinitionVersion"] == "p7-score-logistic-v1"
+    assert body["versions"]["multiFeatureModelDefinitionVersion"] == "p7-multifeature-logistic-v1"
     assert body["versions"]["portfolioValidationVersion"] == "p8-top-score-portfolio-v1"
 
 
