@@ -47,6 +47,34 @@ def test_health_exposes_all_version_keys(tmp_path):
     assert body["versions"]["portfolioValidationVersion"] == "p8-top-score-portfolio-v1"
 
 
+def test_label_status_reports_stale_and_current_files(tmp_path):
+    data_path = tmp_path / "data"
+    label_dir = data_path / "data-foundation-v1" / "labels" / "snapshot" / "sh"
+    label_dir.mkdir(parents=True)
+    pd.DataFrame([{
+        "label_definition_version": "daily-v2-exit-delay",
+        "p20_delayed_executable_return": 0.1,
+    }]).to_parquet(label_dir / "600000.parquet", index=False)
+    pd.DataFrame([{"p20_executable_return": 0.2}]).to_parquet(
+        label_dir / "600001.parquet", index=False
+    )
+
+    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).get(
+        "/api/labels/status"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "currentVersion": "daily-v2-exit-delay",
+        "files": 2,
+        "rows": 2,
+        "versionCounts": {"daily-v2-exit-delay": 1, "legacy-or-unknown": 1},
+        "compatibleFiles": 1,
+        "staleFiles": 1,
+        "delayedExitReady": False,
+    }
+
+
 def test_validate_akshare_reports_available_securities(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
     response = TestClient(app).post("/api/datasets/validate")

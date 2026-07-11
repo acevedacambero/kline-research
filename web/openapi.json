@@ -21,6 +21,22 @@
         }
       }
     },
+    "/api/labels/status": {
+      "get": {
+        "summary": "Label Dataset Status",
+        "operationId": "label_dataset_status_api_labels_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/datasets/validate": {
       "post": {
         "summary": "Validate Dataset",

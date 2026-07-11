@@ -623,6 +623,39 @@ def create_app(
             "versions": VERSIONS,
         }
 
+    @app.get("/api/labels/status")
+    def label_dataset_status():
+        current_version = VERSIONS["labelDefinitionVersion"]
+        paths = sorted(settings.data_path.glob("data-foundation-v1/labels/*/*/*.parquet"))
+        version_counts: dict[str, int] = {}
+        rows = 0
+        compatible_files = 0
+        delayed_exit_files = 0
+        for path in paths:
+            frame = pd.read_parquet(path)
+            rows += len(frame)
+            if "label_definition_version" in frame.columns and not frame.empty:
+                versions = frame["label_definition_version"].fillna("unknown").astype(str)
+                for version, count in versions.value_counts().items():
+                    version_counts[version] = version_counts.get(version, 0) + int(count)
+                if set(versions.unique()) == {current_version}:
+                    compatible_files += 1
+            else:
+                version_counts["legacy-or-unknown"] = (
+                    version_counts.get("legacy-or-unknown", 0) + len(frame)
+                )
+            if "p20_delayed_executable_return" in frame.columns:
+                delayed_exit_files += 1
+        return {
+            "currentVersion": current_version,
+            "files": len(paths),
+            "rows": rows,
+            "versionCounts": version_counts,
+            "compatibleFiles": compatible_files,
+            "staleFiles": len(paths) - compatible_files,
+            "delayedExitReady": bool(paths) and delayed_exit_files == len(paths),
+        }
+
     @app.get("/healthz", include_in_schema=False)
     def healthz():
         return {"status": "ok"}

@@ -1,4 +1,5 @@
 export type Health = { status: string; dataSource: string; cachePath: string; versions: Record<string, string> }
+export type LabelStatus = { currentVersion: string; files: number; rows: number; versionCounts: Record<string, number>; compatibleFiles: number; staleFiles: number; delayedExitReady: boolean }
 export type Bar = {
   date: string; open: number; high: number; low: number; close: number;
   open_qfq: number; high_qfq: number; low_qfq: number; close_qfq: number;
@@ -75,6 +76,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<Health>('/api/system/health'),
+  labelStatus: () => request<LabelStatus>('/api/labels/status'),
   bars: (exchange: string, code: string) => request<Bar[]>(`/api/securities/${exchange}/${code}/bars`),
   audit: (exchange: string, code: string, signalDate: string) => request<Audit>('/api/p1/audit', {
     method: 'POST', body: JSON.stringify({ exchange, code, signal_date: signalDate }),

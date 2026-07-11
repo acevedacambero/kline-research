@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type LabelStatus, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -16,6 +16,7 @@ const featureValue = (value: FeatureValue) => value == null ? '历史不足' : t
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null)
+  const [labelStatus, setLabelStatus] = useState<LabelStatus | null>(null)
   const [exchange, setExchange] = useState('sh')
   const [code, setCode] = useState('600000')
   const [signalDate, setSignalDate] = useState('2024-01-02')
@@ -49,6 +50,7 @@ export function App() {
 
   useEffect(() => {
     api.health().then(setHealth).catch(e => setMessage(e.message))
+    api.labelStatus().then(setLabelStatus).catch(() => undefined)
     const refresh = () => api.quality().then(q => setCachedCount(q.totalCached)).catch(() => undefined)
     refresh(); const timer = window.setInterval(refresh, 5000)
     return () => window.clearInterval(timer)
@@ -237,6 +239,7 @@ export function App() {
     <section className="panel status-panel">
       <div><h2>数据状态</h2><p className="muted">{health ? `${health.dataSource} · 缓存 ${health.cachePath} · ${cachedCount ?? '—'} 只证券` : '正在读取配置…'}</p></div>
       <div className="version"><span>标签版本</span><strong>{health?.versions.labelDefinitionVersion ?? '—'}</strong></div>
+      <div className="version"><span>标签数据兼容</span><strong>{labelStatus ? `${labelStatus.compatibleFiles}/${labelStatus.files}` : '—'}</strong><small>{labelStatus?.staleFiles ? `${labelStatus.staleFiles} 个文件待重建` : labelStatus?.delayedExitReady ? '顺延卖出口径就绪' : '暂无标签数据'}</small></div>
       <div className="version"><span>交易规则</span><strong>{health?.versions.limitRuleVersion ?? '—'}</strong></div>
       <div className="version"><span>特征版本</span><strong>{health?.versions.featureDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>评分版本</span><strong>{health?.versions.scoreDefinitionVersion ?? '—'}</strong></div>
