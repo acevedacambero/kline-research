@@ -244,7 +244,7 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={runScan}>扫描 P6 高分样本</button>
       <button className="secondary" disabled={busy} onClick={runBaseline}>训练 P7 基线模型</button>
       <button className="secondary" disabled={busy} onClick={checkFeatureCatalog}>检查 P2 特征覆盖</button>
-      <button className="secondary" disabled={busy} onClick={runMultifeature}>训练 P7 多特征模型</button>
+      <button className="secondary" disabled={busy || !featureCatalog?.ready} onClick={runMultifeature}>训练 P7 多特征模型</button>
       <button className="secondary" disabled={busy} onClick={runPortfolio}>验证 P8 高分组合</button>
     </section>
     <section className="panel"><div className="section-title"><div><span className="eyebrow">P7 MULTI-FEATURE</span><h2>P7 多特征基线</h2></div>{multifeature && <span className="message">{multifeature.version}</span>}</div>{multifeature ? <div className="validation-panel"><article><span>训练 / 测试样本</span><strong>{multifeature.trainCount} / {multifeature.testCount}</strong><small>状态 {multifeature.status} · AUC {multifeature.auc == null ? '—' : multifeature.auc.toFixed(3)}</small></article><article><span>测试准确率</span><strong>{multifeature.accuracy == null ? '—' : `${(multifeature.accuracy * 100).toFixed(1)}%`}</strong><small>{multifeature.warnings.join('；') || '可用于基线比较'}</small></article><article><span>特征权重</span><strong>{Object.keys(multifeature.weights).length}</strong><small>{Object.entries(multifeature.weights).map(([key, value]) => `${key}:${value.toFixed(2)}`).join(' · ') || '暂无权重'}</small></article><button className="secondary" onClick={exportMultifeature}>导出 CSV</button></div> : <p className="muted">通过 P7 特征 ready gate 后，训练 P2/P3 多特征基线模型。</p>}</section>
