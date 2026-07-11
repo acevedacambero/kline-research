@@ -107,5 +107,5 @@ export const api = {
   calibrateScore: (labelColumn = 'p20_executable_return', buckets = 10) => request<ScoreCalibration>('/api/validation/calibration', {
     method: 'POST', body: JSON.stringify({ label_column: labelColumn, buckets }),
   }),
-  scanP3: (minScore = 70, exchange?: string) => request<ScanResult>('/api/scan/p3', { method: 'POST', body: JSON.stringify({ min_score: minScore, exchange, limit: 50 }) }),
+  scanP3: (minScore = 70, exchange?: string, asOfDate?: string) => request<ScanResult>('/api/scan/p3', { method: 'POST', body: JSON.stringify({ min_score: minScore, exchange, as_of_date: asOfDate || undefined, limit: 50 }) }),
 }
