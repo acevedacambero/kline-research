@@ -12,6 +12,7 @@ describe('App', () => {
     expect(screen.getByLabelText('证券代码')).toBeInTheDocument()
     expect(screen.getByText('P2 特征审计')).toBeInTheDocument()
     expect(screen.getByText('P3 结构评分')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'P20 可执行顺延卖出' })).toHaveValue('p20_delayed_executable_return')
   })
 
   it('renders five P2 groups and explains unavailable history', async () => {
@@ -66,10 +67,9 @@ describe('App', () => {
 
     const { container } = render(<App />)
     await screen.findByRole('heading', { level: 1 })
-    const exchangeSelect = container.querySelector('select')
+    const exchangeSelect = screen.getByLabelText('交易所') as HTMLSelectElement
 
-    expect(exchangeSelect).not.toBeNull()
-    expect(Array.from(exchangeSelect!.options).map(option => option.value)).toEqual(['sh', 'sz'])
+    expect(Array.from(exchangeSelect.options).map(option => option.value)).toEqual(['sh', 'sz'])
     expect(container.querySelector('option[value="bj"]')).toBeNull()
   })
 
