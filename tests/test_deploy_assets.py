@@ -50,3 +50,12 @@ def test_release_pruning_retains_current_previous_and_shared_data():
     assert '"${current}"|"${previous}"' in script
     assert '"${releases}/"*' in script
     assert "shared/data" not in script
+
+
+def test_release_install_uses_shared_runtime_healthcheck_and_rollback():
+    script = read("install-release.sh")
+    assert "shared/runtime-venv" in script
+    assert "healthcheck.sh" in script
+    assert "previous" in script
+    assert "prune-releases.sh" in script
+    assert "ln -sfn" in script

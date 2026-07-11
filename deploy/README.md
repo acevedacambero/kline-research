@@ -23,3 +23,8 @@ symlink `.venv` to it instead of copying roughly 500 MB per release. After a
 successful deployment, run `deploy/prune-releases.sh` to retain only `current`
 and `previous`. The pruning script refuses targets outside `releases/` and does
 not touch `shared/data` or the shared runtime.
+
+Use `deploy/install-release.sh RELEASE_ID SOURCE_TAR WEB_DIST_TAR` for normal
+deployments. It validates inputs, links the shared runtime, records the actual
+previous release, runs the bounded health check, rolls back on failure, and
+prunes obsolete releases after success.
