@@ -101,7 +101,7 @@ LabelColumn = Literal[
 
 
 class SingleFactorValidationRequest(BaseModel):
-    factor_column: str = "score"
+    factor_column: Literal["score"] = "score"
     label_column: LabelColumn = "p20_executable_return"
     buckets: int = 5
     as_of_date: date | None = None

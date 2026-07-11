@@ -594,8 +594,9 @@ export interface components {
             /**
              * Factor Column
              * @default score
+             * @constant
              */
-            factor_column: string;
+            factor_column: "score";
             /**
              * Label Column
              * @default p20_executable_return
