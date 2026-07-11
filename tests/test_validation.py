@@ -108,6 +108,7 @@ def test_score_calibration_buckets_observed_positive_probability():
 def test_score_baseline_trains_time_split_model():
     scores = score_rows(40)
     labels = label_rows(40)
+    labels["label_maturity_date"] = labels["signal_date"]
     result = train_score_baseline(scores, labels, train_until=date(2024, 1, 28))
     assert result["version"] == "p7-score-logistic-v1"
     assert result["status"] == "trained"
@@ -127,10 +128,18 @@ def test_multifeature_baseline_trains_with_p2_columns():
     features["return_20"] = features.index / 100
     features["volume_ratio_5"] = 1.0
     features["volatility_20"] = 0.1
-    result = train_multifeature_baseline(scores, label_rows(40), features, train_until=date(2024, 1, 30))
+    labels = label_rows(40)
+    labels["label_maturity_date"] = labels["signal_date"]
+    result = train_multifeature_baseline(scores, labels, features, train_until=date(2024, 1, 30))
     assert result["version"] == "p7-multifeature-logistic-v1"
     assert result["trainCount"] == 30
     assert set(result["weights"]) == {"score", "bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"}
+
+
+def test_score_baseline_excludes_labels_immature_at_training_cutoff():
+    result = train_score_baseline(score_rows(40), label_rows(40), train_until=date(2024, 1, 28))
+    assert result["trainCount"] == 0
+    assert result["status"] == "insufficient_data"
 
 
 def test_top_score_portfolio_reports_excess_return():
@@ -139,10 +148,17 @@ def test_top_score_portfolio_reports_excess_return():
     assert result["selectedCount"] > 0
     assert result["tradingDayCount"] == 20
     assert result["maxDrawdown"] is None
+    assert result["excessReturn"] is not None
     assert any("重叠" in warning for warning in result["warnings"])
 
 
 def test_top_score_portfolio_warns_on_small_selection():
     result = validate_top_score_portfolio(score_rows(5), label_rows(5), top_fraction=0.2)
     assert any("少于 20" in warning for warning in result["warnings"])
-    assert result["excessReturn"] is not None
+
+
+def test_portfolio_excludes_labels_immature_at_as_of_date():
+    result = validate_top_score_portfolio(
+        score_rows(10), label_rows(10), as_of_date=date(2024, 1, 15)
+    )
+    assert result["sampleCount"] == 0

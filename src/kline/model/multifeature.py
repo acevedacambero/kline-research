@@ -44,6 +44,9 @@ def train_multifeature_baseline(scores: pd.DataFrame | list[dict], labels: pd.Da
         return base
     train = merged.loc[merged["date"] <= train_until]
     test = merged.loc[merged["date"] > train_until]
+    if "label_maturity_date" in train:
+        maturity = pd.to_datetime(train["label_maturity_date"], errors="coerce").dt.date
+        train = train.loc[maturity <= train_until]
     base["trainCount"] = int(len(train))
     base["testCount"] = int(len(test))
     if len(train) < 30 or len(test) < 10:

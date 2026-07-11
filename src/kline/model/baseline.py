@@ -57,6 +57,9 @@ def train_score_baseline(
         base["warnings"] = ["没有可用成熟样本"]
         return base
     train, test = merged.loc[merged["date"] <= train_until], merged.loc[merged["date"] > train_until]
+    if "label_maturity_date" in train:
+        maturity = pd.to_datetime(train["label_maturity_date"], errors="coerce").dt.date
+        train = train.loc[maturity <= train_until]
     base["trainCount"], base["testCount"] = int(len(train)), int(len(test))
     if len(train) < 20 or len(test) < 5:
         base["warnings"] = ["训练集至少 20 条、测试集至少 5 条"]
