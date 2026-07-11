@@ -31,7 +31,7 @@ def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.D
     fraction = max(0.01, min(1.0, float(top_fraction)))
     selected = merged.groupby("date", group_keys=False).apply(lambda frame: frame.nlargest(max(1, int(len(frame) * fraction)), "score"), include_groups=False)
     selected_returns = selected[label_column]
-    daily_returns = selected.groupby("date")[label_column].mean()
+    daily_returns = selected_returns.groupby(level=0).mean()
     curve = (1 + daily_returns).cumprod()
     max_drawdown = float((curve / curve.cummax() - 1).min()) if not curve.empty else None
     benchmark = merged[label_column]
