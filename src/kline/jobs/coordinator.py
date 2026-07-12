@@ -49,28 +49,54 @@ class HeavyTaskCoordinator:
         self._shutdown_state = "open"
         self._shutdown_error: CoordinatorShutdownError | None = None
 
-    def submit(self, job_type: str, payload: Any, operation: Operation) -> SubmittedJob:
+    def submit(
+        self,
+        job_type: str,
+        payload: Any,
+        operation: Operation,
+        *,
+        resumable: bool = False,
+    ) -> SubmittedJob:
         with self._lock:
             if self._shutdown_state != "open":
                 raise RuntimeError("coordinator has been shut down")
             self._prune_completed_locked()
             if job_type in self._job_types:
                 raise DuplicateActiveJobError(f"active {job_type!r} job already exists")
-            job = self._store.create(job_type, payload)
-            self._job_types[job_type] = job.id
-            try:
-                future = self._executor.submit(self._run, job.id, job.payload, operation)
-            except BaseException:
-                del self._job_types[job_type]
-                self._store.fail(job.id, "submission failed")
-                raise
-            self._futures[job.id] = future
-            future.add_done_callback(
-                lambda completed, job_id=job.id, job_type=job_type: self._finished(
-                    job_id, job_type, completed
-                )
+            job = self._store.create(job_type, payload, resumable=resumable)
+            return self._schedule(job, operation)
+
+    def resume(self, job_id: str, operation: Operation) -> SubmittedJob:
+        with self._lock:
+            if self._shutdown_state != "open":
+                raise RuntimeError("coordinator has been shut down")
+            self._prune_completed_locked()
+            job = self._store.get(job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if self._futures:
+                raise DuplicateActiveJobError("another heavy job is already active")
+            job = self._store.requeue(job_id)
+            return self._schedule(job, operation)
+
+    def _schedule(self, job: Job, operation: Operation) -> SubmittedJob:
+        job_type = job.job_type
+        if job_type in self._job_types:
+            raise DuplicateActiveJobError(f"active {job_type!r} job already exists")
+        self._job_types[job_type] = job.id
+        try:
+            future = self._executor.submit(self._run, job.id, job.payload, operation)
+        except BaseException:
+            del self._job_types[job_type]
+            self._store.fail(job.id, "submission failed")
+            raise
+        self._futures[job.id] = future
+        future.add_done_callback(
+            lambda completed, job_id=job.id, job_type=job_type: self._finished(
+                job_id, job_type, completed
             )
-            return SubmittedJob(job.id, future)
+        )
+        return SubmittedJob(job.id, future)
 
     def _run(self, job_id: str, payload: Any, operation: Operation) -> Any:
         self._worker_context.active = True

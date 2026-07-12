@@ -157,6 +157,28 @@ def test_operation_receives_detached_persisted_payload(tmp_path):
     store.close()
 
 
+def test_interrupted_job_resumes_with_same_id_and_payload(tmp_path):
+    path = tmp_path / "jobs.duckdb"
+    with JobStore(path) as store:
+        interrupted = store.create(
+            "labels", {"securities": ["600000"]}, resumable=True
+        )
+        store.transition(interrupted.id, JobStatus.RUNNING)
+
+    store = JobStore(path)
+    coordinator = HeavyTaskCoordinator(store)
+    submitted = coordinator.resume(
+        interrupted.id,
+        lambda payload, progress: {"received": payload["securities"]},
+    )
+
+    assert submitted.job_id == interrupted.id
+    assert submitted.future.result(timeout=2) == {"received": ["600000"]}
+    assert store.get(interrupted.id).status is JobStatus.COMPLETED
+    coordinator.shutdown()
+    store.close()
+
+
 def test_concurrent_shutdown_callers_wait_and_receive_same_failure(tmp_path):
     store = JobStore(tmp_path / "jobs.duckdb")
     coordinator = HeavyTaskCoordinator(store)

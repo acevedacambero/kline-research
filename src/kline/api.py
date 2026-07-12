@@ -195,6 +195,7 @@ class _TaskFacade:
     def __init__(self, coordinator: HeavyTaskCoordinator, store: JobStore, lock: threading.Lock,
                  job_types: set[str]):
         self.coordinator = coordinator
+        self.store = store
         self.items = _DurableItems(store, job_types)
         self.lock = lock
 
@@ -219,7 +220,16 @@ class _TaskFacade:
                     "message": f"A heavy job is already running: {task_id}",
                     "taskId": task_id,
                 })
-            return self.coordinator.submit(job_type, payload, operation).job_id
+            interrupted = [
+                job
+                for job in self.store.list(status=JobStatus.INTERRUPTED)
+                if job.job_type == job_type and job.resumable
+            ]
+            if interrupted:
+                return self.coordinator.resume(interrupted[-1].id, operation).job_id
+            return self.coordinator.submit(
+                job_type, payload, operation, resumable=True
+            ).job_id
 
 
 class TaskStore(_TaskFacade):
@@ -639,6 +649,9 @@ def create_app(
             "dataSource": "AkShare",
             "cachePath": str(settings.data_path),
             "versions": VERSIONS,
+            "recoverableTasks": sum(
+                job.resumable for job in job_store.list(status=JobStatus.INTERRUPTED)
+            ),
         }
 
     label_status_cache: dict[str, object] = {"expires": 0.0, "value": None}

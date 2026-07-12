@@ -256,6 +256,7 @@ export function App() {
       <div><h2>数据状态</h2><p className="muted">{health ? `${health.dataSource} · 缓存 ${health.cachePath} · ${cachedCount ?? '—'} 只证券 · 近似规则 ${approximateRuleRatio == null ? '—' : `${(approximateRuleRatio * 100).toFixed(2)}%`}` : '正在读取配置…'}</p></div>
       <div className="version"><span>标签版本</span><strong>{health?.versions.labelDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>标签数据兼容</span><strong>{labelStatus && Number.isFinite(labelStatus.files) ? `${labelStatus.compatibleFiles}/${labelStatus.files}` : '—'}</strong><small>{labelStatus?.staleFiles ? `${labelStatus.staleFiles} 个文件待重建` : labelStatus?.delayedExitReady ? '顺延卖出口径就绪' : '暂无标签数据'}</small></div>
+      <div className="version"><span>可恢复任务</span><strong>{health?.recoverableTasks ?? 0}</strong><small>再次点击对应任务即可续跑</small></div>
       <div className="version"><span>交易规则</span><strong>{health?.versions.limitRuleVersion ?? '—'}</strong></div>
       <div className="version"><span>特征版本</span><strong>{health?.versions.featureDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>评分版本</span><strong>{health?.versions.scoreDefinitionVersion ?? '—'}</strong></div>

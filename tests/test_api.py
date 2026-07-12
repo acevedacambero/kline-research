@@ -10,6 +10,7 @@ import kline.api as api_module
 from kline.api import create_app, dataframe_records
 from kline.config import Settings
 from kline.data.pipeline import DatasetPipeline
+from kline.jobs import JobStatus, JobStore
 from kline.validation import VALIDATION_DEFINITION_VERSION
 
 
@@ -47,6 +48,23 @@ def test_health_exposes_all_version_keys(tmp_path):
     assert body["versions"]["walkForwardModelDefinitionVersion"] == "p7-walk-forward-v2-nonoverlap"
     assert body["versions"]["portfolioValidationVersion"] == "p8-top-score-portfolio-v2-executable"
     assert body["versions"]["transactionCostVersion"] == "p8-flat-bps-v1"
+    assert body["recoverableTasks"] == 0
+
+
+def test_feature_build_resumes_interrupted_task_with_same_id(tmp_path):
+    data_path = tmp_path / "data"
+    jobs_path = data_path / "jobs.duckdb"
+    data_path.mkdir(parents=True)
+    with JobStore(jobs_path) as store:
+        interrupted = store.create("features", [], resumable=True)
+        store.transition(interrupted.id, JobStatus.RUNNING)
+
+    app = create_app(Settings(data_path=data_path), FakeSource())
+    with TestClient(app) as client:
+        assert client.get("/api/system/health").json()["recoverableTasks"] == 1
+        response = client.post("/api/features/build", json={"scope": "all"})
+        assert response.status_code == 202
+        assert response.json()["taskId"] == interrupted.id
 
 
 def test_label_status_reports_stale_and_current_files(tmp_path):

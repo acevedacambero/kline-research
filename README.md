@@ -104,6 +104,8 @@ python -m pytest tests/test_job_store.py tests/test_job_coordinator.py \
 
 生产 Uvicorn 只允许一个 worker。任一必需 Gate 失败都必须阻断部署。
 
+重任务状态持久化在 `jobs.duckdb`。服务被强制终止时，运行中的任务会标记为可恢复；页面显示可恢复任务数量，再次点击同类任务会使用原任务 ID 和原始任务载荷续跑。各数据写入保持幂等，已完成文件会复用或按内容指纹跳过。
+
 ## 当前边界
 
 - 仅提供日线正式标签和特征；周线、月线尚未纳入版本体系。

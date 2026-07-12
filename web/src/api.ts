@@ -1,4 +1,4 @@
-export type Health = { status: string; dataSource: string; cachePath: string; versions: Record<string, string> }
+export type Health = { status: string; dataSource: string; cachePath: string; versions: Record<string, string>; recoverableTasks?: number }
 export type LabelStatus = { currentVersion: string; files: number; rows: number; versionCounts: Record<string, number>; compatibleFiles: number; staleFiles: number; delayedExitReady: boolean }
 export type Bar = {
   date: string; open: number; high: number; low: number; close: number;

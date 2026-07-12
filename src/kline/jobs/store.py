@@ -174,6 +174,19 @@ class JobStore:
             )
             return self._require(job_id)
 
+    def requeue(self, job_id: str) -> Job:
+        with self._lock:
+            current = self._require(job_id)
+            if current.status is not JobStatus.INTERRUPTED:
+                raise ValueError(f"cannot requeue job in {current.status.value} state")
+            if not current.resumable:
+                raise ValueError("job is not resumable")
+            self._connection.execute(
+                "UPDATE jobs SET status = ?, error = NULL, updated_at = current_timestamp WHERE id = ?",
+                [JobStatus.QUEUED.value, job_id],
+            )
+            return self._require(job_id)
+
     def update_progress(self, job_id: str, progress: Any) -> Job:
         with self._lock:
             self._require(job_id)

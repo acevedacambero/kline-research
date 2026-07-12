@@ -87,6 +87,20 @@ def test_startup_recovery_interrupts_only_running_jobs(tmp_path):
         assert recovered.get(completed.id).status is JobStatus.COMPLETED
 
 
+def test_only_resumable_interrupted_jobs_can_be_requeued(tmp_path):
+    path = tmp_path / "jobs.duckdb"
+    with JobStore(path) as store:
+        resumable = store.create("labels", {"items": [1]}, resumable=True)
+        fixed = store.create("fixed", {}, resumable=False)
+        store.transition(resumable.id, JobStatus.RUNNING)
+        store.transition(fixed.id, JobStatus.RUNNING)
+
+    with JobStore(path) as recovered:
+        assert recovered.requeue(resumable.id).status is JobStatus.QUEUED
+        with pytest.raises(ValueError, match="not resumable"):
+            recovered.requeue(fixed.id)
+
+
 def test_closed_store_rejects_queries(tmp_path):
     store = JobStore(tmp_path / "jobs.duckdb")
     store.close()
