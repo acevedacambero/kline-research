@@ -559,6 +559,7 @@ def build_research_readiness(
             and freshness_coverage >= minimum_coverage
         ),
         "labelsAvailable": int(labels.get("files", 0)) > 0,
+        "labelsReadable": int(labels.get("unreadableFiles", 0)) == 0,
         "labelsCurrent": (
             int(labels.get("files", 0)) > 0
             and int(labels.get("staleFiles", 0)) == 0
@@ -572,6 +573,7 @@ def build_research_readiness(
         "marketDataReadable": "存在不可读行情文件",
         "marketDataFresh": "存在过期行情缓存",
         "labelsAvailable": "尚未生成 P1 标签",
+        "labelsReadable": "存在不可读 P1 标签文件",
         "labelsCurrent": "存在旧版本 P1 标签",
         "featuresReady": "P2 特征覆盖尚未达到训练门槛",
     }
@@ -586,7 +588,7 @@ def build_research_readiness(
         )),
         "readyForModel": all(checks[key] for key in (
             "hasMarketData", "marketDataReadable", "marketDataFresh",
-            "labelsAvailable", "labelsCurrent", "featuresReady",
+            "labelsAvailable", "labelsReadable", "labelsCurrent", "featuresReady",
         )),
         "checks": checks,
         "blockers": blockers,
@@ -799,7 +801,10 @@ def create_app(
         if label_status_path.exists():
             try:
                 persisted = json.loads(label_status_path.read_text(encoding="utf-8"))
-                if persisted.get("currentVersion") == current_version:
+                if (
+                    persisted.get("currentVersion") == current_version
+                    and "unreadableFiles" in persisted
+                ):
                     with label_status_lock:
                         label_status_cache.update(
                             value=persisted, expires=time.monotonic() + 60
@@ -812,8 +817,13 @@ def create_app(
         rows = 0
         compatible_files = 0
         delayed_exit_files = 0
+        unreadable_files: list[str] = []
         for path in paths:
-            parquet = pq.ParquetFile(path)
+            try:
+                parquet = pq.ParquetFile(path)
+            except Exception as exc:
+                unreadable_files.append(f"{path.name}: {exc}")
+                continue
             file_rows = parquet.metadata.num_rows
             rows += file_rows
             columns = set(parquet.schema.names)
@@ -851,13 +861,15 @@ def create_app(
             "versionCounts": version_counts,
             "compatibleFiles": compatible_files,
             "staleFiles": len(paths) - compatible_files,
+            "unreadableFiles": len(unreadable_files),
+            "unreadableExamples": unreadable_files[:20],
             "delayedExitReady": bool(paths) and delayed_exit_files == len(paths),
         }
         with label_status_lock:
             label_status_cache.update(value=result, expires=time.monotonic() + 60)
-            temporary = label_status_path.with_suffix(".tmp")
-            temporary.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
-            temporary.replace(label_status_path)
+            atomic_write_text(
+                json.dumps(result, ensure_ascii=False), label_status_path
+            )
         return result
 
     @app.get("/healthz", include_in_schema=False)
@@ -1336,12 +1348,17 @@ def create_app(
         ):
             latest_paths[(path.parent.name, path.stem)] = path
         if not latest_paths:
-            return {"version": "daily-features-v1", "featureColumns": [], "missingColumns": expected, "securityCount": 0, "rowCount": 0, "ready": False}
+            return {"version": "daily-features-v1", "featureColumns": [], "missingColumns": expected, "securityCount": 0, "rowCount": 0, "unreadableFiles": 0, "unreadableExamples": [], "ready": False}
         ignored = {"exchange", "code", "date"}
         columns: set[str] = set()
         row_count = 0
+        unreadable: list[str] = []
         for path in latest_paths.values():
-            parquet = pq.ParquetFile(path)
+            try:
+                parquet = pq.ParquetFile(path)
+            except Exception as exc:
+                unreadable.append(f"{path.name}: {exc}")
+                continue
             columns.update(parquet.schema.names)
             row_count += parquet.metadata.num_rows
         columns = set(columns) - ignored
@@ -1349,7 +1366,9 @@ def create_app(
         security_count = len(latest_paths)
         return {"version": "daily-features-v1", "featureColumns": sorted(columns), "missingColumns": missing,
                 "securityCount": security_count, "rowCount": row_count,
-                "ready": bool(security_count and not missing)}
+                "unreadableFiles": len(unreadable),
+                "unreadableExamples": unreadable[:20],
+                "ready": bool(security_count and not missing and not unreadable)}
 
     @app.get("/api/system/readiness")
     def research_readiness():

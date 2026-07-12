@@ -226,8 +226,28 @@ def test_label_status_reports_stale_and_current_files(tmp_path):
         "versionCounts": {"daily-v2-exit-delay": 1, "legacy-or-unknown": 1},
         "compatibleFiles": 1,
         "staleFiles": 1,
+        "unreadableFiles": 0,
+        "unreadableExamples": [],
         "delayedExitReady": False,
     }
+
+
+def test_label_status_isolates_unreadable_parquet(tmp_path):
+    path = (
+        tmp_path / "data" / "data-foundation-v1" / "labels" / "snapshot" / "sh"
+        / "600000.parquet"
+    )
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"not-a-parquet-file")
+
+    response = TestClient(
+        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    ).get("/api/labels/status")
+
+    assert response.status_code == 200
+    assert response.json()["unreadableFiles"] == 1
+    assert response.json()["staleFiles"] == 1
+    assert "600000.parquet" in response.json()["unreadableExamples"][0]
 
 
 def test_validate_akshare_reports_available_securities(tmp_path):
@@ -445,6 +465,21 @@ def test_p7_feature_catalog_reports_ready_columns(tmp_path):
     response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get("/api/model/p7/features")
     assert response.json()["ready"] is True
     assert response.json()["securityCount"] == 1
+
+
+def test_p7_feature_catalog_isolates_unreadable_parquet(tmp_path):
+    path = tmp_path / "data" / "data-foundation-v1" / "features" / "v1" / "identity" / "sh"
+    path.mkdir(parents=True)
+    (path / "600000.parquet").write_bytes(b"not-a-parquet-file")
+
+    response = TestClient(
+        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    ).get("/api/model/p7/features")
+
+    assert response.status_code == 200
+    assert response.json()["ready"] is False
+    assert response.json()["unreadableFiles"] == 1
+    assert "600000.parquet" in response.json()["unreadableExamples"][0]
 
 
 def test_p7_multifeature_endpoint_returns_version_when_data_missing(tmp_path):

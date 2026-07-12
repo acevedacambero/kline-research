@@ -1,5 +1,5 @@
 export type Health = { status: string; dataSource: string; cachePath: string; versions: Record<string, string>; recoverableTasks?: number }
-export type LabelStatus = { currentVersion: string; files: number; rows: number; versionCounts: Record<string, number>; compatibleFiles: number; staleFiles: number; delayedExitReady: boolean }
+export type LabelStatus = { currentVersion: string; files: number; rows: number; versionCounts: Record<string, number>; compatibleFiles: number; staleFiles: number; unreadableFiles: number; unreadableExamples: string[]; delayedExitReady: boolean }
 export type Bar = {
   date: string; open: number; high: number; low: number; close: number;
   open_qfq: number; high_qfq: number; low_qfq: number; close_qfq: number;
@@ -53,7 +53,7 @@ export type ScanResult = { version: string; asOfDate?: string | null; exchange?:
 export type BaselineModel = { version: string; labelColumn: string; status: string; trainCount: number; testCount: number; positiveRate?: number | null; testPositiveRate?: number | null; accuracy?: number | null; auc?: number | null; intercept?: number | null; coefficient?: number | null; trainUntil?: string | null; warnings: string[] }
 export type MultiFeatureModel = { version: string; labelColumn: string; featureColumns: string[]; status: string; trainCount: number; testCount: number; accuracy?: number | null; auc?: number | null; weights: Record<string, number>; warnings: string[] }
 export type WalkForwardResult = { version: string; averageAuc?: number | null; averageAccuracy?: number | null; folds: Array<{ trainUntil: string; testUntil: string; status: string; trainCount: number; testCount: number; auc?: number | null; accuracy?: number | null }>; warnings: string[] }
-export type FeatureCatalog = { version: string; featureColumns: string[]; missingColumns: string[]; securityCount: number; rowCount: number; ready: boolean }
+export type FeatureCatalog = { version: string; featureColumns: string[]; missingColumns: string[]; securityCount: number; rowCount: number; unreadableFiles: number; unreadableExamples: string[]; ready: boolean }
 export type PortfolioValidation = { version: string; labelColumn: string; topFraction: number; sampleCount: number; tradingDayCount: number; selectedCount: number; averageReturn?: number | null; netAverageReturn?: number | null; benchmarkReturn?: number | null; excessReturn?: number | null; netExcessReturn?: number | null; winRate?: number | null; maxDrawdown?: number | null; nonOverlapping: boolean; transactionCostBps: number; slippageBps: number; totalCostRate: number; warnings: string[] }
 export type HistoryBackfillTask = {
   status: string; done: number; total: number; completed: number;
