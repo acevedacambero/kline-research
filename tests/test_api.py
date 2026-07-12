@@ -246,6 +246,8 @@ def test_label_status_reports_stale_and_current_files(tmp_path):
         "staleFiles": 1,
         "unreadableFiles": 0,
         "unreadableExamples": [],
+        "incompatibleFiles": 0,
+        "legacyFiles": 1,
         "delayedExitReady": False,
     }
 
@@ -556,6 +558,26 @@ def test_research_endpoint_rejects_unreadable_score_artifact(tmp_path):
     assert response.json()["detail"]["code"] == "RESEARCH_ARTIFACT_UNREADABLE"
     assert response.json()["detail"]["artifacts"][0]["artifact"] == "scores"
     assert "600000.parquet" in response.json()["detail"]["artifacts"][0]["examples"][0]
+
+
+def test_research_endpoint_rejects_explicit_old_score_version(tmp_path):
+    path = tmp_path / "data" / "data-foundation-v1" / "scores" / "old" / "identity" / "sh"
+    path.mkdir(parents=True)
+    pd.DataFrame([{
+        "score": 80.0, "usable": True,
+        "score_definition_version": "p3-rule-score-v0",
+    }]).to_parquet(path / "600000.parquet", index=False)
+    client = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource()))
+
+    response = client.post("/api/scan/p3", json={})
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "RESEARCH_ARTIFACT_VERSION_MISMATCH"
+    assert response.json()["detail"]["artifacts"] == [{
+        "artifact": "scores",
+        "incompatibleFiles": 1,
+        "currentVersion": "p3-rule-score-v1",
+    }]
 
 
 @pytest.mark.parametrize(

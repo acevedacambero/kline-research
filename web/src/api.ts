@@ -1,5 +1,5 @@
 export type Health = { status: string; dataSource: string; cachePath: string; versions: Record<string, string>; recoverableTasks?: number }
-export type LabelStatus = { currentVersion: string; files: number; rows: number; versionCounts: Record<string, number>; compatibleFiles: number; staleFiles: number; unreadableFiles: number; unreadableExamples: string[]; delayedExitReady: boolean }
+export type LabelStatus = { currentVersion: string; files: number; rows: number; versionCounts: Record<string, number>; compatibleFiles: number; staleFiles: number; unreadableFiles: number; unreadableExamples: string[]; incompatibleFiles: number; legacyFiles: number; delayedExitReady: boolean }
 export type Bar = {
   date: string; open: number; high: number; low: number; close: number;
   open_qfq: number; high_qfq: number; low_qfq: number; close_qfq: number;
@@ -65,7 +65,7 @@ export type ProviderGateReport = { gateVersion: string; passed: boolean; probedA
 export type ProviderGateStatus = { available: boolean; report: ProviderGateReport | null; maxAgeHours: number; diagnosticAvailable: boolean; diagnostic: ProviderGateReport | null }
 export type DatasetQuality = { totalCached: number; featureRows: number; approximateRuleRows: number; approximateRuleRatio?: number | null; latestDataDate?: string | null; freshSecurities: number; staleSecurities: number; freshnessCoverage: number; freshnessMinCoverage: number; freshnessThresholdDays: number; staleExamples: Array<{ security: string; latestDate: string }>; unreadableSecurities: number; unreadableExamples: string[] }
 export type ResearchReadiness = { version: string; readyForRefresh: boolean; readyForAudit: boolean; readyForModel: boolean; freshnessCoverage: number; freshnessMinCoverage: number; providerGateAgeHours?: number | null; providerGateMaxAgeHours: number; checks: Record<string, boolean>; blockers: string[] }
-export type ScoreStatus = { currentVersion: string; files: number; rows: number; compatibleFiles: number; staleFiles: number; unreadableFiles: number; unreadableExamples: string[]; ready: boolean }
+export type ScoreStatus = { currentVersion: string; files: number; rows: number; compatibleFiles: number; staleFiles: number; unreadableFiles: number; unreadableExamples: string[]; incompatibleFiles: number; legacyFiles: number; ready: boolean }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })

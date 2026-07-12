@@ -849,6 +849,7 @@ def create_app(
                 if (
                     persisted.get("currentVersion") == current_version
                     and "unreadableFiles" in persisted
+                    and "incompatibleFiles" in persisted
                 ):
                     with label_status_lock:
                         label_status_cache.update(
@@ -863,6 +864,8 @@ def create_app(
         compatible_files = 0
         delayed_exit_files = 0
         unreadable_files: list[str] = []
+        incompatible_files = 0
+        legacy_files = 0
         for path in paths:
             try:
                 parquet = pq.ParquetFile(path)
@@ -893,7 +896,10 @@ def create_app(
                     version_counts[version] = version_counts.get(version, 0) + count
                 if set(file_versions) == {current_version}:
                     compatible_files += 1
+                else:
+                    incompatible_files += 1
             else:
+                legacy_files += 1
                 version_counts["legacy-or-unknown"] = (
                     version_counts.get("legacy-or-unknown", 0) + file_rows
                 )
@@ -908,6 +914,8 @@ def create_app(
             "staleFiles": len(paths) - compatible_files,
             "unreadableFiles": len(unreadable_files),
             "unreadableExamples": unreadable_files[:20],
+            "incompatibleFiles": incompatible_files,
+            "legacyFiles": legacy_files,
             "delayedExitReady": bool(paths) and delayed_exit_files == len(paths),
         }
         with label_status_lock:
@@ -1344,6 +1352,24 @@ def create_app(
                     "artifacts": failures,
                 },
             )
+        mismatches = [
+            {
+                "artifact": name,
+                "incompatibleFiles": int(status.get("incompatibleFiles", 0)),
+                "currentVersion": status.get("currentVersion"),
+            }
+            for name, status in artifacts.items()
+            if int(status.get("incompatibleFiles", 0)) > 0
+        ]
+        if mismatches:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "RESEARCH_ARTIFACT_VERSION_MISMATCH",
+                    "message": "研究数据包含明确的旧版本文件，请先重建对应数据层",
+                    "artifacts": mismatches,
+                },
+            )
 
     @app.post("/api/validation/single-factor")
     def single_factor_validation(request: SingleFactorValidationRequest):
@@ -1465,6 +1491,8 @@ def create_app(
         rows = 0
         compatible = 0
         unreadable: list[str] = []
+        incompatible = 0
+        legacy = 0
         required = {"score", "usable", "score_definition_version"}
         for path in paths:
             try:
@@ -1493,6 +1521,10 @@ def create_app(
                         )["score_definition_version"].to_pylist()
                         if versions and set(versions) == {SCORE_DEFINITION_VERSION}:
                             compatible += 1
+                        else:
+                            incompatible += 1
+                else:
+                    legacy += 1
             except Exception as exc:
                 unreadable.append(f"{path.name}: {exc}")
         result = {
@@ -1503,6 +1535,8 @@ def create_app(
             "staleFiles": len(paths) - compatible,
             "unreadableFiles": len(unreadable),
             "unreadableExamples": unreadable[:20],
+            "incompatibleFiles": incompatible,
+            "legacyFiles": legacy,
             "ready": bool(paths) and compatible == len(paths) and not unreadable,
         }
         with score_status_lock:
