@@ -1861,11 +1861,13 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
+            tail_rows_per_file=250,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
             ["exchange", "code", "signal_date"],
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
+            tail_rows_per_file=250,
         )
         return walk_forward_score_baseline(
             scores, labels, label_column=request.label_column, folds=request.folds
@@ -1878,11 +1880,13 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
+            tail_rows_per_file=250,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
             ["exchange", "code", "signal_date"],
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
+            tail_rows_per_file=250,
         )
         return validate_top_score_portfolio(
             scores,
