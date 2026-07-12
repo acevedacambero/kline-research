@@ -36,17 +36,19 @@ export type ScoreAudit = {
   };
   versions: Record<string, string | null>;
 }
+export type ConfidenceInterval = { lower: number; upper: number; confidence: number; samples: number }
 export type ValidationBucket = {
   bucket: number; count: number; minFactor: number; maxFactor: number;
   avgFactor: number; avgLabel: number; medianLabel: number; winRate: number;
   pathSuccessRate?: number | null; avgMaxDrawdown?: number | null;
+  avgLabelInterval?: ConfidenceInterval | null; winRateInterval?: ConfidenceInterval | null;
 }
 export type SingleFactorValidation = {
   version: string; factorColumn: string; labelColumn: string; bucketCount: number;
-  sampleCount: number; independentPeriodCount: number; independenceGapDays: number; rankCorrelation?: number | null; buckets: ValidationBucket[];
+  sampleCount: number; independentPeriodCount: number; independenceGapDays: number; rankCorrelation?: number | null; rankCorrelationInterval?: ConfidenceInterval | null; buckets: ValidationBucket[];
   missingColumns: string[]; dropped: Record<string, number>;
 }
-export type CalibrationBucket = { bucket: number; count: number; minScore: number; maxScore: number; avgScore: number; observedProbability: number; avgLabel: number }
+export type CalibrationBucket = { bucket: number; count: number; minScore: number; maxScore: number; avgScore: number; observedProbability: number; observedProbabilityInterval?: ConfidenceInterval | null; avgLabel: number; avgLabelInterval?: ConfidenceInterval | null }
 export type ScoreCalibration = { version: string; labelColumn: string; bucketCount: number; sampleCount: number; buckets: CalibrationBucket[]; missingColumns: string[]; dropped: Record<string, number>; reliability: { status: string; warnings: string[] } }
 export type ScanRow = { exchange: string; code: string; date: string; score: number; grade?: string | null }
 export type ScanResult = { version: string; asOfDate?: string | null; exchange?: string | null; minScore: number; scannedCount: number; truncated: boolean; rows: ScanRow[] }

@@ -6,9 +6,10 @@ from typing import Any
 import pandas as pd
 
 from ..p1.core import cluster_independent_periods
+from .statistics import bootstrap_interval, bootstrap_rank_correlation_interval
 
 
-VALIDATION_DEFINITION_VERSION = "p4-single-factor-v2-independent"
+VALIDATION_DEFINITION_VERSION = "p4-single-factor-v3-confidence"
 
 
 def _empty_result(
@@ -28,6 +29,7 @@ def _empty_result(
         "independentPeriodCount": 0,
         "independenceGapDays": 7,
         "rankCorrelation": None,
+        "rankCorrelationInterval": None,
         "buckets": [],
         "missingColumns": missing_columns or [],
         "dropped": dropped or {"unusable": 0, "immature": 0, "missing": 0},
@@ -125,6 +127,10 @@ def validate_single_factor(
                 "avgLabel": float(labels_in_bucket.mean()),
                 "medianLabel": float(labels_in_bucket.median()),
                 "winRate": float((labels_in_bucket > 0).mean()),
+                "avgLabelInterval": bootstrap_interval(labels_in_bucket),
+                "winRateInterval": bootstrap_interval(
+                    (labels_in_bucket > 0).astype(float), seed=20260713 + int(bucket)
+                ),
                 "pathSuccessRate": (
                     float(group["path_success_p20"].fillna(False).astype(bool).mean())
                     if "path_success_p20" in group else None
@@ -153,6 +159,9 @@ def validate_single_factor(
         "independentPeriodCount": independent.independent_n,
         "independenceGapDays": 7,
         "rankCorrelation": None if pd.isna(correlation) else float(correlation),
+        "rankCorrelationInterval": bootstrap_rank_correlation_interval(
+            merged[factor_column], merged[label_column]
+        ),
         "buckets": bucket_rows,
         "missingColumns": [],
         "dropped": dropped,

@@ -68,6 +68,9 @@ def test_single_factor_validation_buckets_scores_against_mature_labels():
     assert result["buckets"][0]["avgLabel"] < result["buckets"][-1]["avgLabel"]
     assert result["buckets"][-1]["winRate"] == 1.0
     assert result["rankCorrelation"] > 0.9
+    assert result["rankCorrelationInterval"]["lower"] > 0.8
+    assert result["buckets"][0]["avgLabelInterval"]["lower"] <= result["buckets"][0]["avgLabel"]
+    assert result["buckets"][-1]["winRateInterval"]["upper"] == 1.0
 
 
 def test_single_factor_validation_filters_unusable_and_immature_samples():
@@ -105,12 +108,14 @@ def test_single_factor_validation_reports_missing_columns():
 
 def test_score_calibration_buckets_observed_positive_probability():
     result = calibrate_score(score_rows(), label_rows(), buckets=4, as_of_date=date(2024, 3, 1))
-    assert result["version"] == "p5-score-calibration-v1"
+    assert result["version"] == "p5-score-calibration-v2-confidence"
     assert result["sampleCount"] == 20
     assert len(result["buckets"]) == 4
     assert result["buckets"][0]["observedProbability"] < result["buckets"][-1]["observedProbability"]
     assert result["reliability"]["status"] == "review"
     assert result["reliability"]["warnings"]
+    assert result["buckets"][0]["observedProbabilityInterval"]["confidence"] == 0.95
+    assert result["buckets"][0]["avgLabelInterval"]["lower"] <= result["buckets"][0]["avgLabel"]
 
 
 def test_score_baseline_trains_time_split_model():

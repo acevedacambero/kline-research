@@ -5,8 +5,10 @@ from typing import Any
 
 import pandas as pd
 
+from .statistics import bootstrap_interval
 
-CALIBRATION_DEFINITION_VERSION = "p5-score-calibration-v1"
+
+CALIBRATION_DEFINITION_VERSION = "p5-score-calibration-v2-confidence"
 
 
 def calibrate_score(
@@ -73,7 +75,11 @@ def calibrate_score(
             "maxScore": float(group["score"].max()),
             "avgScore": float(group["score"].mean()),
             "observedProbability": float((result > 0).mean()),
+            "observedProbabilityInterval": bootstrap_interval(
+                (result > 0).astype(float), seed=20260713 + int(bucket)
+            ),
             "avgLabel": float(result.mean()),
+            "avgLabelInterval": bootstrap_interval(result),
         })
     probabilities = [row["observedProbability"] for row in rows]
     monotonic = all(left <= right for left, right in zip(probabilities, probabilities[1:]))

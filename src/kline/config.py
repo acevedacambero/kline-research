@@ -35,6 +35,8 @@ VERSIONS = {
     "rightsVersion": "akshare-factor-v1",
     "featureDefinitionVersion": "daily-features-v1",
     "scoreDefinitionVersion": "p3-rule-score-v1",
+    "singleFactorValidationVersion": "p4-single-factor-v3-confidence",
+    "calibrationDefinitionVersion": "p5-score-calibration-v2-confidence",
     "modelDefinitionVersion": "p7-score-logistic-v1",
     "multiFeatureModelDefinitionVersion": "p7-multifeature-logistic-v1",
     "walkForwardModelDefinitionVersion": "p7-walk-forward-v2-nonoverlap",
