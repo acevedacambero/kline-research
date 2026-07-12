@@ -856,6 +856,7 @@ def create_app(
                     persisted.get("currentVersion") == current_version
                     and "unreadableFiles" in persisted
                     and "incompatibleFiles" in persisted
+                    and "supersededFiles" in persisted
                 ):
                     with label_status_lock:
                         label_status_cache.update(
@@ -864,7 +865,14 @@ def create_app(
                     return persisted
             except (OSError, ValueError, AttributeError):
                 pass
-        paths = sorted(settings.data_path.glob("data-foundation-v1/labels/*/*/*.parquet"))
+        all_paths = sorted(
+            settings.data_path.glob("data-foundation-v1/labels/*/*/*.parquet"),
+            key=lambda item: item.stat().st_mtime,
+        )
+        latest_paths: dict[tuple[str, str], Path] = {}
+        for path in all_paths:
+            latest_paths[(path.parent.name, path.stem)] = path
+        paths = sorted(latest_paths.values())
         version_counts: dict[str, int] = {}
         rows = 0
         compatible_files = 0
@@ -914,6 +922,7 @@ def create_app(
         result = {
             "currentVersion": current_version,
             "files": len(paths),
+            "supersededFiles": len(all_paths) - len(paths),
             "rows": rows,
             "versionCounts": version_counts,
             "compatibleFiles": compatible_files,
@@ -1339,9 +1348,17 @@ def create_app(
         pattern: str,
         unique_keys: list[str] | None = None,
         columns: list[str] | None = None,
+        *,
+        latest_per_security: bool = True,
     ) -> pd.DataFrame:
         frames = []
         paths = sorted(settings.data_path.glob(pattern), key=lambda path: path.stat().st_mtime)
+        if latest_per_security:
+            latest: dict[tuple[str, str], Path] = {}
+            for path in paths:
+                if not path.name.endswith(".manifest.json"):
+                    latest[(path.parent.name, path.stem)] = path
+            paths = list(latest.values())
         for path in paths:
             if path.name.endswith(".manifest.json"):
                 continue

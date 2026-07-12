@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+import os
 import time
 
 import pandas as pd
@@ -259,6 +260,7 @@ def test_label_status_reports_stale_and_current_files(tmp_path):
     assert response.json() == {
         "currentVersion": "daily-v2-exit-delay",
         "files": 2,
+        "supersededFiles": 0,
         "rows": 2,
         "versionCounts": {"daily-v2-exit-delay": 1, "legacy-or-unknown": 1},
         "compatibleFiles": 1,
@@ -269,6 +271,30 @@ def test_label_status_reports_stale_and_current_files(tmp_path):
         "legacyFiles": 1,
         "delayedExitReady": False,
     }
+
+
+def test_label_status_uses_only_latest_snapshot_per_security(tmp_path):
+    root = tmp_path / "data" / "data-foundation-v1" / "labels"
+    old = root / "snapshot-old" / "sh" / "600000.parquet"
+    new = root / "snapshot-new" / "sh" / "600000.parquet"
+    old.parent.mkdir(parents=True)
+    new.parent.mkdir(parents=True)
+    pd.DataFrame([{"label_definition_version": "daily-v1"}]).to_parquet(old)
+    pd.DataFrame([{
+        "label_definition_version": "daily-v2-exit-delay",
+        "p20_delayed_executable_return": 0.1,
+    }]).to_parquet(new)
+    os.utime(old, (1, 1))
+    os.utime(new, (2, 2))
+
+    body = TestClient(
+        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    ).get("/api/labels/status").json()
+
+    assert body["files"] == 1
+    assert body["supersededFiles"] == 1
+    assert body["compatibleFiles"] == 1
+    assert body["staleFiles"] == 0
 
 
 def test_label_status_isolates_unreadable_parquet(tmp_path):
