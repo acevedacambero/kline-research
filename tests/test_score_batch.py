@@ -124,7 +124,9 @@ def test_score_builder_reuses_matching_offline_features(tmp_path, monkeypatch):
     output = tmp_path / "output"
     features = compute_daily_features(bars, exchange="sh", code="600000")
     FeatureDatasetStore(output).write(
-        "sh", "600000", features,
+        "sh",
+        "600000",
+        features,
         snapshot_version="snapshot-one",
         factor_version="factor-v1",
         limit_rule_version="cn-equity-v1",
@@ -135,12 +137,51 @@ def test_score_builder_reuses_matching_offline_features(tmp_path, monkeypatch):
         raise AssertionError("matching P2 features must be reused")
 
     monkeypatch.setattr("kline.score.batch.compute_daily_features", should_not_recompute)
-    report = BatchScoreBuilder(ScoreDatasetStore(output)).build_security({
-        "exchange": "sh", "code": "600000",
-        "derived_path": str(derived_path), "snapshot_version": "snapshot-one",
-    })
+    report = BatchScoreBuilder(ScoreDatasetStore(output)).build_security(
+        {
+            "exchange": "sh",
+            "code": "600000",
+            "derived_path": str(derived_path),
+            "snapshot_version": "snapshot-one",
+        }
+    )
 
     assert report.status == "written"
     assert report.rows == len(features)
     written = pd.read_parquet(report.path)
     assert written.iloc[-1]["code"] == "600000"
+
+
+def test_score_builder_skips_score_computation_when_output_exists(tmp_path, monkeypatch):
+    derived_path = tmp_path / "derived.parquet"
+    bars = derived_frame()
+    bars.to_parquet(derived_path, index=False)
+    store = ScoreDatasetStore(tmp_path / "output")
+    frame = compute_score_frame(bars, exchange="sh", code="600000")
+    first = store.write(
+        "sh",
+        "600000",
+        frame,
+        snapshot_version="snapshot-one",
+        factor_version="factor-v1",
+        limit_rule_version="cn-equity-v1",
+        feature_definition_version="daily-features-v1",
+        score_definition_version="p3-rule-score-v1",
+    )
+
+    def should_not_compute(*_args, **_kwargs):
+        raise AssertionError("existing P3 output must be reused before score computation")
+
+    monkeypatch.setattr("kline.score.batch.compute_score_frame_from_features", should_not_compute)
+    report = BatchScoreBuilder(store).build_security(
+        {
+            "exchange": "sh",
+            "code": "600000",
+            "derived_path": str(derived_path),
+            "snapshot_version": "snapshot-one",
+        }
+    )
+
+    assert report.status == "reused"
+    assert report.path == first.path
+    assert report.rows == len(frame)

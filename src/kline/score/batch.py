@@ -40,9 +40,7 @@ def compute_score_frame(
     code: str,
     st_status: bool = False,
 ) -> pd.DataFrame:
-    features = compute_daily_features(
-        bars, exchange=exchange, code=code, st_status=st_status
-    )
+    features = compute_daily_features(bars, exchange=exchange, code=code, st_status=st_status)
     return compute_score_frame_from_features(features)
 
 
@@ -66,9 +64,7 @@ def compute_score_frame_from_features(features: pd.DataFrame) -> pd.DataFrame:
                 "volume_price_score": components["volumePrice"]["score"],
                 "trading_behavior_score": components["tradingBehavior"]["score"],
                 "reasons": score["reasons"],
-                "component_reasons": {
-                    key: value["reasons"] for key, value in components.items()
-                },
+                "component_reasons": {key: value["reasons"] for key, value in components.items()},
                 "price_basis": row["price_basis"],
                 "feature_definition_version": FEATURE_DEFINITION_VERSION,
                 "score_definition_version": SCORE_DEFINITION_VERSION,
@@ -83,6 +79,34 @@ class ScoreDatasetStore:
     def __init__(self, output_root: Path):
         self.output_root = Path(output_root)
 
+    def paths_for(
+        self,
+        exchange: str,
+        code: str,
+        *,
+        snapshot_version: str,
+        factor_version: str,
+        limit_rule_version: str,
+        feature_definition_version: str,
+        score_definition_version: str,
+    ) -> tuple[Path, Path]:
+        identity = (
+            "__".join(
+                (snapshot_version, factor_version, limit_rule_version, feature_definition_version)
+            )
+            .replace("/", "-")
+            .replace("\\", "-")
+        )
+        root = (
+            self.output_root
+            / "data-foundation-v1"
+            / "scores"
+            / score_definition_version
+            / identity
+            / exchange
+        )
+        return root / f"{code}.parquet", root / f"{code}.manifest.json"
+
     def write(
         self,
         exchange: str,
@@ -95,27 +119,19 @@ class ScoreDatasetStore:
         feature_definition_version: str,
         score_definition_version: str,
     ) -> ScoreStoreReport:
-        identity = "__".join(
-            (
-                snapshot_version,
-                factor_version,
-                limit_rule_version,
-                feature_definition_version,
-            )
-        ).replace("/", "-").replace("\\", "-")
-        root = (
-            self.output_root
-            / "data-foundation-v1"
-            / "scores"
-            / score_definition_version
-            / identity
-            / exchange
+        path, manifest_path = self.paths_for(
+            exchange,
+            code,
+            snapshot_version=snapshot_version,
+            factor_version=factor_version,
+            limit_rule_version=limit_rule_version,
+            feature_definition_version=feature_definition_version,
+            score_definition_version=score_definition_version,
         )
-        path = root / f"{code}.parquet"
-        manifest_path = root / f"{code}.manifest.json"
         if path.exists() and manifest_path.exists():
             return ScoreStoreReport("reused", str(path), str(manifest_path), len(frame))
 
+        root = path.parent
         root.mkdir(parents=True, exist_ok=True)
         atomic_write_parquet(frame, path)
         manifest = {
@@ -130,17 +146,15 @@ class ScoreDatasetStore:
                 "scoreDefinitionVersion": score_definition_version,
             },
             "usableRatio": (
-                round(float(frame["usable"].fillna(False).mean()), 8)
-                if "usable" in frame else None
+                round(float(frame["usable"].fillna(False).mean()), 8) if "usable" in frame else None
             ),
             "averageScore": (
                 round(float(frame["score"].dropna().mean()), 8)
-                if "score" in frame and not frame["score"].dropna().empty else None
+                if "score" in frame and not frame["score"].dropna().empty
+                else None
             ),
         }
-        atomic_write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2), manifest_path
-        )
+        atomic_write_text(json.dumps(manifest, ensure_ascii=False, indent=2), manifest_path)
         return ScoreStoreReport("written", str(path), str(manifest_path), len(frame))
 
 
@@ -155,15 +169,31 @@ class BatchScoreBuilder:
             if "factor_version" in frame and not frame["factor_version"].dropna().empty
             else "unknown"
         )
+        score_path, score_manifest_path = self.store.paths_for(
+            security["exchange"],
+            security["code"],
+            snapshot_version=security["snapshot_version"],
+            factor_version=factor_version,
+            limit_rule_version=VERSIONS["limitRuleVersion"],
+            feature_definition_version=FEATURE_DEFINITION_VERSION,
+            score_definition_version=SCORE_DEFINITION_VERSION,
+        )
+        if score_path.exists() and score_manifest_path.exists():
+            manifest = json.loads(score_manifest_path.read_text(encoding="utf-8"))
+            return ScoreStoreReport(
+                "reused", str(score_path), str(score_manifest_path), int(manifest.get("rows", 0))
+            )
         feature_path = FeatureDatasetStore(self.store.output_root).path_for(
-            security["exchange"], security["code"],
+            security["exchange"],
+            security["code"],
             snapshot_version=security["snapshot_version"],
             factor_version=factor_version,
             limit_rule_version=VERSIONS["limitRuleVersion"],
             feature_definition_version=FEATURE_DEFINITION_VERSION,
         )
         features = (
-            pd.read_parquet(feature_path) if feature_path.exists()
+            pd.read_parquet(feature_path)
+            if feature_path.exists()
             else compute_daily_features(
                 frame,
                 exchange=security["exchange"],
@@ -186,15 +216,14 @@ class BatchScoreBuilder:
     def build_many(
         self,
         securities: Iterable[dict[str, Any]],
-        on_progress: Callable[[str, ScoreStoreReport | None, Exception | None], None]
-        | None = None,
+        on_progress: Callable[[str, ScoreStoreReport | None, Exception | None], None] | None = None,
     ) -> BatchScoreReport:
         rows = 0
         done = 0
         errors: list[dict[str, str]] = []
         outputs: list[ScoreStoreReport] = []
         for security in securities:
-            security_key = f'{security["exchange"]}{security["code"]}'
+            security_key = f"{security['exchange']}{security['code']}"
             try:
                 report = self.build_security(security)
                 outputs.append(report)
