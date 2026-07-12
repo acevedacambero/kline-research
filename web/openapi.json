@@ -787,6 +787,22 @@
         }
       }
     },
+    "/api/model/p7/registry": {
+      "get": {
+        "summary": "P7 Model Registry",
+        "operationId": "p7_model_registry_api_model_p7_registry_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/model/p7/walk-forward": {
       "post": {
         "summary": "P7 Walk Forward",

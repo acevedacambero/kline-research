@@ -52,8 +52,8 @@ export type CalibrationBucket = { bucket: number; count: number; minScore: numbe
 export type ScoreCalibration = { version: string; labelColumn: string; bucketCount: number; sampleCount: number; buckets: CalibrationBucket[]; missingColumns: string[]; dropped: Record<string, number>; reliability: { status: string; warnings: string[] }; quality: { brierScore?: number | null; logLoss?: number | null; expectedCalibrationError?: number | null } }
 export type ScanRow = { exchange: string; code: string; date: string; score: number; grade?: string | null }
 export type ScanResult = { version: string; asOfDate?: string | null; exchange?: string | null; minScore: number; scannedCount: number; truncated: boolean; rows: ScanRow[] }
-export type BaselineModel = { version: string; labelColumn: string; status: string; trainCount: number; testCount: number; positiveRate?: number | null; testPositiveRate?: number | null; accuracy?: number | null; auc?: number | null; intercept?: number | null; coefficient?: number | null; trainUntil?: string | null; warnings: string[] }
-export type MultiFeatureModel = { version: string; labelColumn: string; featureColumns: string[]; status: string; trainCount: number; testCount: number; accuracy?: number | null; auc?: number | null; weights: Record<string, number>; warnings: string[] }
+export type BaselineModel = { version: string; labelColumn: string; status: string; trainCount: number; testCount: number; positiveRate?: number | null; testPositiveRate?: number | null; accuracy?: number | null; auc?: number | null; intercept?: number | null; coefficient?: number | null; trainUntil?: string | null; warnings: string[]; modelId?: string; artifactPath?: string }
+export type MultiFeatureModel = { version: string; labelColumn: string; featureColumns: string[]; status: string; trainCount: number; testCount: number; accuracy?: number | null; auc?: number | null; weights: Record<string, number>; warnings: string[]; modelId?: string; artifactPath?: string }
 export type WalkForwardResult = { version: string; averageAuc?: number | null; averageAccuracy?: number | null; folds: Array<{ trainUntil: string; testUntil: string; status: string; trainCount: number; testCount: number; auc?: number | null; accuracy?: number | null }>; warnings: string[] }
 export type FeatureCatalog = { version: string; featureColumns: string[]; missingColumns: string[]; securityCount: number; rowCount: number; unreadableFiles: number; unreadableExamples: string[]; ready: boolean }
 export type PortfolioValidation = { version: string; labelColumn: string; topFraction: number; sampleCount: number; tradingDayCount: number; selectedCount: number; averageReturn?: number | null; netAverageReturn?: number | null; benchmarkReturn?: number | null; excessReturn?: number | null; netExcessReturn?: number | null; winRate?: number | null; maxDrawdown?: number | null; nonOverlapping: boolean; transactionCostBps: number; slippageBps: number; totalCostRate: number; warnings: string[] }
@@ -68,6 +68,8 @@ export type ProviderGateStatus = { available: boolean; report: ProviderGateRepor
 export type DatasetQuality = { totalCached: number; featureRows: number; approximateRuleRows: number; approximateRuleRatio?: number | null; latestDataDate?: string | null; freshSecurities: number; staleSecurities: number; freshnessCoverage: number; freshnessMinCoverage: number; freshnessThresholdDays: number; staleExamples: Array<{ security: string; latestDate: string }>; unreadableSecurities: number; unreadableExamples: string[] }
 export type ResearchReadiness = { version: string; readyForRefresh: boolean; readyForAudit: boolean; readyForModel: boolean; freshnessCoverage: number; freshnessMinCoverage: number; providerGateAgeHours?: number | null; providerGateMaxAgeHours: number; checks: Record<string, boolean>; blockers: string[] }
 export type ScoreStatus = { currentVersion: string; files: number; rows: number; compatibleFiles: number; staleFiles: number; unreadableFiles: number; unreadableExamples: string[]; incompatibleFiles: number; legacyFiles: number; ready: boolean }
+export type ModelArtifact = { modelId: string; kind: string; createdAt: string; version?: string | null; status?: string | null; labelColumn?: string | null; artifactPath: string; dependencies: Record<string, unknown> }
+export type ModelRegistryStatus = { version: string; artifacts: ModelArtifact[]; unreadableFiles: number; unreadableExamples: string[] }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
@@ -90,6 +92,7 @@ export const api = {
   providerGate: () => request<ProviderGateStatus>('/api/system/provider-gate'),
   readiness: () => request<ResearchReadiness>('/api/system/readiness'),
   scoreStatus: () => request<ScoreStatus>('/api/scores/status'),
+  modelRegistry: () => request<ModelRegistryStatus>('/api/model/p7/registry'),
   probeProviders: (quick = false) => request<{ taskId: string; quick: boolean }>(`/api/system/provider-gate/probe?quick=${quick}`, { method: 'POST' }),
   recentTasks: (limit = 10) => request<GenericTask[]>(`/api/tasks/recent?limit=${limit}`),
   taskStatus: (taskId: string) => request<GenericTask>(`/api/tasks/${taskId}`),

@@ -51,7 +51,12 @@ from .p1.market_rules import is_no_limit_session, status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
 from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
-from .model import train_multifeature_baseline, train_score_baseline, walk_forward_score_baseline
+from .model import (
+    ModelRegistry,
+    train_multifeature_baseline,
+    train_score_baseline,
+    walk_forward_score_baseline,
+)
 from .ops.provider_probe import ProviderProbeRunner
 from .storage import atomic_write_text
 
@@ -687,6 +692,7 @@ def create_app(
     pipeline = DatasetPipeline(settings.data_path, memory_limit=settings.duckdb_memory_limit,
                                threads=settings.duckdb_threads)
     pipeline.initialize_catalog()
+    model_registry = ModelRegistry(settings.data_path)
     if source_injected:
         adapter = _InjectedProviderAdapter(source)
         download_source = HybridDownloadSource(adapter, adapter)
@@ -1436,8 +1442,20 @@ def create_app(
         )
         scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
         labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
-        return train_score_baseline(scores, labels, label_column=request.label_column,
-                                    train_until=request.train_until)
+        result = train_score_baseline(
+            scores, labels, label_column=request.label_column,
+            train_until=request.train_until,
+        )
+        if result.get("status") == "trained":
+            result.update(model_registry.save(
+                "baseline", result,
+                dependencies={
+                    "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
+                    "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
+                    "trainUntil": request.train_until,
+                },
+            ))
+        return result
 
     @app.get("/api/model/p7/features")
     def p7_feature_catalog():
@@ -1559,9 +1577,25 @@ def create_app(
         scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
         labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
         features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"])
-        return train_multifeature_baseline(scores, labels, features,
-                                            label_column=request.label_column,
-                                            train_until=request.train_until)
+        result = train_multifeature_baseline(
+            scores, labels, features, label_column=request.label_column,
+            train_until=request.train_until,
+        )
+        if result.get("status") == "trained":
+            result.update(model_registry.save(
+                "multifeature", result,
+                dependencies={
+                    "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
+                    "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
+                    "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
+                    "trainUntil": request.train_until,
+                },
+            ))
+        return result
+
+    @app.get("/api/model/p7/registry")
+    def p7_model_registry():
+        return model_registry.list()
 
     @app.post("/api/model/p7/walk-forward")
     def p7_walk_forward(request: WalkForwardRequest):
