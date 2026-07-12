@@ -198,7 +198,7 @@ export function App() {
         if (task.status === 'queued' || task.status === 'running') window.setTimeout(poll, 1000)
         else {
           const latest = await api.providerGate(); setProviderGate(latest); setBusy(false)
-          setMessage(latest.report?.passed ? '数据源上线 Gate 已通过' : quick ? '快速诊断完成（不作为上线依据）' : `上线 Gate 未通过：${latest.report?.reasons.join('；') || '请查看任务错误'}`)
+          setMessage(quick ? '快速诊断完成（正式 Gate 结论保持不变）' : latest.report?.passed ? '数据源上线 Gate 已通过' : `上线 Gate 未通过：${latest.report?.reasons.join('；') || '请查看任务错误'}`)
         }
       }
       await poll()

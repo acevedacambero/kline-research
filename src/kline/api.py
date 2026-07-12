@@ -602,6 +602,7 @@ def create_app(
     provider_probe_runner = ProviderProbeRunner()
     app.state.provider_probe_runner = provider_probe_runner
     provider_report_path = settings.data_path / "provider-gate-latest.json"
+    provider_diagnostic_path = settings.data_path / "provider-diagnostic-latest.json"
     submission_lock = threading.Lock()
     tasks = TaskStore(coordinator, job_store, submission_lock, settings.download_workers)
     label_tasks = LabelTaskStore(coordinator, job_store, submission_lock)
@@ -661,16 +662,25 @@ def create_app(
 
     @app.get("/api/system/provider-gate")
     def provider_gate_status():
-        if not provider_report_path.exists():
-            return {"available": False, "report": None}
-        try:
-            report = json.loads(provider_report_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
-            raise HTTPException(
-                500,
-                detail={"code": "PROVIDER_REPORT_INVALID", "message": str(exc)},
-            ) from exc
-        return {"available": True, "report": report}
+        def load(path: Path):
+            if not path.exists():
+                return None
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise HTTPException(
+                    500,
+                    detail={"code": "PROVIDER_REPORT_INVALID", "message": str(exc)},
+                ) from exc
+
+        report = load(provider_report_path)
+        diagnostic = load(provider_diagnostic_path)
+        return {
+            "available": report is not None,
+            "report": report,
+            "diagnosticAvailable": diagnostic is not None,
+            "diagnostic": diagnostic,
+        }
 
     @app.post("/api/system/provider-gate/probe", status_code=202)
     def start_provider_gate_probe(quick: bool = False):
@@ -688,9 +698,12 @@ def create_app(
                 report = provider_probe_runner.run(quick=bool(payload["quick"]))
                 result = report.to_dict()
                 result["probedAt"] = pd.Timestamp.now(tz="Asia/Shanghai").isoformat()
+                target_path = (
+                    provider_diagnostic_path if payload["quick"] else provider_report_path
+                )
                 atomic_write_text(
                     json.dumps(result, ensure_ascii=False, indent=2),
-                    provider_report_path,
+                    target_path,
                 )
                 progress({"done": 1, "total": 1, "stage": "completed"})
                 return {"done": 1, "total": 1, "report": result}

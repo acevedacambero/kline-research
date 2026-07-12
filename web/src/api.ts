@@ -62,7 +62,7 @@ export type HistoryBackfillTask = {
 }
 export type GenericTask = { id: string; jobType: string; status: string; done: number; total: number; rows?: number; errors: unknown[]; currentSecurity?: string | null; speed?: number; etaSeconds?: number | null }
 export type ProviderGateReport = { gateVersion: string; passed: boolean; probedAt?: string; reasons: string[]; warnings?: string[] }
-export type ProviderGateStatus = { available: boolean; report: ProviderGateReport | null }
+export type ProviderGateStatus = { available: boolean; report: ProviderGateReport | null; diagnosticAvailable: boolean; diagnostic: ProviderGateReport | null }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })

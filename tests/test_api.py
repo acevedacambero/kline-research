@@ -96,7 +96,8 @@ def test_provider_gate_probe_is_persisted_and_queryable(tmp_path):
         app = create_app(Settings(data_path=data_path), FakeSource())
         with TestClient(app) as client:
             assert client.get("/api/system/provider-gate").json() == {
-                "available": False, "report": None
+                "available": False, "report": None,
+                "diagnosticAvailable": False, "diagnostic": None,
             }
             submitted = client.post("/api/system/provider-gate/probe?quick=true")
             assert submitted.status_code == 202
@@ -109,9 +110,11 @@ def test_provider_gate_probe_is_persisted_and_queryable(tmp_path):
             assert task["status"] == "completed", task
             assert task["report"]["passed"] is True
             latest = client.get("/api/system/provider-gate").json()
-            assert latest["available"] is True
-            assert latest["report"]["gateVersion"] == "test-gate"
-            assert latest["report"]["probedAt"]
+            assert latest["available"] is False
+            assert latest["report"] is None
+            assert latest["diagnosticAvailable"] is True
+            assert latest["diagnostic"]["gateVersion"] == "test-gate"
+            assert latest["diagnostic"]["probedAt"]
     finally:
         api_module.ProviderProbeRunner.run = original_run
 
