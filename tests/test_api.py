@@ -7,7 +7,7 @@ from pydantic import ValidationError
 import pytest
 
 import kline.api as api_module
-from kline.api import create_app, dataframe_records
+from kline.api import build_research_readiness, create_app, dataframe_records
 from kline.config import Settings
 from kline.data.pipeline import DatasetPipeline
 from kline.jobs import JobStatus, JobStore
@@ -49,6 +49,42 @@ def test_health_exposes_all_version_keys(tmp_path):
     assert body["versions"]["portfolioValidationVersion"] == "p8-top-score-portfolio-v2-executable"
     assert body["versions"]["transactionCostVersion"] == "p8-flat-bps-v1"
     assert body["recoverableTasks"] == 0
+
+
+def test_research_readiness_separates_refresh_audit_and_model_gates():
+    result = build_research_readiness(
+        {"report": {"passed": False}},
+        {
+            "totalCached": 100, "unreadableSecurities": 0,
+            "staleSecurities": 0,
+        },
+        {"files": 100, "staleFiles": 0},
+        {"ready": True},
+    )
+
+    assert result["readyForRefresh"] is False
+    assert result["readyForAudit"] is True
+    assert result["readyForModel"] is True
+    assert result["checks"]["providerGate"] is False
+    assert result["blockers"] == ["尚未通过完整数据源上线 Gate"]
+
+
+def test_research_readiness_blocks_model_for_stale_labels_and_features():
+    result = build_research_readiness(
+        {"report": {"passed": True}},
+        {
+            "totalCached": 10, "unreadableSecurities": 0,
+            "staleSecurities": 0,
+        },
+        {"files": 10, "staleFiles": 2},
+        {"ready": False},
+    )
+
+    assert result["readyForRefresh"] is True
+    assert result["readyForAudit"] is True
+    assert result["readyForModel"] is False
+    assert "存在旧版本 P1 标签" in result["blockers"]
+    assert "P2 特征覆盖尚未达到训练门槛" in result["blockers"]
 
 
 def test_feature_build_resumes_interrupted_task_with_same_id(tmp_path):

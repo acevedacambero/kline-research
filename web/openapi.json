@@ -719,6 +719,22 @@
         }
       }
     },
+    "/api/system/readiness": {
+      "get": {
+        "summary": "Research Readiness",
+        "operationId": "research_readiness_api_system_readiness_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/model/p7/multifeature": {
       "post": {
         "summary": "P7 Multifeature",

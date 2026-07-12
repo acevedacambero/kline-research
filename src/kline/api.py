@@ -528,6 +528,49 @@ def dataframe_records(frame: pd.DataFrame) -> list[dict]:
     return frame.astype(object).where(pd.notna(frame), None).to_dict("records")
 
 
+def build_research_readiness(
+    provider: dict, quality: dict, labels: dict, features: dict
+) -> dict:
+    checks = {
+        "providerGate": bool(provider.get("report", {}).get("passed"))
+        if provider.get("report") else False,
+        "hasMarketData": int(quality.get("totalCached", 0)) > 0,
+        "marketDataReadable": int(quality.get("unreadableSecurities", 0)) == 0,
+        "marketDataFresh": (
+            int(quality.get("totalCached", 0)) > 0
+            and int(quality.get("staleSecurities", 0)) == 0
+        ),
+        "labelsAvailable": int(labels.get("files", 0)) > 0,
+        "labelsCurrent": (
+            int(labels.get("files", 0)) > 0
+            and int(labels.get("staleFiles", 0)) == 0
+        ),
+        "featuresReady": bool(features.get("ready")),
+    }
+    messages = {
+        "providerGate": "尚未通过完整数据源上线 Gate",
+        "hasMarketData": "本地没有行情缓存",
+        "marketDataReadable": "存在不可读行情文件",
+        "marketDataFresh": "存在过期行情缓存",
+        "labelsAvailable": "尚未生成 P1 标签",
+        "labelsCurrent": "存在旧版本 P1 标签",
+        "featuresReady": "P2 特征覆盖尚未达到训练门槛",
+    }
+    blockers = [messages[key] for key, passed in checks.items() if not passed]
+    return {
+        "readyForRefresh": checks["providerGate"],
+        "readyForAudit": all(checks[key] for key in (
+            "hasMarketData", "marketDataReadable", "marketDataFresh"
+        )),
+        "readyForModel": all(checks[key] for key in (
+            "hasMarketData", "marketDataReadable", "marketDataFresh",
+            "labelsAvailable", "labelsCurrent", "featuresReady",
+        )),
+        "checks": checks,
+        "blockers": blockers,
+    }
+
+
 def create_app(
     settings: Settings | None = None,
     source: AkShareSource | None = None,
@@ -1266,6 +1309,12 @@ def create_app(
         return {"version": "daily-features-v1", "featureColumns": sorted(columns), "missingColumns": missing,
                 "securityCount": security_count, "rowCount": row_count,
                 "ready": bool(security_count and not missing)}
+
+    @app.get("/api/system/readiness")
+    def research_readiness():
+        return build_research_readiness(
+            provider_gate_status(), quality(), label_dataset_status(), p7_feature_catalog()
+        )
 
     @app.post("/api/model/p7/multifeature")
     def p7_multifeature(request: BaselineModelRequest):

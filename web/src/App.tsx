@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type LabelStatus, type Security, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult, type ProviderGateStatus, type DatasetQuality } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type LabelStatus, type Security, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult, type ProviderGateStatus, type DatasetQuality, type ResearchReadiness } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -64,6 +64,7 @@ export function App() {
   const [cachedCount, setCachedCount] = useState<number | null>(null)
   const [approximateRuleRatio, setApproximateRuleRatio] = useState<number | null>(null)
   const [datasetQuality, setDatasetQuality] = useState<DatasetQuality | null>(null)
+  const [readiness, setReadiness] = useState<ResearchReadiness | null>(null)
   const [taskView, setTaskView] = useState<TaskView | null>(null)
 
   const showTask = (kind: string, id: string, task: { status: string; done: number; total: number; rows?: number; errors: unknown[]; currentSecurity?: string | null; speed?: number; etaSeconds?: number | null }) => {
@@ -73,6 +74,7 @@ export function App() {
   useEffect(() => {
     api.health().then(setHealth).catch(e => setMessage(e.message))
     api.providerGate().then(setProviderGate).catch(() => undefined)
+    api.readiness().then(setReadiness).catch(() => undefined)
     api.labelStatus().then(setLabelStatus).catch(() => undefined)
     const restoreTask = (task: import('./api').GenericTask) => {
       const names: Record<string, string> = { import: '行情导入', history_backfill: '历史补全', labels: 'P1 标签', features: 'P2 特征', scores: 'P3 评分' }
@@ -323,6 +325,7 @@ export function App() {
       <div className="version"><span>行情策略</span><strong>{health?.versions.providerPolicyVersion ?? '—'}</strong></div>
       <div className="version"><span>数据源上线 Gate</span><strong>{providerGate?.report ? (providerGate.report.passed ? '通过' : '未通过') : '未执行'}</strong><small>{providerGate?.report ? `${providerGate.report.gateVersion} · ${providerGate.report.probedAt ? new Date(providerGate.report.probedAt).toLocaleString('zh-CN') : '时间未知'}` : '完整探测后可作为上线依据'}</small></div>
       <div className="version"><span>行情新鲜度</span><strong>{datasetQuality?.latestDataDate ?? '暂无数据'}</strong><small>{datasetQuality ? `新鲜 ${datasetQuality.freshSecurities} · 过期 ${datasetQuality.staleSecurities} · 不可读 ${datasetQuality.unreadableSecurities}` : '正在统计覆盖日期'}</small></div>
+      <div className="version"><span>研究运行 Gate</span><strong>{readiness?.readyForModel ? '模型就绪' : readiness?.readyForAudit ? '仅审计就绪' : '未就绪'}</strong><small>{readiness?.blockers?.length ? readiness.blockers.slice(0, 3).join('；') : readiness?.readyForModel ? '行情、标签和特征检查通过' : '正在检查运行条件'}</small></div>
       <button className="secondary" disabled={busy} onClick={() => probeProviders(true)}>快速诊断数据源</button>
       <button className="secondary" disabled={busy} onClick={() => probeProviders(false)}>执行数据源上线 Gate</button>
       <button disabled={busy} onClick={() => startImport('representative')}>拉取代表样本</button>
@@ -334,11 +337,11 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={runValidation}>验证 P4 单因子</button>
       <button className="secondary" disabled={busy} onClick={runCalibration}>运行 P5 概率校准</button>
       <button className="secondary" disabled={busy} onClick={runScan}>扫描 P6 高分样本</button>
-      <button className="secondary" disabled={busy} onClick={runBaseline}>训练 P7 基线模型</button>
+      <button className="secondary" disabled={busy || readiness?.readyForModel === false} onClick={runBaseline}>训练 P7 基线模型</button>
       <button className="secondary" disabled={busy} onClick={checkFeatureCatalog}>检查 P2 特征覆盖</button>
       <button className="secondary" disabled={busy || !featureCatalog?.ready} onClick={runMultifeature}>训练 P7 多特征模型</button>
-      <button className="secondary" disabled={busy} onClick={runWalkForward}>运行 P7 Walk-forward</button>
-      <button className="secondary" disabled={busy} onClick={runPortfolio}>验证 P8 高分组合</button>
+      <button className="secondary" disabled={busy || readiness?.readyForModel === false} onClick={runWalkForward}>运行 P7 Walk-forward</button>
+      <button className="secondary" disabled={busy || readiness?.readyForModel === false} onClick={runPortfolio}>验证 P8 高分组合</button>
     </section>
     {taskView && <section className="panel task-panel" aria-label="任务进度">
       <div className="section-title"><div><span className="eyebrow">BACKGROUND TASK</span><h2>{taskView.kind}</h2></div><span className="message">{taskView.status}</span></div>
