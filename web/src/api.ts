@@ -24,6 +24,7 @@ export type FeatureAudit = {
   reasons: string[]; priceBasis: string;
   versions: Record<string, string | null>;
 }
+export type Security = { exchange: 'sh' | 'sz'; code: string; name: string }
 export type ScoreComponent = { score: number; weight: number; available: boolean; reasons: string[] }
 export type ScoreAudit = {
   exchange: string; code: string; date: string; availableHistory: number;
@@ -83,6 +84,7 @@ export const api = {
   taskStatus: (taskId: string) => request<GenericTask>(`/api/tasks/${taskId}`),
   labelStatus: () => request<LabelStatus>('/api/labels/status'),
   bars: (exchange: string, code: string) => request<Bar[]>(`/api/securities/${exchange}/${code}/bars`),
+  securities: (query: string) => request<Security[]>(`/api/securities?query=${encodeURIComponent(query)}`),
   audit: (exchange: string, code: string, signalDate: string) => request<Audit>('/api/p1/audit', {
     method: 'POST', body: JSON.stringify({ exchange, code, signal_date: signalDate }),
   }),

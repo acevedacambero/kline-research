@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type LabelStatus, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type LabelStatus, type Security, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -31,6 +31,7 @@ export function App() {
   const [labelStatus, setLabelStatus] = useState<LabelStatus | null>(null)
   const [exchange, setExchange] = useState('sh')
   const [code, setCode] = useState('600000')
+  const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>([])
   const [signalDate, setSignalDate] = useState('2024-01-02')
   const [bars, setBars] = useState<Bar[]>([])
   const [audit, setAudit] = useState<Audit | null>(null)
@@ -82,6 +83,21 @@ export function App() {
     refresh(); const timer = window.setInterval(refresh, 5000)
     return () => window.clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    const query = code.trim()
+    if (query.length < 2) { setSecuritySuggestions([]); return }
+    const timer = window.setTimeout(() => {
+      api.securities(query).then(rows => setSecuritySuggestions(Array.isArray(rows) ? rows : [])).catch(() => setSecuritySuggestions([]))
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [code])
+
+  const changeSecurityQuery = (value: string) => {
+    setCode(value)
+    const selected = securitySuggestions.find(item => item.code === value)
+    if (selected) setExchange(selected.exchange)
+  }
 
   async function runAudit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setMessage('正在读取本地行情并计算…')
@@ -313,7 +329,7 @@ export function App() {
       <div className="section-title"><div><span className="eyebrow">P1 AUDITOR</span><h2>P1 标签审计台</h2></div><span className="message">{message}</span></div>
       <form onSubmit={runAudit}>
         <label>交易所<select value={exchange} onChange={e => setExchange(e.target.value)}><option value="sh">上海</option><option value="sz">深圳</option></select></label>
-        <label>证券代码<input aria-label="证券代码" value={code} onChange={e => setCode(e.target.value)} /></label>
+        <label>证券代码或名称<input aria-label="证券代码" list="security-suggestions" value={code} onChange={e => changeSecurityQuery(e.target.value)} /><datalist id="security-suggestions">{securitySuggestions.map(item => <option key={`${item.exchange}-${item.code}`} value={item.code}>{item.name} · {item.exchange === 'sh' ? '上海' : '深圳'}</option>)}</datalist></label>
         <label>信号日<input type="date" value={signalDate} onChange={e => setSignalDate(e.target.value)} /></label>
         <button disabled={busy}>计算并审计</button>
       </form>

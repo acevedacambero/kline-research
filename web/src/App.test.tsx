@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 
@@ -115,6 +115,25 @@ describe('App', () => {
     expect(await screen.findByText(/已补全 3 · 新股 1 · 错误 1/)).toBeInTheDocument()
     expect(screen.getByText(/检查错误后，再手动生成 P1 和 P2/)).toBeInTheDocument()
     expect(screen.getByText('sh600000')).toBeInTheDocument()
+  })
+
+  it('searches securities by name and switches to the selected exchange', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      const body = path.startsWith('/api/securities?query=')
+        ? [{ exchange: 'sz', code: '000001', name: '平安银行' }]
+        : path.includes('/quality') ? { totalCached: 1 }
+          : { status: 'ok', dataSource: 'AkShare', cachePath: 'data', versions: {} }
+      return { ok: true, json: async () => body }
+    }))
+    render(<App />)
+    const input = screen.getByLabelText('证券代码')
+
+    fireEvent.change(input, { target: { value: '平安' } })
+    await waitFor(() => expect(document.querySelector('option[value="000001"]')).toHaveTextContent('平安银行 · 深圳'))
+    fireEvent.change(input, { target: { value: '000001' } })
+
+    expect(screen.getByLabelText('交易所')).toHaveValue('sz')
   })
 
   it('starts P3 score build and polls progress', async () => {
