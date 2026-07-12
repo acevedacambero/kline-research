@@ -29,6 +29,7 @@ from .data.history_backfill import (
 )
 from .data.provider_policy import (
     ProductionProviderPolicy as HybridDownloadSource,
+    REPRESENTATIVE_SECURITIES,
     SUPPORTED_EXCHANGES,
 )
 from .data.pipeline import DatasetPipeline
@@ -905,8 +906,8 @@ def create_app(
             )
         if request.scope == "representative":
             securities = [
-                {"exchange": "sh", "code": "600000", "name": "浦发银行"},
-                {"exchange": "sz", "code": "000001", "name": "平安银行"},
+                {"exchange": exchange, "code": code, "name": name}
+                for exchange, code, name in REPRESENTATIVE_SECURITIES
             ]
         elif request.scope == "all":
             try:
@@ -951,7 +952,11 @@ def create_app(
     @app.get("/api/datasets/quality")
     def quality():
         nonlocal history_backfill_candidate_count
-        cached = pipeline.cached_market_counts()
+        cached = {
+            market: count
+            for market, count in pipeline.cached_market_counts().items()
+            if market in SUPPORTED_EXCHANGES
+        }
         events = pipeline.quality_events(limit=100_000)
         with history_backfill_scan_lock:
             if history_backfill_candidate_count is None:
@@ -994,7 +999,10 @@ def create_app(
             if time.monotonic() >= float(freshness_quality_cache["expires"]):
                 coverage: list[dict[str, object]] = []
                 unreadable: list[str] = []
-                cached_items = pipeline.cached_securities()
+                cached_items = [
+                    item for item in pipeline.cached_securities()
+                    if item["exchange"] in SUPPORTED_EXCHANGES
+                ]
                 for item in cached_items:
                     path = Path(item["derived_path"])
                     security = f'{item["exchange"]}{item["code"]}'

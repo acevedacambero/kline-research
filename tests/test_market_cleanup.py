@@ -38,6 +38,14 @@ def seeded_root(tmp_path: Path) -> tuple[DatasetPipeline, dict[str, Path]]:
             root / "data-foundation-v1/features/v1/identity/bj/920001.manifest.json",
             b"{}",
         ),
+        "score": write(
+            root / "data-foundation-v1/scores/v1/identity/bj/920001.parquet",
+            b"bj-score",
+        ),
+        "score_manifest": write(
+            root / "data-foundation-v1/scores/v1/identity/bj/920001.manifest.json",
+            b"{}",
+        ),
     }
     with pipeline.connection() as connection:
         connection.execute(
@@ -69,13 +77,19 @@ def test_dry_run_is_exact_and_does_not_mutate(tmp_path):
     assert plan.security_master_rows == 1
     assert {entry.path for entry in plan.files if entry.action == "delete"} == {
         str(paths[name].resolve())
-        for name in ("bj_raw", "bj_derived", "label", "feature", "feature_manifest")
+        for name in (
+            "bj_raw", "bj_derived", "label", "feature", "feature_manifest",
+            "score", "score_manifest",
+        )
     }
     shared = next(entry for entry in plan.files if entry.path == str(paths["shared"].resolve()))
     assert shared.action == "skip_shared"
     assert plan.delete_bytes == sum(
         len(before[name])
-        for name in ("bj_raw", "bj_derived", "label", "feature", "feature_manifest")
+        for name in (
+            "bj_raw", "bj_derived", "label", "feature", "feature_manifest",
+            "score", "score_manifest",
+        )
     )
     assert pipeline.cached_market_counts()["bj"] == 1
     assert pipeline.load_security_master()[-1]["exchange"] == "bj"
@@ -101,7 +115,8 @@ def test_execute_removes_only_beijing_data_and_is_idempotent(tmp_path):
     assert pipeline.cached_market_counts()["bj"] == 0
     assert {item["exchange"] for item in pipeline.load_security_master()} == {"sh", "sz"}
     assert all(not paths[name].exists() for name in (
-        "bj_raw", "bj_derived", "label", "feature", "feature_manifest"
+        "bj_raw", "bj_derived", "label", "feature", "feature_manifest",
+        "score", "score_manifest",
     ))
     assert all(paths[name].read_bytes() == value for name, value in sh_before.items())
     assert any(entry.status == "skipped_shared" for entry in receipt.entries)

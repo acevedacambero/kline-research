@@ -108,6 +108,8 @@ class MarketCleanup:
             ("labels/*/bj/*.parquet", "label"),
             ("features/*/*/bj/*.parquet", "feature"),
             ("features/*/*/bj/*.manifest.json", "feature_manifest"),
+            ("scores/*/*/bj/*.parquet", "score"),
+            ("scores/*/*/bj/*.manifest.json", "score_manifest"),
         ):
             for path in foundation.glob(pattern):
                 candidates[str(path.resolve())] = (source, "exchange-file")

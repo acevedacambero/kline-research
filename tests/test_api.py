@@ -661,6 +661,40 @@ def test_quality_reports_market_relative_data_freshness(tmp_path, monkeypatch):
     assert body["unreadableSecurities"] == 0
 
 
+def test_quality_excludes_legacy_beijing_cache_from_counts_and_freshness(
+    tmp_path, monkeypatch
+):
+    sh_path = tmp_path / "sh.parquet"
+    bj_path = tmp_path / "bj.parquet"
+    for path in (sh_path, bj_path):
+        pd.DataFrame({
+            "date": pd.to_datetime(["2026-07-10"]), "close": [10.0]
+        }).to_parquet(path)
+    monkeypatch.setattr(
+        api_module.DatasetPipeline,
+        "cached_market_counts",
+        lambda _self: {"sh": 1, "sz": 0, "bj": 1},
+    )
+    monkeypatch.setattr(
+        api_module.DatasetPipeline,
+        "cached_securities",
+        lambda _self: [
+            {"exchange": "sh", "code": "600000", "derived_path": str(sh_path)},
+            {"exchange": "bj", "code": "830001", "derived_path": str(bj_path)},
+        ],
+    )
+
+    body = TestClient(
+        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    ).get("/api/datasets/quality").json()
+
+    assert body["cachedSecurities"] == {"sh": 1, "sz": 0}
+    assert body["totalCached"] == 1
+    assert body["freshSecurities"] == 1
+    assert body["freshnessCoverage"] == 1
+    assert all("bj" not in item["security"] for item in body["staleExamples"])
+
+
 def test_quality_caches_expensive_short_history_scan(tmp_path, monkeypatch):
     calls = 0
     original = api_module.HistoryBackfillService.scan

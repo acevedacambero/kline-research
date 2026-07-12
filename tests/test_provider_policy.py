@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from kline.data.provider_policy import (
+    REPRESENTATIVE_SECURITIES,
     HISTORY_BACKFILL_VERSION,
     MarketNotSupportedError,
     ProductionProviderPolicy,
@@ -22,6 +23,12 @@ def factors():
         [{"date": date(2024, 1, 2), "qfq_factor": 1.0,
           "hfq_factor": 1.0, "factor_source": "stock_zh_a_daily"}]
     )
+
+
+def test_representative_universe_is_limited_to_supported_markets():
+    assert [(exchange, code) for exchange, code, _name in REPRESENTATIVE_SECURITIES] == [
+        ("sh", "600000"), ("sz", "000001")
+    ]
 
 
 class TencentFake:

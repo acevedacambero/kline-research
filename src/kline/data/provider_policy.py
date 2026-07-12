@@ -7,6 +7,10 @@ import pandas as pd
 
 
 SUPPORTED_EXCHANGES = ("sh", "sz")
+REPRESENTATIVE_SECURITIES = (
+    ("sh", "600000", "浦发银行"),
+    ("sz", "000001", "平安银行"),
+)
 PROVIDER_POLICY_VERSION = "sh-sz-tencent-sina-v1"
 HISTORY_BACKFILL_VERSION = "history-backfill-v1"
 
