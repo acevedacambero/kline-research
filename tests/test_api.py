@@ -132,6 +132,24 @@ def test_research_readiness_expires_old_provider_gate():
     assert result["blockers"] == ["数据源上线 Gate 已过期，请重新执行"]
 
 
+def test_research_readiness_blocks_model_for_missing_scores():
+    result = build_research_readiness(
+        {"report": {"passed": True, "probedAt": "2026-07-12T11:00:00+00:00"}},
+        {
+            "totalCached": 1, "unreadableSecurities": 0,
+            "freshnessCoverage": 1, "freshnessMinCoverage": 0.95,
+        },
+        {"files": 1, "staleFiles": 0, "unreadableFiles": 0},
+        {"ready": True},
+        {"files": 0, "compatibleFiles": 0, "unreadableFiles": 0},
+        now=datetime(2026, 7, 12, 12, tzinfo=timezone.utc),
+    )
+
+    assert result["readyForModel"] is False
+    assert result["checks"]["scoresAvailable"] is False
+    assert "尚未生成 P3 评分" in result["blockers"]
+
+
 def test_feature_build_resumes_interrupted_task_with_same_id(tmp_path):
     data_path = tmp_path / "data"
     jobs_path = data_path / "jobs.duckdb"
@@ -480,6 +498,26 @@ def test_p7_feature_catalog_isolates_unreadable_parquet(tmp_path):
     assert response.json()["ready"] is False
     assert response.json()["unreadableFiles"] == 1
     assert "600000.parquet" in response.json()["unreadableExamples"][0]
+
+
+def test_score_status_reports_current_and_unreadable_files(tmp_path):
+    path = tmp_path / "data" / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
+    path.mkdir(parents=True)
+    pd.DataFrame([{
+        "score": 80.0, "usable": True,
+        "score_definition_version": "p3-rule-score-v1",
+    }]).to_parquet(path / "600000.parquet", index=False)
+    (path / "600001.parquet").write_bytes(b"not-a-parquet-file")
+
+    response = TestClient(
+        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    ).get("/api/scores/status")
+
+    assert response.status_code == 200
+    assert response.json()["files"] == 2
+    assert response.json()["compatibleFiles"] == 1
+    assert response.json()["unreadableFiles"] == 1
+    assert response.json()["ready"] is False
 
 
 def test_p7_multifeature_endpoint_returns_version_when_data_missing(tmp_path):

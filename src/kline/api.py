@@ -531,7 +531,7 @@ def dataframe_records(frame: pd.DataFrame) -> list[dict]:
 
 def build_research_readiness(
     provider: dict, quality: dict, labels: dict, features: dict,
-    *, now: datetime | None = None,
+    scores: dict | None = None, *, now: datetime | None = None,
 ) -> dict:
     now = now or datetime.now(timezone.utc)
     provider_report = provider.get("report") or {}
@@ -566,6 +566,15 @@ def build_research_readiness(
         ),
         "featuresReady": bool(features.get("ready")),
     }
+    if scores is not None:
+        checks.update({
+            "scoresAvailable": int(scores.get("files", 0)) > 0,
+            "scoresReadable": int(scores.get("unreadableFiles", 0)) == 0,
+            "scoresCurrent": (
+                int(scores.get("files", 0)) > 0
+                and int(scores.get("compatibleFiles", 0)) == int(scores.get("files", 0))
+            ),
+        })
     messages = {
         "providerGate": "尚未通过完整数据源上线 Gate",
         "providerGateFresh": "数据源上线 Gate 已过期，请重新执行",
@@ -576,6 +585,9 @@ def build_research_readiness(
         "labelsReadable": "存在不可读 P1 标签文件",
         "labelsCurrent": "存在旧版本 P1 标签",
         "featuresReady": "P2 特征覆盖尚未达到训练门槛",
+        "scoresAvailable": "尚未生成 P3 评分",
+        "scoresReadable": "存在不可读 P3 评分文件",
+        "scoresCurrent": "存在旧版本 P3 评分",
     }
     blockers = [
         messages[key] for key, passed in checks.items()
@@ -589,7 +601,9 @@ def build_research_readiness(
         "readyForModel": all(checks[key] for key in (
             "hasMarketData", "marketDataReadable", "marketDataFresh",
             "labelsAvailable", "labelsReadable", "labelsCurrent", "featuresReady",
-        )),
+        )) and all(checks[key] for key in (
+            "scoresAvailable", "scoresReadable", "scoresCurrent"
+        ) if key in checks),
         "checks": checks,
         "blockers": blockers,
         "freshnessCoverage": freshness_coverage,
@@ -1370,10 +1384,44 @@ def create_app(
                 "unreadableExamples": unreadable[:20],
                 "ready": bool(security_count and not missing and not unreadable)}
 
+    @app.get("/api/scores/status")
+    def score_dataset_status():
+        paths = sorted(
+            settings.data_path.glob("data-foundation-v1/scores/*/*/*/*.parquet")
+        )
+        rows = 0
+        compatible = 0
+        unreadable: list[str] = []
+        required = {"score", "usable", "score_definition_version"}
+        for path in paths:
+            try:
+                parquet = pq.ParquetFile(path)
+                columns = set(parquet.schema.names)
+                rows += parquet.metadata.num_rows
+                if required.issubset(columns):
+                    versions = parquet.read(
+                        columns=["score_definition_version"]
+                    )["score_definition_version"].to_pylist()
+                    if versions and set(versions) == {SCORE_DEFINITION_VERSION}:
+                        compatible += 1
+            except Exception as exc:
+                unreadable.append(f"{path.name}: {exc}")
+        return {
+            "currentVersion": SCORE_DEFINITION_VERSION,
+            "files": len(paths),
+            "rows": rows,
+            "compatibleFiles": compatible,
+            "staleFiles": len(paths) - compatible,
+            "unreadableFiles": len(unreadable),
+            "unreadableExamples": unreadable[:20],
+            "ready": bool(paths) and compatible == len(paths) and not unreadable,
+        }
+
     @app.get("/api/system/readiness")
     def research_readiness():
         return build_research_readiness(
-            provider_gate_status(), quality(), label_dataset_status(), p7_feature_catalog()
+            provider_gate_status(), quality(), label_dataset_status(),
+            p7_feature_catalog(), score_dataset_status()
         )
 
     @app.post("/api/model/p7/multifeature")

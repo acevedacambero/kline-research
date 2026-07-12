@@ -719,6 +719,22 @@
         }
       }
     },
+    "/api/scores/status": {
+      "get": {
+        "summary": "Score Dataset Status",
+        "operationId": "score_dataset_status_api_scores_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/system/readiness": {
       "get": {
         "summary": "Research Readiness",

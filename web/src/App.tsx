@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type LabelStatus, type Security, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult, type ProviderGateStatus, type DatasetQuality, type ResearchReadiness } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type LabelStatus, type Security, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult, type ProviderGateStatus, type DatasetQuality, type ResearchReadiness, type ScoreStatus } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -65,6 +65,7 @@ export function App() {
   const [approximateRuleRatio, setApproximateRuleRatio] = useState<number | null>(null)
   const [datasetQuality, setDatasetQuality] = useState<DatasetQuality | null>(null)
   const [readiness, setReadiness] = useState<ResearchReadiness | null>(null)
+  const [scoreStatus, setScoreStatus] = useState<ScoreStatus | null>(null)
   const [taskView, setTaskView] = useState<TaskView | null>(null)
 
   const showTask = (kind: string, id: string, task: { status: string; done: number; total: number; rows?: number; errors: unknown[]; currentSecurity?: string | null; speed?: number; etaSeconds?: number | null }) => {
@@ -75,6 +76,7 @@ export function App() {
     api.health().then(setHealth).catch(e => setMessage(e.message))
     api.providerGate().then(setProviderGate).catch(() => undefined)
     api.readiness().then(setReadiness).catch(() => undefined)
+    api.scoreStatus().then(setScoreStatus).catch(() => undefined)
     api.labelStatus().then(setLabelStatus).catch(() => undefined)
     const restoreTask = (task: import('./api').GenericTask) => {
       const names: Record<string, string> = { import: '行情导入', history_backfill: '历史补全', labels: 'P1 标签', features: 'P2 特征', scores: 'P3 评分' }
@@ -322,6 +324,7 @@ export function App() {
       <div className="version"><span>交易规则</span><strong>{health?.versions.limitRuleVersion ?? '—'}</strong></div>
       <div className="version"><span>特征版本</span><strong>{health?.versions.featureDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>评分版本</span><strong>{health?.versions.scoreDefinitionVersion ?? '—'}</strong></div>
+      <div className="version"><span>P3 评分数据</span><strong>{scoreStatus ? `${scoreStatus.compatibleFiles}/${scoreStatus.files}` : '—'}</strong><small>{scoreStatus?.unreadableFiles ? `${scoreStatus.unreadableFiles} 个文件不可读` : scoreStatus?.staleFiles ? `${scoreStatus.staleFiles} 个旧版本文件` : scoreStatus?.ready ? `${scoreStatus.rows} 行就绪` : '暂无评分数据'}</small></div>
       <div className="version"><span>模型版本</span><strong>{health?.versions.modelDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>多特征模型</span><strong>{health?.versions.multiFeatureModelDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>滚动验证</span><strong>{health?.versions.walkForwardModelDefinitionVersion ?? '—'}</strong></div>

@@ -65,6 +65,7 @@ export type ProviderGateReport = { gateVersion: string; passed: boolean; probedA
 export type ProviderGateStatus = { available: boolean; report: ProviderGateReport | null; maxAgeHours: number; diagnosticAvailable: boolean; diagnostic: ProviderGateReport | null }
 export type DatasetQuality = { totalCached: number; featureRows: number; approximateRuleRows: number; approximateRuleRatio?: number | null; latestDataDate?: string | null; freshSecurities: number; staleSecurities: number; freshnessCoverage: number; freshnessMinCoverage: number; freshnessThresholdDays: number; staleExamples: Array<{ security: string; latestDate: string }>; unreadableSecurities: number; unreadableExamples: string[] }
 export type ResearchReadiness = { version: string; readyForRefresh: boolean; readyForAudit: boolean; readyForModel: boolean; freshnessCoverage: number; freshnessMinCoverage: number; providerGateAgeHours?: number | null; providerGateMaxAgeHours: number; checks: Record<string, boolean>; blockers: string[] }
+export type ScoreStatus = { currentVersion: string; files: number; rows: number; compatibleFiles: number; staleFiles: number; unreadableFiles: number; unreadableExamples: string[]; ready: boolean }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
@@ -86,6 +87,7 @@ export const api = {
   health: () => request<Health>('/api/system/health'),
   providerGate: () => request<ProviderGateStatus>('/api/system/provider-gate'),
   readiness: () => request<ResearchReadiness>('/api/system/readiness'),
+  scoreStatus: () => request<ScoreStatus>('/api/scores/status'),
   probeProviders: (quick = false) => request<{ taskId: string; quick: boolean }>(`/api/system/provider-gate/probe?quick=${quick}`, { method: 'POST' }),
   recentTasks: (limit = 10) => request<GenericTask[]>(`/api/tasks/recent?limit=${limit}`),
   taskStatus: (taskId: string) => request<GenericTask>(`/api/tasks/${taskId}`),
