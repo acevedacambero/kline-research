@@ -1445,6 +1445,7 @@ def create_app(
         columns: list[str] | None = None,
         *,
         latest_per_security: bool = True,
+        tail_rows_per_file: int | None = None,
     ) -> pd.DataFrame:
         frames = []
         paths = sorted(settings.data_path.glob(pattern), key=lambda path: path.stat().st_mtime)
@@ -1470,7 +1471,10 @@ def create_app(
                 parquet = pq.ParquetFile(path)
                 available = set(parquet.schema.names)
                 selected = [column for column in columns if column in available]
-                frames.append(parquet.read(columns=selected).to_pandas())
+                table = parquet.read(columns=selected)
+                if tail_rows_per_file and table.num_rows > tail_rows_per_file:
+                    table = table.slice(table.num_rows - tail_rows_per_file)
+                frames.append(table.to_pandas())
             else:
                 frames.append(pd.read_parquet(path))
         if not frames:
@@ -1555,11 +1559,13 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
+            tail_rows_per_file=250,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
             ["exchange", "code", "signal_date"],
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
+            tail_rows_per_file=250,
         )
         return calibrate_score(
             scores,
@@ -1630,11 +1636,13 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
+            tail_rows_per_file=250,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
             ["exchange", "code", "signal_date"],
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
+            tail_rows_per_file=250,
         )
         result = train_score_baseline(
             scores,
@@ -1798,11 +1806,13 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
+            tail_rows_per_file=250,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
             ["exchange", "code", "signal_date"],
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
+            tail_rows_per_file=250,
         )
         features = read_dataset_glob(
             "data-foundation-v1/features/*/*/*/*.parquet",
@@ -1816,6 +1826,7 @@ def create_app(
                 "volume_ratio_5",
                 "volatility_20",
             ],
+            tail_rows_per_file=250,
         )
         result = train_multifeature_baseline(
             scores,
