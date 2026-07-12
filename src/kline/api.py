@@ -805,6 +805,10 @@ def create_app(
     label_status_cache: dict[str, object] = {"expires": 0.0, "value": None}
     label_status_lock = threading.Lock()
     label_status_path = settings.data_path / ".label-status.json"
+    score_status_cache: dict[str, object] = {"expires": 0.0, "value": None}
+    score_status_lock = threading.Lock()
+    feature_catalog_cache: dict[str, object] = {"expires": 0.0, "value": None}
+    feature_catalog_lock = threading.Lock()
 
     @app.get("/api/labels/status")
     def label_dataset_status():
@@ -1225,6 +1229,8 @@ def create_app(
                     "taskId": active["id"],
                 },
             )
+        with feature_catalog_lock:
+            feature_catalog_cache.update(value=None, expires=0.0)
         cached = [
             item for item in pipeline.cached_securities()
             if item["exchange"] in SUPPORTED_EXCHANGES
@@ -1239,9 +1245,8 @@ def create_app(
                     "message": "scope must be representative or all",
                 },
             )
-        label_status_path.unlink(missing_ok=True)
-        with label_status_lock:
-            label_status_cache.update(value=None, expires=0.0)
+        with score_status_lock:
+            score_status_cache.update(value=None, expires=0.0)
         try:
             names = {
                 f'{item["exchange"]}{item["code"]}': item["name"]
@@ -1354,6 +1359,9 @@ def create_app(
 
     @app.get("/api/model/p7/features")
     def p7_feature_catalog():
+        with feature_catalog_lock:
+            if time.monotonic() < float(feature_catalog_cache["expires"]):
+                return feature_catalog_cache["value"]
         expected = ["bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"]
         latest_paths: dict[tuple[str, str], Path] = {}
         for path in sorted(
@@ -1362,7 +1370,10 @@ def create_app(
         ):
             latest_paths[(path.parent.name, path.stem)] = path
         if not latest_paths:
-            return {"version": "daily-features-v1", "featureColumns": [], "missingColumns": expected, "securityCount": 0, "rowCount": 0, "unreadableFiles": 0, "unreadableExamples": [], "ready": False}
+            result = {"version": "daily-features-v1", "featureColumns": [], "missingColumns": expected, "securityCount": 0, "rowCount": 0, "unreadableFiles": 0, "unreadableExamples": [], "ready": False}
+            with feature_catalog_lock:
+                feature_catalog_cache.update(value=result, expires=time.monotonic() + 60)
+            return result
         ignored = {"exchange", "code", "date"}
         columns: set[str] = set()
         row_count = 0
@@ -1378,14 +1389,20 @@ def create_app(
         columns = set(columns) - ignored
         missing = sorted(set(expected) - set(columns))
         security_count = len(latest_paths)
-        return {"version": "daily-features-v1", "featureColumns": sorted(columns), "missingColumns": missing,
+        result = {"version": "daily-features-v1", "featureColumns": sorted(columns), "missingColumns": missing,
                 "securityCount": security_count, "rowCount": row_count,
                 "unreadableFiles": len(unreadable),
                 "unreadableExamples": unreadable[:20],
                 "ready": bool(security_count and not missing and not unreadable)}
+        with feature_catalog_lock:
+            feature_catalog_cache.update(value=result, expires=time.monotonic() + 60)
+        return result
 
     @app.get("/api/scores/status")
     def score_dataset_status():
+        with score_status_lock:
+            if time.monotonic() < float(score_status_cache["expires"]):
+                return score_status_cache["value"]
         paths = sorted(
             settings.data_path.glob("data-foundation-v1/scores/*/*/*/*.parquet")
         )
@@ -1398,15 +1415,31 @@ def create_app(
                 parquet = pq.ParquetFile(path)
                 columns = set(parquet.schema.names)
                 rows += parquet.metadata.num_rows
-                if required.issubset(columns):
-                    versions = parquet.read(
-                        columns=["score_definition_version"]
-                    )["score_definition_version"].to_pylist()
-                    if versions and set(versions) == {SCORE_DEFINITION_VERSION}:
+                if required.issubset(columns) and parquet.metadata.num_rows:
+                    column_index = parquet.schema.names.index("score_definition_version")
+                    metadata_current = True
+                    for index in range(parquet.metadata.num_row_groups):
+                        stats = parquet.metadata.row_group(index).column(
+                            column_index
+                        ).statistics
+                        if (
+                            not stats or not stats.has_min_max
+                            or stats.min != SCORE_DEFINITION_VERSION
+                            or stats.max != SCORE_DEFINITION_VERSION
+                        ):
+                            metadata_current = False
+                            break
+                    if metadata_current:
                         compatible += 1
+                    else:
+                        versions = parquet.read(
+                            columns=["score_definition_version"]
+                        )["score_definition_version"].to_pylist()
+                        if versions and set(versions) == {SCORE_DEFINITION_VERSION}:
+                            compatible += 1
             except Exception as exc:
                 unreadable.append(f"{path.name}: {exc}")
-        return {
+        result = {
             "currentVersion": SCORE_DEFINITION_VERSION,
             "files": len(paths),
             "rows": rows,
@@ -1416,6 +1449,9 @@ def create_app(
             "unreadableExamples": unreadable[:20],
             "ready": bool(paths) and compatible == len(paths) and not unreadable,
         }
+        with score_status_lock:
+            score_status_cache.update(value=result, expires=time.monotonic() + 60)
+        return result
 
     @app.get("/api/system/readiness")
     def research_readiness():

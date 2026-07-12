@@ -500,6 +500,30 @@ def test_p7_feature_catalog_isolates_unreadable_parquet(tmp_path):
     assert "600000.parquet" in response.json()["unreadableExamples"][0]
 
 
+def test_p7_feature_catalog_caches_parquet_metadata_scan(tmp_path, monkeypatch):
+    path = tmp_path / "data" / "data-foundation-v1" / "features" / "v1" / "identity" / "sh"
+    path.mkdir(parents=True)
+    pd.DataFrame([{
+        "bullish_alignment": True, "return_20": 0.1,
+        "volume_ratio_5": 1.2, "volatility_20": 0.02,
+    }]).to_parquet(path / "600000.parquet", index=False)
+    calls = 0
+    original = api_module.pq.ParquetFile
+
+    def counted_parquet_file(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(api_module.pq, "ParquetFile", counted_parquet_file)
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    with TestClient(app) as client:
+        assert client.get("/api/model/p7/features").status_code == 200
+        assert client.get("/api/model/p7/features").status_code == 200
+
+    assert calls == 1
+
+
 def test_score_status_reports_current_and_unreadable_files(tmp_path):
     path = tmp_path / "data" / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
     path.mkdir(parents=True)
@@ -518,6 +542,30 @@ def test_score_status_reports_current_and_unreadable_files(tmp_path):
     assert response.json()["compatibleFiles"] == 1
     assert response.json()["unreadableFiles"] == 1
     assert response.json()["ready"] is False
+
+
+def test_score_status_caches_parquet_metadata_scan(tmp_path, monkeypatch):
+    path = tmp_path / "data" / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
+    path.mkdir(parents=True)
+    pd.DataFrame([{
+        "score": 80.0, "usable": True,
+        "score_definition_version": "p3-rule-score-v1",
+    }]).to_parquet(path / "600000.parquet", index=False)
+    calls = 0
+    original = api_module.pq.ParquetFile
+
+    def counted_parquet_file(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(api_module.pq, "ParquetFile", counted_parquet_file)
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    with TestClient(app) as client:
+        assert client.get("/api/scores/status").status_code == 200
+        assert client.get("/api/scores/status").status_code == 200
+
+    assert calls == 1
 
 
 def test_p7_multifeature_endpoint_returns_version_when_data_missing(tmp_path):
