@@ -201,6 +201,7 @@ class _TaskFacade:
         self.store = store
         self.items = _DurableItems(store, job_types)
         self.lock = lock
+        self.on_finish = None
 
     def active(self) -> dict | None:
         active = self.coordinator.active()
@@ -214,6 +215,13 @@ class _TaskFacade:
         return None
 
     def _submit(self, job_type, payload, operation) -> str:
+        def finalizing_operation(operation_payload, progress):
+            try:
+                return operation(operation_payload, progress)
+            finally:
+                if self.on_finish is not None:
+                    self.on_finish()
+
         with self.lock:
             active = self.coordinator.active()
             if active:
@@ -229,9 +237,11 @@ class _TaskFacade:
                 if job.job_type == job_type and job.resumable
             ]
             if interrupted:
-                return self.coordinator.resume(interrupted[-1].id, operation).job_id
+                return self.coordinator.resume(
+                    interrupted[-1].id, finalizing_operation
+                ).job_id
             return self.coordinator.submit(
-                job_type, payload, operation, resumable=True
+                job_type, payload, finalizing_operation, resumable=True
             ).job_id
 
 
@@ -810,6 +820,23 @@ def create_app(
     feature_catalog_cache: dict[str, object] = {"expires": 0.0, "value": None}
     feature_catalog_lock = threading.Lock()
 
+    def invalidate_label_status():
+        label_status_path.unlink(missing_ok=True)
+        with label_status_lock:
+            label_status_cache.update(value=None, expires=0.0)
+
+    def invalidate_feature_catalog():
+        with feature_catalog_lock:
+            feature_catalog_cache.update(value=None, expires=0.0)
+
+    def invalidate_score_status():
+        with score_status_lock:
+            score_status_cache.update(value=None, expires=0.0)
+
+    label_tasks.on_finish = invalidate_label_status
+    feature_tasks.on_finish = invalidate_feature_catalog
+    score_tasks.on_finish = invalidate_score_status
+
     @app.get("/api/labels/status")
     def label_dataset_status():
         with label_status_lock:
@@ -1137,6 +1164,7 @@ def create_app(
     @app.post("/api/labels/build", status_code=202)
     def build_labels(request: ImportRequest):
         label_tasks.active()
+        invalidate_label_status()
         cached = [
             item for item in pipeline.cached_securities()
             if item["exchange"] in SUPPORTED_EXCHANGES
@@ -1229,8 +1257,7 @@ def create_app(
                     "taskId": active["id"],
                 },
             )
-        with feature_catalog_lock:
-            feature_catalog_cache.update(value=None, expires=0.0)
+        invalidate_feature_catalog()
         cached = [
             item for item in pipeline.cached_securities()
             if item["exchange"] in SUPPORTED_EXCHANGES
@@ -1245,8 +1272,7 @@ def create_app(
                     "message": "scope must be representative or all",
                 },
             )
-        with score_status_lock:
-            score_status_cache.update(value=None, expires=0.0)
+        invalidate_score_status()
         try:
             names = {
                 f'{item["exchange"]}{item["code"]}': item["name"]

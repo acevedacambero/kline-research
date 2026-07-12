@@ -72,6 +72,13 @@ export function App() {
     setTaskView({ kind, id, status: task.status, done: task.done, total: task.total, rows: task.rows, errors: task.errors.length, errorItems: task.errors, current: task.currentSecurity, speed: task.speed, etaSeconds: task.etaSeconds })
   }
 
+  const refreshResearchStatus = () => Promise.all([
+    api.labelStatus().then(setLabelStatus),
+    api.featureCatalog().then(setFeatureCatalog),
+    api.scoreStatus().then(setScoreStatus),
+    api.readiness().then(setReadiness),
+  ]).catch(() => undefined)
+
   useEffect(() => {
     api.health().then(setHealth).catch(e => setMessage(e.message))
     api.providerGate().then(setProviderGate).catch(() => undefined)
@@ -149,7 +156,7 @@ export function App() {
         else {
           setBusy(false)
           if (task.errors.length) setMessage(`标签完成，但有 ${task.errors.length} 个错误`)
-          api.labelStatus().then(setLabelStatus).catch(() => undefined)
+          void refreshResearchStatus()
         }
       }
       await poll()
@@ -187,7 +194,7 @@ export function App() {
         showTask('P2 特征', result.taskId, task)
         setMessage(`P2 特征：${task.done}/${task.total}，已生成 ${task.rows} 行`)
         if (task.status === 'queued' || task.status === 'running') window.setTimeout(poll, 1000)
-        else { setBusy(false); if (task.errors.length) setMessage(`特征完成，但有 ${task.errors.length} 个错误`) }
+        else { setBusy(false); if (task.errors.length) setMessage(`特征完成，但有 ${task.errors.length} 个错误`); void refreshResearchStatus() }
       }
       await poll()
     } catch (error) { setMessage(error instanceof Error ? error.message : '特征任务启动失败'); setBusy(false) }
@@ -224,7 +231,7 @@ export function App() {
         showTask('P3 评分', result.taskId, task)
         setMessage(`P3 评分：${task.done}/${task.total}，已生成 ${task.rows} 行`)
         if (task.status === 'queued' || task.status === 'running') window.setTimeout(poll, 1000)
-        else { setBusy(false); if (task.errors.length) setMessage(`评分完成，但有 ${task.errors.length} 个错误`) }
+        else { setBusy(false); if (task.errors.length) setMessage(`评分完成，但有 ${task.errors.length} 个错误`); void refreshResearchStatus() }
       }
       await poll()
     } catch (error) { setMessage(error instanceof Error ? error.message : '评分任务启动失败'); setBusy(false) }
@@ -419,7 +426,7 @@ export function App() {
         </div>
       </div> : <p className="muted">执行上方审计后，展示 P2 特征驱动的可解释 P3 分数。</p>}
     </section>
-    <section className="panel"><div className="section-title"><div><span className="eyebrow">P7 FEATURE GATE</span><h2>P7 多特征数据门槛</h2></div>{featureCatalog && <span className="message">{featureCatalog.ready ? '可进入训练' : '暂不可训练'} · {featureCatalog.version}</span>}</div>{featureCatalog ? <div className="validation-panel"><article><span>证券覆盖</span><strong>{featureCatalog.securityCount}</strong><small>{featureCatalog.rowCount} 行特征数据 · 不可读 {featureCatalog.unreadableFiles ?? 0}</small></article><article><span>可用特征</span><strong>{featureCatalog.featureColumns.length}</strong><small>{featureCatalog.featureColumns.slice(0, 5).join('、') || '暂无特征'}{featureCatalog.missingColumns.length ? ` · 缺失 ${featureCatalog.missingColumns.join('、')}` : ''}</small></article></div> : <p className="muted">检查 P2 特征文件覆盖后，再进入多特征模型训练。</p>}</section>
+    <section className="panel"><div className="section-title"><div><span className="eyebrow">P7 FEATURE GATE</span><h2>P7 多特征数据门槛</h2></div>{featureCatalog && <span className="message">{featureCatalog.ready ? '可进入训练' : '暂不可训练'} · {featureCatalog.version ?? '状态刷新中'}</span>}</div>{featureCatalog ? <div className="validation-panel"><article><span>证券覆盖</span><strong>{featureCatalog.securityCount ?? 0}</strong><small>{featureCatalog.rowCount ?? 0} 行特征数据 · 不可读 {featureCatalog.unreadableFiles ?? 0}</small></article><article><span>可用特征</span><strong>{featureCatalog.featureColumns?.length ?? 0}</strong><small>{featureCatalog.featureColumns?.slice(0, 5).join('、') || '暂无特征'}{featureCatalog.missingColumns?.length ? ` · 缺失 ${featureCatalog.missingColumns.join('、')}` : ''}</small></article></div> : <p className="muted">检查 P2 特征文件覆盖后，再进入多特征模型训练。</p>}</section>
     <section className="panel">
       <div className="section-title"><div><span className="eyebrow">P2 AUDITOR</span><h2>P2 特征审计</h2></div>{featureAudit && <span className="message">历史 {featureAudit.availableHistory} 日 · {featureAudit.priceBasis}</span>}</div>
       {featureAudit ? <div className="feature-groups">

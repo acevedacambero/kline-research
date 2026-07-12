@@ -568,6 +568,36 @@ def test_score_status_caches_parquet_metadata_scan(tmp_path, monkeypatch):
     assert calls == 1
 
 
+def test_completed_feature_and_score_jobs_invalidate_cached_status(tmp_path):
+    data_path = tmp_path / "data"
+    seed_security(data_path)
+    app = create_app(Settings(data_path=data_path), FakeSource())
+
+    def wait_for_task(client, task_id):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            task = client.get(f"/api/tasks/{task_id}").json()
+            if task["status"] not in {"queued", "running"}:
+                return task
+            time.sleep(0.02)
+        return task
+
+    with TestClient(app) as client:
+        assert client.get("/api/model/p7/features").json()["ready"] is False
+        feature_id = client.post(
+            "/api/features/build", json={"scope": "all"}
+        ).json()["taskId"]
+        assert wait_for_task(client, feature_id)["status"] == "completed"
+        assert client.get("/api/model/p7/features").json()["ready"] is True
+
+        assert client.get("/api/scores/status").json()["ready"] is False
+        score_id = client.post(
+            "/api/scores/build", json={"scope": "all"}
+        ).json()["taskId"]
+        assert wait_for_task(client, score_id)["status"] == "completed"
+        assert client.get("/api/scores/status").json()["ready"] is True
+
+
 def test_p7_multifeature_endpoint_returns_version_when_data_missing(tmp_path):
     response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).post(
         "/api/model/p7/multifeature", json={"label_column": "p20_executable_return"}
