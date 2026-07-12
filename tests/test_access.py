@@ -102,7 +102,9 @@ def test_production_api_requires_access_token_but_healthz_and_static_are_public(
     app = create_app(settings, FakeSource(), access_verifier=StubVerifier())
 
     with TestClient(app) as client:
-        assert client.get("/healthz").status_code == 200
+        health = client.get("/healthz")
+        assert health.status_code == 200
+        assert health.json() == {"status": "ok", "activeTasks": 0}
         assert "production-ui" in client.get("/").text
         missing = client.get("/api/system/health")
         invalid = client.get(

@@ -730,7 +730,7 @@ def create_app(
 
     @app.get("/healthz", include_in_schema=False)
     def healthz():
-        return {"status": "ok"}
+        return {"status": "ok", "activeTasks": len(coordinator.active())}
 
     @app.post("/api/datasets/validate")
     def validate_dataset():

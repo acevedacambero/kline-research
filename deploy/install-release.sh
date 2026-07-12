@@ -19,6 +19,17 @@ release="${releases}/${release_id}"
 [[ -x "${runtime}/bin/python" ]] || { echo "shared runtime missing" >&2; exit 3; }
 [[ ! -e "${release}" ]] || { echo "release already exists" >&2; exit 3; }
 
+if [[ "${KLINE_ALLOW_ACTIVE_DEPLOY:-0}" != "1" ]]; then
+  health="$(curl -fsS --max-time 5 http://127.0.0.1:8800/healthz 2>/dev/null || true)"
+  if [[ -n "${health}" ]]; then
+    active="$(printf '%s' "${health}" | "${runtime}/bin/python" -c 'import json,sys; print(int(json.load(sys.stdin).get("activeTasks", 0)))')"
+    [[ "${active}" == "0" ]] || {
+      echo "deployment blocked: ${active} heavy task(s) are active" >&2
+      exit 5
+    }
+  fi
+fi
+
 old="$(readlink -f "${root}/current")"
 old_previous="$(readlink -f "${root}/previous" 2>/dev/null || true)"
 mkdir -p "${release}/web/dist"
