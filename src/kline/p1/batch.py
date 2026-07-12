@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import pandas as pd
+from pyarrow.lib import ArrowInvalid
 
 from ..storage import atomic_write_parquet
 
@@ -25,8 +26,7 @@ def filter_mature_samples(samples: list[dict[str, Any]], as_of_date: date):
     return [
         sample
         for sample in samples
-        if sample["signal_date"] <= as_of_date
-        and sample["label_maturity_date"] <= as_of_date
+        if sample["signal_date"] <= as_of_date and sample["label_maturity_date"] <= as_of_date
     ]
 
 
@@ -41,20 +41,47 @@ class LabelDatasetStore:
     def __init__(self, output_root: Path):
         self.output_root = Path(output_root)
 
-    def write(
-        self, exchange: str, code: str, rows: list[dict[str, Any]]
-    ) -> LabelStoreReport:
-        if not rows:
-            return LabelStoreReport("empty", "", 0)
-        snapshot = rows[0]["snapshot_version"]
-        path = (
+    def path_for(self, exchange: str, code: str, snapshot_version: str) -> Path:
+        return (
             self.output_root
             / "data-foundation-v1"
             / "labels"
-            / snapshot
+            / snapshot_version
             / exchange
             / f"{code}.parquet"
         )
+
+    def reuse_current(
+        self,
+        exchange: str,
+        code: str,
+        snapshot_version: str,
+        *,
+        label_definition_version: str,
+        limit_rule_version: str,
+    ) -> LabelStoreReport | None:
+        path = self.path_for(exchange, code, snapshot_version)
+        if not path.exists():
+            return None
+        try:
+            versions = pd.read_parquet(
+                path, columns=["label_definition_version", "limit_rule_version"]
+            )
+        except (ArrowInvalid, KeyError, ValueError):
+            return None
+        if versions.empty:
+            return None
+        if not versions["label_definition_version"].eq(label_definition_version).all():
+            return None
+        if not versions["limit_rule_version"].eq(limit_rule_version).all():
+            return None
+        return LabelStoreReport("reused", str(path), len(versions))
+
+    def write(self, exchange: str, code: str, rows: list[dict[str, Any]]) -> LabelStoreReport:
+        if not rows:
+            return LabelStoreReport("empty", "", 0)
+        snapshot = rows[0]["snapshot_version"]
+        path = self.path_for(exchange, code, snapshot)
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_parquet(pd.DataFrame(rows), path)
         return LabelStoreReport("written", str(path), len(rows))
@@ -87,9 +114,7 @@ class BatchLabelBuilder:
             return []
         max_horizon = max(self.horizons)
         trading_dates = [bar["date"] for bar in bars]
-        benchmark_date_index = {
-            bar["date"]: index for index, bar in enumerate(benchmark)
-        }
+        benchmark_date_index = {bar["date"]: index for index, bar in enumerate(benchmark)}
         listing_date = bars[0]["date"]
         no_limit_indices = {
             index
@@ -113,39 +138,44 @@ class BatchLabelBuilder:
             )
             if not entry.executable or entry.entry_index is None:
                 continue
-            entry_basis = float(bars[entry.entry_index].get(
-                "open_total_return", bars[entry.entry_index]["open_qfq"]
-            ))
-            signal_basis = float(bars[signal_index].get(
-                "close_total_return", bars[signal_index]["close_qfq"]
-            ))
+            entry_basis = float(
+                bars[entry.entry_index].get(
+                    "open_total_return", bars[entry.entry_index]["open_qfq"]
+                )
+            )
+            signal_basis = float(
+                bars[signal_index].get("close_total_return", bars[signal_index]["close_qfq"])
+            )
             if entry_basis <= 0 or signal_basis <= 0:
                 continue
             labels = compute_forward_labels(
-                bars, benchmark, signal_index, entry.entry_index, self.horizons,
+                bars,
+                benchmark,
+                signal_index,
+                entry.entry_index,
+                self.horizons,
                 benchmark_date_index,
             )
             exits = {
                 horizon: resolve_executable_exit(
-                    bars, entry.entry_index + horizon, code=code,
-                    exchange=exchange, st_status=st_status,
+                    bars,
+                    entry.entry_index + horizon,
+                    code=code,
+                    exchange=exchange,
+                    st_status=st_status,
                     max_delay=self.max_exit_delay,
                 )
                 for horizon in self.horizons
             }
             maturity_dates = {
-                horizon: compute_label_maturity_date(
-                    trading_dates, entry.entry_index, horizon
-                )
+                horizon: compute_label_maturity_date(trading_dates, entry.entry_index, horizon)
                 for horizon in self.horizons
             }
             if any(value is None for value in maturity_dates.values()):
                 continue
             path_start = entry_basis
             path = compute_path_label(bars, entry.entry_index, path_start)
-            drawdown = compute_drawdown_label(
-                bars, entry.entry_index, path_start, 20, 0.08
-            )
+            drawdown = compute_drawdown_label(bars, entry.entry_index, path_start, 20, 0.08)
             row: dict[str, Any] = {
                 "exchange": exchange,
                 "code": code,
@@ -181,9 +211,7 @@ class BatchLabelBuilder:
                 row[f"{prefix}_exit_date"] = exit_result.exit_date
                 row[f"{prefix}_exit_delay"] = exit_result.exit_delay
                 row[f"{prefix}_delayed_executable_return"] = (
-                    exit_result.exit_price
-                    / entry_basis
-                    - 1
+                    exit_result.exit_price / entry_basis - 1
                     if exit_result.executable and exit_result.exit_price is not None
                     else None
                 )

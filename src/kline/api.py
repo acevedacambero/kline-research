@@ -158,19 +158,27 @@ def _task_response(job: Job) -> dict:
         total = len(job.payload["candidates"])
     else:
         total = 0
-    defaults = {"total": total, "done": 0, "rows": 0, "errors": [],
-                "currentSecurity": None}
+    defaults = {"total": total, "done": 0, "rows": 0, "errors": [], "currentSecurity": None}
     if job.job_type == "import":
-        defaults.update({"stage": "queued", "speed": 0.0, "etaSeconds": None,
-                         "directAvailable": job.payload.get("directAvailable")
-                         if isinstance(job.payload, dict) else None})
+        defaults.update(
+            {
+                "stage": "queued",
+                "speed": 0.0,
+                "etaSeconds": None,
+                "directAvailable": job.payload.get("directAvailable")
+                if isinstance(job.payload, dict)
+                else None,
+            }
+        )
     elif job.job_type == "history_backfill":
-        defaults.update({
-            "completed": 0,
-            "listingHistoryShort": 0,
-            "speed": 0.0,
-            "etaSeconds": None,
-        })
+        defaults.update(
+            {
+                "completed": 0,
+                "listingHistoryShort": 0,
+                "speed": 0.0,
+                "etaSeconds": None,
+            }
+        )
     progress = job.progress if isinstance(job.progress, dict) else {}
     result = job.result if isinstance(job.result, dict) else {}
     item = {"id": job.id, "jobType": job.job_type, **defaults, **progress, **result}
@@ -200,8 +208,13 @@ class _DurableItems:
 
 
 class _TaskFacade:
-    def __init__(self, coordinator: HeavyTaskCoordinator, store: JobStore, lock: threading.Lock,
-                 job_types: set[str]):
+    def __init__(
+        self,
+        coordinator: HeavyTaskCoordinator,
+        store: JobStore,
+        lock: threading.Lock,
+        job_types: set[str],
+    ):
         self.coordinator = coordinator
         self.store = store
         self.items = _DurableItems(store, job_types)
@@ -212,11 +225,14 @@ class _TaskFacade:
         active = self.coordinator.active()
         if active:
             task_id = active[0].id
-            raise HTTPException(409, detail={
-                "code": "HEAVY_JOB_ALREADY_RUNNING",
-                "message": f"A heavy job is already running: {task_id}",
-                "taskId": task_id,
-            })
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "HEAVY_JOB_ALREADY_RUNNING",
+                    "message": f"A heavy job is already running: {task_id}",
+                    "taskId": task_id,
+                },
+            )
         return None
 
     def _submit(self, job_type, payload, operation) -> str:
@@ -231,20 +247,21 @@ class _TaskFacade:
             active = self.coordinator.active()
             if active:
                 task_id = active[0].id
-                raise HTTPException(409, detail={
-                    "code": "HEAVY_JOB_ALREADY_RUNNING",
-                    "message": f"A heavy job is already running: {task_id}",
-                    "taskId": task_id,
-                })
+                raise HTTPException(
+                    409,
+                    detail={
+                        "code": "HEAVY_JOB_ALREADY_RUNNING",
+                        "message": f"A heavy job is already running: {task_id}",
+                        "taskId": task_id,
+                    },
+                )
             interrupted = [
                 job
                 for job in self.store.list(status=JobStatus.INTERRUPTED)
                 if job.job_type == job_type and job.resumable
             ]
             if interrupted:
-                return self.coordinator.resume(
-                    interrupted[-1].id, finalizing_operation
-                ).job_id
+                return self.coordinator.resume(interrupted[-1].id, finalizing_operation).job_id
             return self.coordinator.submit(
                 job_type, payload, finalizing_operation, resumable=True
             ).job_id
@@ -256,9 +273,16 @@ class TaskStore(_TaskFacade):
         self.workers = max(1, min(workers, 3))
 
     def submit(self, pipeline, source, securities, start_date, end_date, timeout_seconds) -> str:
-        initial = {"total": len(securities), "done": 0, "errors": [],
-                   "currentSecurity": None, "stage": "queued", "speed": 0.0,
-                   "etaSeconds": None, "directAvailable": source.direct_available}
+        initial = {
+            "total": len(securities),
+            "done": 0,
+            "errors": [],
+            "currentSecurity": None,
+            "stage": "queued",
+            "speed": 0.0,
+            "etaSeconds": None,
+            "directAvailable": source.direct_available,
+        }
 
         payload = {"securities": securities, "directAvailable": source.direct_available}
 
@@ -269,33 +293,31 @@ class TaskStore(_TaskFacade):
             started = time.monotonic()
 
             def fetch(security):
-                return source.fetch_bundle(security["exchange"], security["code"],
-                                           start_date, end_date)
+                return source.fetch_bundle(
+                    security["exchange"], security["code"], start_date, end_date
+                )
 
             def record_finished():
                 state["done"] += 1
                 elapsed = max(time.monotonic() - started, 0.001)
                 state["speed"] = round(state["done"] / elapsed, 3)
                 remaining = state["total"] - state["done"]
-                state["etaSeconds"] = (
-                    round(remaining / state["speed"]) if state["speed"] else None
-                )
+                state["etaSeconds"] = round(remaining / state["speed"]) if state["speed"] else None
                 state["directAvailable"] = source.direct_available
                 progress(state)
 
             securities = payload["securities"]
             for offset in range(0, len(securities), self.workers):
-                batch = securities[offset:offset + self.workers]
-                executor = ThreadPoolExecutor(max_workers=len(batch),
-                                              thread_name_prefix="market-fetch")
+                batch = securities[offset : offset + self.workers]
+                executor = ThreadPoolExecutor(
+                    max_workers=len(batch), thread_name_prefix="market-fetch"
+                )
                 try:
-                    futures = {
-                        executor.submit(fetch, security): security for security in batch
-                    }
+                    futures = {executor.submit(fetch, security): security for security in batch}
                     completed, pending = wait(futures, timeout=timeout_seconds)
                     for future in completed:
                         security = futures[future]
-                        key = f'{security["exchange"]}{security["code"]}'
+                        key = f"{security['exchange']}{security['code']}"
                         state["currentSecurity"] = key
                         state["stage"] = "writing-snapshot"
                         try:
@@ -310,11 +332,13 @@ class TaskStore(_TaskFacade):
                     for future in pending:
                         future.cancel()
                         security = futures[future]
-                        key = f'{security["exchange"]}{security["code"]}'
-                        state["errors"].append({
-                            "security": key,
-                            "message": f"fetch timed out after {timeout_seconds}s",
-                        })
+                        key = f"{security['exchange']}{security['code']}"
+                        state["errors"].append(
+                            {
+                                "security": key,
+                                "message": f"fetch timed out after {timeout_seconds}s",
+                            }
+                        )
                         record_finished()
                 finally:
                     executor.shutdown(wait=False, cancel_futures=True)
@@ -335,9 +359,19 @@ class LabelTaskStore(_TaskFacade):
             benchmarks = {}
             builder, output = BatchLabelBuilder(), LabelDatasetStore(output_root)
             for security in payload:
-                key = f'{security["exchange"]}{security["code"]}'
+                key = f"{security['exchange']}{security['code']}"
                 try:
                     exchange = security["exchange"]
+                    reused = output.reuse_current(
+                        exchange,
+                        security["code"],
+                        security["snapshot_version"],
+                        label_definition_version=VERSIONS["labelDefinitionVersion"],
+                        limit_rule_version=VERSIONS["limitRuleVersion"],
+                    )
+                    if reused:
+                        state["rows"] += reused.rows
+                        continue
                     if exchange not in benchmarks:
                         frame = source.index_history(exchange, date(1990, 1, 1), date.today())
                         for column in ("open", "high", "low", "close"):
@@ -345,9 +379,14 @@ class LabelTaskStore(_TaskFacade):
                             frame[f"{column}_total_return"] = frame[column]
                         benchmarks[exchange] = frame.to_dict("records")
                     bars = pd.read_parquet(security["derived_path"]).to_dict("records")
-                    rows = builder.build(exchange, security["code"], bars, benchmarks[exchange],
-                                         security["snapshot_version"],
-                                         st_status=status_from_name(names.get(key, "")).is_st)
+                    rows = builder.build(
+                        exchange,
+                        security["code"],
+                        bars,
+                        benchmarks[exchange],
+                        security["snapshot_version"],
+                        st_status=status_from_name(names.get(key, "")).is_st,
+                    )
                     state["rows"] += output.write(exchange, security["code"], rows).rows
                 except Exception as exc:
                     state["errors"].append({"security": key, "message": str(exc)})
@@ -355,6 +394,7 @@ class LabelTaskStore(_TaskFacade):
                     state["done"] += 1
                     progress(state)
             return state
+
         return self._submit("labels", securities, operation)
 
 
@@ -364,9 +404,15 @@ class FeatureTaskStore(_TaskFacade):
 
     def submit(self, securities, output_root) -> str:
         def operation(payload, progress):
-            state = {"total": len(payload), "done": 0, "rows": 0, "errors": [],
-                     "currentSecurity": None}
+            state = {
+                "total": len(payload),
+                "done": 0,
+                "rows": 0,
+                "errors": [],
+                "currentSecurity": None,
+            }
             builder = BatchFeatureBuilder(FeatureDatasetStore(output_root))
+
             def on_progress(security, report, error):
                 state["currentSecurity"] = security
                 state["done"] += 1
@@ -375,9 +421,11 @@ class FeatureTaskStore(_TaskFacade):
                 if error:
                     state["errors"].append({"security": security, "message": str(error)})
                 progress(state)
+
             builder.build_many(payload, on_progress=on_progress)
             state["currentSecurity"] = None
             return state
+
         return self._submit("features", securities, operation)
 
 
@@ -387,8 +435,13 @@ class ScoreTaskStore(_TaskFacade):
 
     def submit(self, securities, output_root) -> str:
         def operation(payload, progress):
-            state = {"total": len(payload), "done": 0, "rows": 0, "errors": [],
-                     "currentSecurity": None}
+            state = {
+                "total": len(payload),
+                "done": 0,
+                "rows": 0,
+                "errors": [],
+                "currentSecurity": None,
+            }
             builder = BatchScoreBuilder(ScoreDatasetStore(output_root))
 
             def on_progress(security, report, error):
@@ -440,9 +493,7 @@ class HistoryBackfillTaskStore(_TaskFacade):
 
             def fetch_with_timeout(candidate, as_of_date):
                 if timeout_seconds is None:
-                    return service.fetch_history_bundle(
-                        candidate, as_of_date=as_of_date
-                    )
+                    return service.fetch_history_bundle(candidate, as_of_date=as_of_date)
                 result_queue = queue.Queue(maxsize=1)
 
                 def fetch():
@@ -450,9 +501,7 @@ class HistoryBackfillTaskStore(_TaskFacade):
                         result_queue.put_nowait(
                             (
                                 "ok",
-                                service.fetch_history_bundle(
-                                    candidate, as_of_date=as_of_date
-                                ),
+                                service.fetch_history_bundle(candidate, as_of_date=as_of_date),
                             )
                         )
                     except Exception as exc:
@@ -495,9 +544,7 @@ class HistoryBackfillTaskStore(_TaskFacade):
                     raise exc
 
             for item in payload["candidates"]:
-                candidate = BackfillCandidate(
-                    **{**item, "path": Path(item["path"])}
-                )
+                candidate = BackfillCandidate(**{**item, "path": Path(item["path"])})
                 key = f"{candidate.exchange}{candidate.code}"
                 state["currentSecurity"] = key
                 try:
@@ -545,8 +592,13 @@ def dataframe_records(frame: pd.DataFrame) -> list[dict]:
 
 
 def build_research_readiness(
-    provider: dict, quality: dict, labels: dict, features: dict,
-    scores: dict | None = None, *, now: datetime | None = None,
+    provider: dict,
+    quality: dict,
+    labels: dict,
+    features: dict,
+    scores: dict | None = None,
+    *,
+    now: datetime | None = None,
 ) -> dict:
     now = now or datetime.now(timezone.utc)
     provider_report = provider.get("report") or {}
@@ -570,26 +622,26 @@ def build_research_readiness(
         "hasMarketData": int(quality.get("totalCached", 0)) > 0,
         "marketDataReadable": int(quality.get("unreadableSecurities", 0)) == 0,
         "marketDataFresh": (
-            int(quality.get("totalCached", 0)) > 0
-            and freshness_coverage >= minimum_coverage
+            int(quality.get("totalCached", 0)) > 0 and freshness_coverage >= minimum_coverage
         ),
         "labelsAvailable": int(labels.get("files", 0)) > 0,
         "labelsReadable": int(labels.get("unreadableFiles", 0)) == 0,
         "labelsCurrent": (
-            int(labels.get("files", 0)) > 0
-            and int(labels.get("staleFiles", 0)) == 0
+            int(labels.get("files", 0)) > 0 and int(labels.get("staleFiles", 0)) == 0
         ),
         "featuresReady": bool(features.get("ready")),
     }
     if scores is not None:
-        checks.update({
-            "scoresAvailable": int(scores.get("files", 0)) > 0,
-            "scoresReadable": int(scores.get("unreadableFiles", 0)) == 0,
-            "scoresCurrent": (
-                int(scores.get("files", 0)) > 0
-                and int(scores.get("compatibleFiles", 0)) == int(scores.get("files", 0))
-            ),
-        })
+        checks.update(
+            {
+                "scoresAvailable": int(scores.get("files", 0)) > 0,
+                "scoresReadable": int(scores.get("unreadableFiles", 0)) == 0,
+                "scoresCurrent": (
+                    int(scores.get("files", 0)) > 0
+                    and int(scores.get("compatibleFiles", 0)) == int(scores.get("files", 0))
+                ),
+            }
+        )
     messages = {
         "providerGate": "尚未通过完整数据源上线 Gate",
         "providerGateFresh": "数据源上线 Gate 已过期，请重新执行",
@@ -605,20 +657,32 @@ def build_research_readiness(
         "scoresCurrent": "存在旧版本 P3 评分",
     }
     blockers = [
-        messages[key] for key, passed in checks.items()
+        messages[key]
+        for key, passed in checks.items()
         if not passed and not (key == "providerGateFresh" and not checks["providerGate"])
     ]
     return {
         "readyForRefresh": checks["providerGate"] and checks["providerGateFresh"],
-        "readyForAudit": all(checks[key] for key in (
-            "hasMarketData", "marketDataReadable", "marketDataFresh"
-        )),
-        "readyForModel": all(checks[key] for key in (
-            "hasMarketData", "marketDataReadable", "marketDataFresh",
-            "labelsAvailable", "labelsReadable", "labelsCurrent", "featuresReady",
-        )) and all(checks[key] for key in (
-            "scoresAvailable", "scoresReadable", "scoresCurrent"
-        ) if key in checks),
+        "readyForAudit": all(
+            checks[key] for key in ("hasMarketData", "marketDataReadable", "marketDataFresh")
+        ),
+        "readyForModel": all(
+            checks[key]
+            for key in (
+                "hasMarketData",
+                "marketDataReadable",
+                "marketDataFresh",
+                "labelsAvailable",
+                "labelsReadable",
+                "labelsCurrent",
+                "featuresReady",
+            )
+        )
+        and all(
+            checks[key]
+            for key in ("scoresAvailable", "scoresReadable", "scoresCurrent")
+            if key in checks
+        ),
         "checks": checks,
         "blockers": blockers,
         "freshnessCoverage": freshness_coverage,
@@ -640,8 +704,9 @@ def create_app(
     source = source or AkShareSource(retries=settings.request_retries)
     jobs_db_path = settings.jobs_db_path or settings.data_path / "jobs.duckdb"
     jobs_db_path.parent.mkdir(parents=True, exist_ok=True)
-    job_store = JobStore(jobs_db_path, memory_limit=settings.duckdb_memory_limit,
-                         threads=settings.duckdb_threads)
+    job_store = JobStore(
+        jobs_db_path, memory_limit=settings.duckdb_memory_limit, threads=settings.duckdb_threads
+    )
     coordinator = HeavyTaskCoordinator(job_store)
 
     @asynccontextmanager
@@ -674,23 +739,32 @@ def create_app(
                 if not token:
                     return JSONResponse(
                         status_code=403,
-                        content={"detail": {
-                            "code": "ACCESS_DENIED",
-                            "message": "Cloudflare Access token is required",
-                        }},
+                        content={
+                            "detail": {
+                                "code": "ACCESS_DENIED",
+                                "message": "Cloudflare Access token is required",
+                            }
+                        },
                     )
                 try:
                     verifier.verify(token)
                 except AccessDenied as exc:
                     return JSONResponse(
                         status_code=403,
-                        content={"detail": {
-                            "code": "ACCESS_DENIED", "message": str(exc),
-                        }},
+                        content={
+                            "detail": {
+                                "code": "ACCESS_DENIED",
+                                "message": str(exc),
+                            }
+                        },
                     )
             return await call_next(request)
-    pipeline = DatasetPipeline(settings.data_path, memory_limit=settings.duckdb_memory_limit,
-                               threads=settings.duckdb_threads)
+
+    pipeline = DatasetPipeline(
+        settings.data_path,
+        memory_limit=settings.duckdb_memory_limit,
+        threads=settings.duckdb_threads,
+    )
     pipeline.initialize_catalog()
     model_registry = ModelRegistry(settings.data_path)
     if source_injected:
@@ -716,9 +790,7 @@ def create_app(
         min_days=settings.history_backfill_min_days,
         freshness_days=settings.history_backfill_freshness_days,
     )
-    history_backfill_tasks = HistoryBackfillTaskStore(
-        coordinator, job_store, submission_lock
-    )
+    history_backfill_tasks = HistoryBackfillTaskStore(coordinator, job_store, submission_lock)
     history_backfill_scan_lock = threading.Lock()
     history_backfill_candidate_count: int | None = None
     approximate_quality_lock = threading.Lock()
@@ -735,8 +807,7 @@ def create_app(
             security_cache = source.list_securities()
             pipeline.save_security_master(security_cache)
         security_cache = [
-            item for item in security_cache
-            if item.get("exchange") in SUPPORTED_EXCHANGES
+            item for item in security_cache if item.get("exchange") in SUPPORTED_EXCHANGES
         ]
         return security_cache
 
@@ -799,20 +870,21 @@ def create_app(
         with submission_lock:
             active = coordinator.active()
             if active:
-                raise HTTPException(409, detail={
-                    "code": "HEAVY_JOB_ALREADY_RUNNING",
-                    "message": f"A heavy job is already running: {active[0].id}",
-                    "taskId": active[0].id,
-                })
+                raise HTTPException(
+                    409,
+                    detail={
+                        "code": "HEAVY_JOB_ALREADY_RUNNING",
+                        "message": f"A heavy job is already running: {active[0].id}",
+                        "taskId": active[0].id,
+                    },
+                )
 
             def operation(payload, progress):
                 progress({"done": 0, "total": 1, "stage": "probing"})
                 report = provider_probe_runner.run(quick=bool(payload["quick"]))
                 result = report.to_dict()
                 result["probedAt"] = pd.Timestamp.now(tz="Asia/Shanghai").isoformat()
-                target_path = (
-                    provider_diagnostic_path if payload["quick"] else provider_report_path
-                )
+                target_path = provider_diagnostic_path if payload["quick"] else provider_report_path
                 atomic_write_text(
                     json.dumps(result, ensure_ascii=False, indent=2),
                     target_path,
@@ -867,9 +939,7 @@ def create_app(
                     and "orphanedFiles" in persisted
                 ):
                     with label_status_lock:
-                        label_status_cache.update(
-                            value=persisted, expires=time.monotonic() + 60
-                        )
+                        label_status_cache.update(value=persisted, expires=time.monotonic() + 60)
                     return persisted
             except (OSError, ValueError, AttributeError):
                 pass
@@ -881,8 +951,7 @@ def create_app(
         current_keys = current_cached_keys()
         if current_keys:
             all_paths = [
-                path for path in all_paths
-                if (path.parent.name, path.stem) in current_keys
+                path for path in all_paths if (path.parent.name, path.stem) in current_keys
             ]
         latest_paths: dict[tuple[str, str], Path] = {}
         for path in all_paths:
@@ -911,16 +980,25 @@ def create_app(
                 for index in range(parquet.metadata.num_row_groups):
                     row_group = parquet.metadata.row_group(index)
                     statistics = row_group.column(column_index).statistics
-                    if not statistics or not statistics.has_min_max or statistics.min != statistics.max:
+                    if (
+                        not statistics
+                        or not statistics.has_min_max
+                        or statistics.min != statistics.max
+                    ):
                         metadata_complete = False
                         break
                     version = str(statistics.min)
                     file_versions[version] = file_versions.get(version, 0) + row_group.num_rows
                 if not metadata_complete:
-                    versions = parquet.read(columns=["label_definition_version"]).to_pandas()[
-                        "label_definition_version"
-                    ].fillna("unknown").astype(str)
-                    file_versions = {str(key): int(value) for key, value in versions.value_counts().items()}
+                    versions = (
+                        parquet.read(columns=["label_definition_version"])
+                        .to_pandas()["label_definition_version"]
+                        .fillna("unknown")
+                        .astype(str)
+                    )
+                    file_versions = {
+                        str(key): int(value) for key, value in versions.value_counts().items()
+                    }
                 for version, count in file_versions.items():
                     version_counts[version] = version_counts.get(version, 0) + count
                 if set(file_versions) == {current_version}:
@@ -951,9 +1029,7 @@ def create_app(
         }
         with label_status_lock:
             label_status_cache.update(value=result, expires=time.monotonic() + 60)
-            atomic_write_text(
-                json.dumps(result, ensure_ascii=False), label_status_path
-            )
+            atomic_write_text(json.dumps(result, ensure_ascii=False), label_status_path)
         return result
 
     @app.get("/healthz", include_in_schema=False)
@@ -969,9 +1045,7 @@ def create_app(
     def generic_task_status(task_id: str):
         job = job_store.get(task_id)
         if job is None:
-            raise HTTPException(
-                404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"}
-            )
+            raise HTTPException(404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"})
         return _task_response(job)
 
     @app.post("/api/datasets/validate")
@@ -1018,7 +1092,7 @@ def create_app(
                 409,
                 detail={
                     "code": "IMPORT_ALREADY_RUNNING",
-                    "message": f'已有导入任务运行中：{active["id"]}',
+                    "message": f"已有导入任务运行中：{active['id']}",
                     "taskId": active["id"],
                 },
             )
@@ -1037,28 +1111,38 @@ def create_app(
         else:
             raise HTTPException(
                 422,
-                detail={"code": "INVALID_IMPORT_SCOPE", "message": "scope must be representative or all"},
+                detail={
+                    "code": "INVALID_IMPORT_SCOPE",
+                    "message": "scope must be representative or all",
+                },
             )
         requested_total = len(securities)
         if not request.refresh:
             cached_keys = {
-                f'{item["exchange"]}{item["code"]}'
-                for item in pipeline.cached_securities()
+                f"{item['exchange']}{item['code']}" for item in pipeline.cached_securities()
             }
             securities = [
                 item
                 for item in securities
-                if f'{item["exchange"]}{item["code"]}' not in cached_keys
+                if f"{item['exchange']}{item['code']}" not in cached_keys
             ]
         skipped = requested_total - len(securities)
-        start = date.fromisoformat(f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-{settings.history_start_date[6:]}")
+        start = date.fromisoformat(
+            f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-{settings.history_start_date[6:]}"
+        )
         task_id = tasks.submit(
-            pipeline, download_source, securities, start, date.today(),
+            pipeline,
+            download_source,
+            securities,
+            start,
+            date.today(),
             settings.security_fetch_timeout_seconds,
         )
         return {
-            "taskId": task_id, "total": len(securities),
-            "requested": requested_total, "skipped": skipped,
+            "taskId": task_id,
+            "total": len(securities),
+            "requested": requested_total,
+            "skipped": skipped,
         }
 
     @app.get("/api/datasets/tasks/{task_id}")
@@ -1084,9 +1168,7 @@ def create_app(
             if time.monotonic() >= float(approximate_quality_cache["expires"]):
                 latest: dict[str, dict] = {}
                 for path in sorted(
-                    settings.data_path.glob(
-                        "data-foundation-v1/features/*/*/*/*.manifest.json"
-                    ),
+                    settings.data_path.glob("data-foundation-v1/features/*/*/*/*.manifest.json"),
                     key=lambda item: item.stat().st_mtime,
                 ):
                     try:
@@ -1118,35 +1200,39 @@ def create_app(
                 coverage: list[dict[str, object]] = []
                 unreadable: list[str] = []
                 cached_items = [
-                    item for item in pipeline.cached_securities()
+                    item
+                    for item in pipeline.cached_securities()
                     if item["exchange"] in SUPPORTED_EXCHANGES
                 ]
                 for item in cached_items:
                     path = Path(item["derived_path"])
-                    security = f'{item["exchange"]}{item["code"]}'
+                    security = f"{item['exchange']}{item['code']}"
                     try:
                         parquet = pq.ParquetFile(path)
                         if parquet.metadata.num_rows == 0 or "date" not in parquet.schema.names:
                             raise ValueError("empty file or missing date column")
                         index = parquet.schema.names.index("date")
-                        stats = parquet.metadata.row_group(
-                            parquet.metadata.num_row_groups - 1
-                        ).column(index).statistics
+                        stats = (
+                            parquet.metadata.row_group(parquet.metadata.num_row_groups - 1)
+                            .column(index)
+                            .statistics
+                        )
                         latest_date = stats.max if stats and stats.has_min_max else None
                         if latest_date is None:
                             latest_date = parquet.read(columns=["date"])["date"][-1].as_py()
-                        coverage.append({
-                            "security": security,
-                            "latestDate": pd.Timestamp(latest_date).date(),
-                        })
+                        coverage.append(
+                            {
+                                "security": security,
+                                "latestDate": pd.Timestamp(latest_date).date(),
+                            }
+                        )
                     except Exception as exc:
                         unreadable.append(f"{security}: {exc}")
-                market_latest = max(
-                    (item["latestDate"] for item in coverage), default=None
-                )
+                market_latest = max((item["latestDate"] for item in coverage), default=None)
                 threshold = settings.history_backfill_freshness_days
                 stale = [
-                    item for item in coverage
+                    item
+                    for item in coverage
                     if market_latest is not None
                     and (market_latest - item["latestDate"]).days > threshold
                 ]
@@ -1155,8 +1241,7 @@ def create_app(
                     "freshSecurities": len(coverage) - len(stale),
                     "staleSecurities": len(stale),
                     "freshnessCoverage": (
-                        (len(coverage) - len(stale)) / len(cached_items)
-                        if cached_items else 0.0
+                        (len(coverage) - len(stale)) / len(cached_items) if cached_items else 0.0
                     ),
                     "freshnessMinCoverage": settings.research_freshness_min_coverage,
                     "freshnessThresholdDays": threshold,
@@ -1205,16 +1290,17 @@ def create_app(
         label_tasks.active()
         invalidate_label_status()
         cached = [
-            item for item in pipeline.cached_securities()
-            if item["exchange"] in SUPPORTED_EXCHANGES
+            item for item in pipeline.cached_securities() if item["exchange"] in SUPPORTED_EXCHANGES
         ]
         if request.scope == "representative":
             cached = cached[:3]
         elif request.scope == "failed":
             previous = next(
                 (
-                    job for job in reversed(job_store.list())
-                    if job.job_type == "labels" and isinstance(job.result, dict)
+                    job
+                    for job in reversed(job_store.list())
+                    if job.job_type == "labels"
+                    and isinstance(job.result, dict)
                     and job.result.get("errors")
                 ),
                 None,
@@ -1224,35 +1310,28 @@ def create_app(
                 for item in (previous.result.get("errors", []) if previous else [])
                 if isinstance(item, dict) and item.get("security")
             }
-            cached = [
-                item for item in cached
-                if f'{item["exchange"]}{item["code"]}' in failed_keys
-            ]
+            cached = [item for item in cached if f"{item['exchange']}{item['code']}" in failed_keys]
         elif request.scope != "all":
             raise HTTPException(
-                422, detail={
+                422,
+                detail={
                     "code": "INVALID_LABEL_SCOPE",
                     "message": "scope must be representative, failed, or all",
-                }
+                },
             )
         try:
             names = {
-                f'{item["exchange"]}{item["code"]}': item["name"]
-                for item in securities_list()
+                f"{item['exchange']}{item['code']}": item["name"] for item in securities_list()
             }
         except Exception:
             names = {}
-        task_id = label_tasks.submit(
-            pipeline, download_source, cached, names, settings.data_path
-        )
+        task_id = label_tasks.submit(pipeline, download_source, cached, names, settings.data_path)
         return {"taskId": task_id, "total": len(cached)}
 
     @app.get("/api/labels/tasks/{task_id}")
     def label_task_status(task_id: str):
         if task_id not in label_tasks.items:
-            raise HTTPException(
-                404, detail={"code": "TASK_NOT_FOUND", "message": "标签任务不存在"}
-            )
+            raise HTTPException(404, detail={"code": "TASK_NOT_FOUND", "message": "标签任务不存在"})
         return label_tasks.items[task_id]
 
     @app.post("/api/features/build", status_code=202)
@@ -1263,25 +1342,26 @@ def create_app(
                 409,
                 detail={
                     "code": "FEATURE_BUILD_ALREADY_RUNNING",
-                    "message": f'已有特征任务运行中：{active["id"]}',
+                    "message": f"已有特征任务运行中：{active['id']}",
                     "taskId": active["id"],
                 },
             )
         cached = [
-            item for item in pipeline.cached_securities()
-            if item["exchange"] in SUPPORTED_EXCHANGES
+            item for item in pipeline.cached_securities() if item["exchange"] in SUPPORTED_EXCHANGES
         ]
         if request.scope == "representative":
             cached = cached[:3]
         elif request.scope != "all":
             raise HTTPException(
                 422,
-                detail={"code": "INVALID_FEATURE_SCOPE", "message": "scope must be representative or all"},
+                detail={
+                    "code": "INVALID_FEATURE_SCOPE",
+                    "message": "scope must be representative or all",
+                },
             )
         try:
             names = {
-                f'{item["exchange"]}{item["code"]}': item["name"]
-                for item in securities_list()
+                f"{item['exchange']}{item['code']}": item["name"] for item in securities_list()
             }
         except Exception:
             names = {}
@@ -1289,7 +1369,7 @@ def create_app(
             {
                 **item,
                 "st_status": status_from_name(
-                    names.get(f'{item["exchange"]}{item["code"]}', "")
+                    names.get(f"{item['exchange']}{item['code']}", "")
                 ).is_st,
             }
             for item in cached
@@ -1300,9 +1380,7 @@ def create_app(
     @app.get("/api/features/tasks/{task_id}")
     def feature_task_status(task_id: str):
         if task_id not in feature_tasks.items:
-            raise HTTPException(
-                404, detail={"code": "TASK_NOT_FOUND", "message": "特征任务不存在"}
-            )
+            raise HTTPException(404, detail={"code": "TASK_NOT_FOUND", "message": "特征任务不存在"})
         return feature_tasks.items[task_id]
 
     @app.post("/api/scores/build", status_code=202)
@@ -1313,14 +1391,13 @@ def create_app(
                 409,
                 detail={
                     "code": "SCORE_BUILD_ALREADY_RUNNING",
-                    "message": f'A score job is already running: {active["id"]}',
+                    "message": f"A score job is already running: {active['id']}",
                     "taskId": active["id"],
                 },
             )
         invalidate_feature_catalog()
         cached = [
-            item for item in pipeline.cached_securities()
-            if item["exchange"] in SUPPORTED_EXCHANGES
+            item for item in pipeline.cached_securities() if item["exchange"] in SUPPORTED_EXCHANGES
         ]
         if request.scope == "representative":
             cached = cached[:3]
@@ -1335,8 +1412,7 @@ def create_app(
         invalidate_score_status()
         try:
             names = {
-                f'{item["exchange"]}{item["code"]}': item["name"]
-                for item in securities_list()
+                f"{item['exchange']}{item['code']}": item["name"] for item in securities_list()
             }
         except Exception:
             names = {}
@@ -1344,7 +1420,7 @@ def create_app(
             {
                 **item,
                 "st_status": status_from_name(
-                    names.get(f'{item["exchange"]}{item["code"]}', "")
+                    names.get(f"{item['exchange']}{item['code']}", "")
                 ).is_st,
             }
             for item in cached
@@ -1372,7 +1448,8 @@ def create_app(
         current_keys = current_cached_keys()
         if current_keys:
             paths = [
-                path for path in paths
+                path
+                for path in paths
                 if path.name.endswith(".manifest.json")
                 or (path.parent.name, path.stem) in current_keys
             ]
@@ -1440,11 +1517,25 @@ def create_app(
 
     @app.post("/api/validation/single-factor")
     def single_factor_validation(request: SingleFactorValidationRequest):
-        require_readable_artifacts(
-            labels=label_dataset_status(), scores=score_dataset_status()
+        require_readable_artifacts(labels=label_dataset_status(), scores=score_dataset_status())
+        scores = read_dataset_glob(
+            "data-foundation-v1/scores/*/*/*/*.parquet",
+            ["exchange", "code", "date"],
+            ["exchange", "code", "date", request.factor_column, "usable"],
         )
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", request.factor_column, "usable"])
-        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date", "path_success_p20", "max_drawdown_p20"])
+        labels = read_dataset_glob(
+            "data-foundation-v1/labels/*/*/*.parquet",
+            ["exchange", "code", "signal_date"],
+            [
+                "exchange",
+                "code",
+                "signal_date",
+                request.label_column,
+                "label_maturity_date",
+                "path_success_p20",
+                "max_drawdown_p20",
+            ],
+        )
         return validate_single_factor(
             scores,
             labels,
@@ -1456,21 +1547,42 @@ def create_app(
 
     @app.post("/api/validation/calibration")
     def score_calibration(request: CalibrationRequest):
-        require_readable_artifacts(
-            labels=label_dataset_status(), scores=score_dataset_status()
+        require_readable_artifacts(labels=label_dataset_status(), scores=score_dataset_status())
+        scores = read_dataset_glob(
+            "data-foundation-v1/scores/*/*/*/*.parquet",
+            ["exchange", "code", "date"],
+            ["exchange", "code", "date", "score", "usable"],
         )
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
-        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
-        return calibrate_score(scores, labels, label_column=request.label_column,
-                               buckets=request.buckets, as_of_date=request.as_of_date)
+        labels = read_dataset_glob(
+            "data-foundation-v1/labels/*/*/*.parquet",
+            ["exchange", "code", "signal_date"],
+            ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
+        )
+        return calibrate_score(
+            scores,
+            labels,
+            label_column=request.label_column,
+            buckets=request.buckets,
+            as_of_date=request.as_of_date,
+        )
 
     @app.post("/api/scan/p3")
     def scan_p3(request: ScanRequest):
         require_readable_artifacts(scores=score_dataset_status())
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "grade", "usable"])
+        scores = read_dataset_glob(
+            "data-foundation-v1/scores/*/*/*/*.parquet",
+            ["exchange", "code", "date"],
+            ["exchange", "code", "date", "score", "grade", "usable"],
+        )
         if scores.empty:
-            return {"version": SCORE_DEFINITION_VERSION, "asOfDate": request.as_of_date,
-                    "minScore": request.min_score, "scannedCount": 0, "truncated": False, "rows": []}
+            return {
+                "version": SCORE_DEFINITION_VERSION,
+                "asOfDate": request.as_of_date,
+                "minScore": request.min_score,
+                "scannedCount": 0,
+                "truncated": False,
+                "rows": [],
+            }
         scores["date"] = pd.to_datetime(scores["date"]).dt.date
         if request.as_of_date is not None:
             scores = scores.loc[scores["date"] <= request.as_of_date]
@@ -1488,34 +1600,57 @@ def create_app(
         )
         candidate_count = int(len(scores))
         scores = scores.head(request.limit)
-        rows = [{"exchange": row.exchange, "code": row.code, "date": row.date,
-                 "score": float(row.score), "grade": getattr(row, "grade", None)}
-                for row in scores.itertuples(index=False)]
-        return {"version": SCORE_DEFINITION_VERSION, "asOfDate": request.as_of_date,
-                "exchange": request.exchange, "minScore": request.min_score,
-                "scannedCount": candidate_count, "truncated": candidate_count > request.limit,
-                "rows": rows}
+        rows = [
+            {
+                "exchange": row.exchange,
+                "code": row.code,
+                "date": row.date,
+                "score": float(row.score),
+                "grade": getattr(row, "grade", None),
+            }
+            for row in scores.itertuples(index=False)
+        ]
+        return {
+            "version": SCORE_DEFINITION_VERSION,
+            "asOfDate": request.as_of_date,
+            "exchange": request.exchange,
+            "minScore": request.min_score,
+            "scannedCount": candidate_count,
+            "truncated": candidate_count > request.limit,
+            "rows": rows,
+        }
 
     @app.post("/api/model/p7/baseline")
     def p7_baseline(request: BaselineModelRequest):
-        require_readable_artifacts(
-            labels=label_dataset_status(), scores=score_dataset_status()
+        require_readable_artifacts(labels=label_dataset_status(), scores=score_dataset_status())
+        scores = read_dataset_glob(
+            "data-foundation-v1/scores/*/*/*/*.parquet",
+            ["exchange", "code", "date"],
+            ["exchange", "code", "date", "score", "usable"],
         )
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
-        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
+        labels = read_dataset_glob(
+            "data-foundation-v1/labels/*/*/*.parquet",
+            ["exchange", "code", "signal_date"],
+            ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
+        )
         result = train_score_baseline(
-            scores, labels, label_column=request.label_column,
+            scores,
+            labels,
+            label_column=request.label_column,
             train_until=request.train_until,
         )
         if result.get("status") == "trained":
-            result.update(model_registry.save(
-                "baseline", result,
-                dependencies={
-                    "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
-                    "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
-                    "trainUntil": request.train_until,
-                },
-            ))
+            result.update(
+                model_registry.save(
+                    "baseline",
+                    result,
+                    dependencies={
+                        "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
+                        "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
+                        "trainUntil": request.train_until,
+                    },
+                )
+            )
         return result
 
     @app.get("/api/model/p7/features")
@@ -1532,11 +1667,18 @@ def create_app(
             latest_paths[(path.parent.name, path.stem)] = path
         current_keys = current_cached_keys()
         if current_keys:
-            latest_paths = {
-                key: path for key, path in latest_paths.items() if key in current_keys
-            }
+            latest_paths = {key: path for key, path in latest_paths.items() if key in current_keys}
         if not latest_paths:
-            result = {"version": "daily-features-v1", "featureColumns": [], "missingColumns": expected, "securityCount": 0, "rowCount": 0, "unreadableFiles": 0, "unreadableExamples": [], "ready": False}
+            result = {
+                "version": "daily-features-v1",
+                "featureColumns": [],
+                "missingColumns": expected,
+                "securityCount": 0,
+                "rowCount": 0,
+                "unreadableFiles": 0,
+                "unreadableExamples": [],
+                "ready": False,
+            }
             with feature_catalog_lock:
                 feature_catalog_cache.update(value=result, expires=time.monotonic() + 60)
             return result
@@ -1555,11 +1697,16 @@ def create_app(
         columns = set(columns) - ignored
         missing = sorted(set(expected) - set(columns))
         security_count = len(latest_paths)
-        result = {"version": "daily-features-v1", "featureColumns": sorted(columns), "missingColumns": missing,
-                "securityCount": security_count, "rowCount": row_count,
-                "unreadableFiles": len(unreadable),
-                "unreadableExamples": unreadable[:20],
-                "ready": bool(security_count and not missing and not unreadable)}
+        result = {
+            "version": "daily-features-v1",
+            "featureColumns": sorted(columns),
+            "missingColumns": missing,
+            "securityCount": security_count,
+            "rowCount": row_count,
+            "unreadableFiles": len(unreadable),
+            "unreadableExamples": unreadable[:20],
+            "ready": bool(security_count and not missing and not unreadable),
+        }
         with feature_catalog_lock:
             feature_catalog_cache.update(value=result, expires=time.monotonic() + 60)
         return result
@@ -1569,15 +1716,10 @@ def create_app(
         with score_status_lock:
             if time.monotonic() < float(score_status_cache["expires"]):
                 return score_status_cache["value"]
-        paths = sorted(
-            settings.data_path.glob("data-foundation-v1/scores/*/*/*/*.parquet")
-        )
+        paths = sorted(settings.data_path.glob("data-foundation-v1/scores/*/*/*/*.parquet"))
         current_keys = current_cached_keys()
         if current_keys:
-            paths = [
-                path for path in paths
-                if (path.parent.name, path.stem) in current_keys
-            ]
+            paths = [path for path in paths if (path.parent.name, path.stem) in current_keys]
         rows = 0
         compatible = 0
         unreadable: list[str] = []
@@ -1593,11 +1735,10 @@ def create_app(
                     column_index = parquet.schema.names.index("score_definition_version")
                     metadata_current = True
                     for index in range(parquet.metadata.num_row_groups):
-                        stats = parquet.metadata.row_group(index).column(
-                            column_index
-                        ).statistics
+                        stats = parquet.metadata.row_group(index).column(column_index).statistics
                         if (
-                            not stats or not stats.has_min_max
+                            not stats
+                            or not stats.has_min_max
                             or stats.min != SCORE_DEFINITION_VERSION
                             or stats.max != SCORE_DEFINITION_VERSION
                         ):
@@ -1606,9 +1747,9 @@ def create_app(
                     if metadata_current:
                         compatible += 1
                     else:
-                        versions = parquet.read(
-                            columns=["score_definition_version"]
-                        )["score_definition_version"].to_pylist()
+                        versions = parquet.read(columns=["score_definition_version"])[
+                            "score_definition_version"
+                        ].to_pylist()
                         if versions and set(versions) == {SCORE_DEFINITION_VERSION}:
                             compatible += 1
                         else:
@@ -1636,33 +1777,63 @@ def create_app(
     @app.get("/api/system/readiness")
     def research_readiness():
         return build_research_readiness(
-            provider_gate_status(), quality(), label_dataset_status(),
-            p7_feature_catalog(), score_dataset_status()
+            provider_gate_status(),
+            quality(),
+            label_dataset_status(),
+            p7_feature_catalog(),
+            score_dataset_status(),
         )
 
     @app.post("/api/model/p7/multifeature")
     def p7_multifeature(request: BaselineModelRequest):
         require_readable_artifacts(
-            labels=label_dataset_status(), features=p7_feature_catalog(),
+            labels=label_dataset_status(),
+            features=p7_feature_catalog(),
             scores=score_dataset_status(),
         )
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
-        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
-        features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"])
+        scores = read_dataset_glob(
+            "data-foundation-v1/scores/*/*/*/*.parquet",
+            ["exchange", "code", "date"],
+            ["exchange", "code", "date", "score", "usable"],
+        )
+        labels = read_dataset_glob(
+            "data-foundation-v1/labels/*/*/*.parquet",
+            ["exchange", "code", "signal_date"],
+            ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
+        )
+        features = read_dataset_glob(
+            "data-foundation-v1/features/*/*/*/*.parquet",
+            ["exchange", "code", "date"],
+            [
+                "exchange",
+                "code",
+                "date",
+                "bullish_alignment",
+                "return_20",
+                "volume_ratio_5",
+                "volatility_20",
+            ],
+        )
         result = train_multifeature_baseline(
-            scores, labels, features, label_column=request.label_column,
+            scores,
+            labels,
+            features,
+            label_column=request.label_column,
             train_until=request.train_until,
         )
         if result.get("status") == "trained":
-            result.update(model_registry.save(
-                "multifeature", result,
-                dependencies={
-                    "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
-                    "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
-                    "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
-                    "trainUntil": request.train_until,
-                },
-            ))
+            result.update(
+                model_registry.save(
+                    "multifeature",
+                    result,
+                    dependencies={
+                        "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
+                        "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
+                        "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
+                        "trainUntil": request.train_until,
+                    },
+                )
+            )
         return result
 
     @app.get("/api/model/p7/registry")
@@ -1671,37 +1842,60 @@ def create_app(
 
     @app.post("/api/model/p7/walk-forward")
     def p7_walk_forward(request: WalkForwardRequest):
-        require_readable_artifacts(
-            labels=label_dataset_status(), scores=score_dataset_status()
+        require_readable_artifacts(labels=label_dataset_status(), scores=score_dataset_status())
+        scores = read_dataset_glob(
+            "data-foundation-v1/scores/*/*/*/*.parquet",
+            ["exchange", "code", "date"],
+            ["exchange", "code", "date", "score", "usable"],
         )
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
-        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
-        return walk_forward_score_baseline(scores, labels,
-                                           label_column=request.label_column,
-                                           folds=request.folds)
+        labels = read_dataset_glob(
+            "data-foundation-v1/labels/*/*/*.parquet",
+            ["exchange", "code", "signal_date"],
+            ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
+        )
+        return walk_forward_score_baseline(
+            scores, labels, label_column=request.label_column, folds=request.folds
+        )
 
     @app.post("/api/validation/portfolio")
     def portfolio_validation(request: PortfolioValidationRequest):
-        require_readable_artifacts(
-            labels=label_dataset_status(), scores=score_dataset_status()
+        require_readable_artifacts(labels=label_dataset_status(), scores=score_dataset_status())
+        scores = read_dataset_glob(
+            "data-foundation-v1/scores/*/*/*/*.parquet",
+            ["exchange", "code", "date"],
+            ["exchange", "code", "date", "score", "usable"],
         )
-        scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
-        labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
-        return validate_top_score_portfolio(scores, labels, label_column=request.label_column,
-                                            top_fraction=request.top_fraction, as_of_date=request.as_of_date,
-                                            non_overlapping=request.non_overlapping,
-                                            transaction_cost_bps=request.transaction_cost_bps,
-                                            slippage_bps=request.slippage_bps)
+        labels = read_dataset_glob(
+            "data-foundation-v1/labels/*/*/*.parquet",
+            ["exchange", "code", "signal_date"],
+            ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
+        )
+        return validate_top_score_portfolio(
+            scores,
+            labels,
+            label_column=request.label_column,
+            top_fraction=request.top_fraction,
+            as_of_date=request.as_of_date,
+            non_overlapping=request.non_overlapping,
+            transaction_cost_bps=request.transaction_cost_bps,
+            slippage_bps=request.slippage_bps,
+        )
 
     @app.get("/api/securities")
     def securities(query: str = ""):
         try:
             rows = securities_list()
         except Exception as exc:
-            raise HTTPException(503, detail={"code": "AKSHARE_UNAVAILABLE", "message": str(exc)}) from exc
+            raise HTTPException(
+                503, detail={"code": "AKSHARE_UNAVAILABLE", "message": str(exc)}
+            ) from exc
         needle = query.strip().lower()
         if needle:
-            rows = [row for row in rows if needle in row["code"].lower() or needle in row["name"].lower()]
+            rows = [
+                row
+                for row in rows
+                if needle in row["code"].lower() or needle in row["name"].lower()
+            ]
         return rows[:50]
 
     def load_bars(exchange: str, code: str) -> pd.DataFrame:
@@ -1728,8 +1922,7 @@ def create_app(
                     if not completed:
                         future.cancel()
                         raise TimeoutError(
-                            "fetch timed out after "
-                            f"{settings.security_fetch_timeout_seconds}s"
+                            f"fetch timed out after {settings.security_fetch_timeout_seconds}s"
                         )
                     raw, factors = future.result()
                 finally:
@@ -1743,11 +1936,14 @@ def create_app(
                 active = coordinator.active()
                 if active:
                     task_id = active[0].id
-                    raise HTTPException(409, detail={
-                        "code": "HEAVY_JOB_ALREADY_RUNNING",
-                        "message": f"A heavy job is already running: {task_id}",
-                        "taskId": task_id,
-                    })
+                    raise HTTPException(
+                        409,
+                        detail={
+                            "code": "HEAVY_JOB_ALREADY_RUNNING",
+                            "message": f"A heavy job is already running: {task_id}",
+                            "taskId": task_id,
+                        },
+                    )
                 submitted = coordinator.submit(
                     "cache-security", {"exchange": exchange, "code": code}, operation
                 )
@@ -1786,7 +1982,9 @@ def create_app(
                 cached_end = pd.to_datetime(cached["date"]).dt.date.max()
                 if cached_end >= required_end:
                     return cached.to_dict("records")
-        start = date.fromisoformat(f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-{settings.history_start_date[6:]}")
+        start = date.fromisoformat(
+            f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-{settings.history_start_date[6:]}"
+        )
         try:
             frame = download_source.index_history(exchange, start, date.today())
         except Exception:
@@ -1822,8 +2020,7 @@ def create_app(
                 (
                     item["name"]
                     for item in securities_list()
-                    if item["exchange"] == request.exchange
-                    and item["code"] == request.code
+                    if item["exchange"] == request.exchange and item["code"] == request.code
                 ),
                 "",
             )
@@ -1852,23 +2049,25 @@ def create_app(
             no_limit_indices=no_limit_indices,
         )
         output = {
-            "eligibility": asdict(eligibility), "entry": asdict(entry), "labels": {},
+            "eligibility": asdict(eligibility),
+            "entry": asdict(entry),
+            "labels": {},
             "exits": {},
-            "path": None, "drawdown": None, "dataSource": "AkShare",
-            "dataSnapshotVersion": pipeline.latest_snapshot_version(
-                request.exchange, request.code
-            ),
+            "path": None,
+            "drawdown": None,
+            "dataSource": "AkShare",
+            "dataSnapshotVersion": pipeline.latest_snapshot_version(request.exchange, request.code),
             "factorVersion": records[0].get("factor_version"),
             "securityStatus": asdict(security_status),
         }
         if entry.executable and entry.entry_index is not None:
             benchmark = benchmark_bars(request.exchange, records[-1]["date"])
-            labels = compute_forward_labels(
-                records, benchmark, signal_index, entry.entry_index
+            labels = compute_forward_labels(records, benchmark, signal_index, entry.entry_index)
+            entry_price = float(
+                records[entry.entry_index].get(
+                    "open_total_return", records[entry.entry_index]["open_qfq"]
+                )
             )
-            entry_price = float(records[entry.entry_index].get(
-                "open_total_return", records[entry.entry_index]["open_qfq"]
-            ))
             exits = {
                 horizon: resolve_executable_exit(
                     records,
@@ -1880,17 +2079,14 @@ def create_app(
                 for horizon in labels
             }
             output["exits"] = {
-                str(horizon): asdict(exit_result)
-                for horizon, exit_result in exits.items()
+                str(horizon): asdict(exit_result) for horizon, exit_result in exits.items()
             }
             output["labels"] = {}
             for horizon, label in labels.items():
                 label_record = asdict(label)
                 planned_index = entry.entry_index + horizon
                 label_record["planned_exit_date"] = (
-                    records[planned_index]["date"]
-                    if planned_index < len(records)
-                    else None
+                    records[planned_index]["date"] if planned_index < len(records) else None
                 )
                 exit_result = exits[horizon]
                 label_record["delayed_executable_return"] = (
@@ -1902,9 +2098,7 @@ def create_app(
             path_start = records[entry.entry_index].get(
                 "open_total_return", records[entry.entry_index]["open_qfq"]
             )
-            output["path"] = asdict(
-                compute_path_label(records, entry.entry_index, path_start)
-            )
+            output["path"] = asdict(compute_path_label(records, entry.entry_index, path_start))
             output["drawdown"] = asdict(
                 compute_drawdown_label(records, entry.entry_index, path_start, 20, 0.08)
             )
@@ -1944,9 +2138,19 @@ def create_app(
             "trend": {
                 key: row.get(key)
                 for key in (
-                    "ma5", "ma10", "ma20", "ma60", "ma5_slope", "ma10_slope",
-                    "ma20_slope", "ma60_slope", "close_to_ma5", "close_to_ma10",
-                    "close_to_ma20", "close_to_ma60", "bullish_alignment",
+                    "ma5",
+                    "ma10",
+                    "ma20",
+                    "ma60",
+                    "ma5_slope",
+                    "ma10_slope",
+                    "ma20_slope",
+                    "ma60_slope",
+                    "close_to_ma5",
+                    "close_to_ma10",
+                    "close_to_ma20",
+                    "close_to_ma60",
+                    "bullish_alignment",
                     "bearish_alignment",
                 )
             },
@@ -1956,21 +2160,28 @@ def create_app(
                 for key in (f"range_position_{window}", f"drawdown_from_high_{window}")
             },
             "momentum": {
-                f"return_{window}": row.get(f"return_{window}")
-                for window in (5, 10, 20, 60, 120)
+                f"return_{window}": row.get(f"return_{window}") for window in (5, 10, 20, 60, 120)
             },
             "volumePrice": {
                 key: row.get(key)
                 for key in (
-                    "volume_ratio_5", "volume_percentile_20", "amount",
-                    "volatility_20", "amplitude",
+                    "volume_ratio_5",
+                    "volume_percentile_20",
+                    "amount",
+                    "volatility_20",
+                    "amplitude",
                 )
             },
             "tradingBehavior": {
                 key: row.get(key)
                 for key in (
-                    "is_limit_up", "limit_up_count_20", "locked_limit_up_streak",
-                    "gap_open", "suspension_gap_days", "is_approx", "rule_reason",
+                    "is_limit_up",
+                    "limit_up_count_20",
+                    "locked_limit_up_streak",
+                    "gap_open",
+                    "suspension_gap_days",
+                    "is_approx",
+                    "rule_reason",
                 )
             },
         }
@@ -1983,9 +2194,7 @@ def create_app(
             "reasons": row["reasons"],
             "priceBasis": row["price_basis"],
             "versions": {
-                "snapshotVersion": pipeline.latest_snapshot_version(
-                    request.exchange, request.code
-                ),
+                "snapshotVersion": pipeline.latest_snapshot_version(request.exchange, request.code),
                 "factorVersion": row.get("factor_version"),
                 "limitRuleVersion": VERSIONS["limitRuleVersion"],
                 "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
@@ -2031,9 +2240,7 @@ def create_app(
             "priceBasis": row["price_basis"],
             "score": compute_rule_score(row),
             "versions": {
-                "snapshotVersion": pipeline.latest_snapshot_version(
-                    request.exchange, request.code
-                ),
+                "snapshotVersion": pipeline.latest_snapshot_version(request.exchange, request.code),
                 "factorVersion": row.get("factor_version"),
                 "limitRuleVersion": VERSIONS["limitRuleVersion"],
                 "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,

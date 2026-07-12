@@ -9,15 +9,26 @@ def make_bars(count: int, start: float = 10.0):
     rows = []
     for index in range(count):
         price = start * (1 + index * 0.0005)
-        rows.append({
-            "date": date(2020, 1, 1) + timedelta(days=index),
-            "open": price, "high": price * 1.01, "low": price * 0.99, "close": price,
-            "open_qfq": price, "high_qfq": price * 1.01, "low_qfq": price * 0.99, "close_qfq": price,
-            "open_total_return": price, "high_total_return": price * 1.01,
-            "low_total_return": price * 0.99, "close_total_return": price,
-            "volume": 1000, "amount": 10000,
-            "factor_version": "factor-test",
-        })
+        rows.append(
+            {
+                "date": date(2020, 1, 1) + timedelta(days=index),
+                "open": price,
+                "high": price * 1.01,
+                "low": price * 0.99,
+                "close": price,
+                "open_qfq": price,
+                "high_qfq": price * 1.01,
+                "low_qfq": price * 0.99,
+                "close_qfq": price,
+                "open_total_return": price,
+                "high_total_return": price * 1.01,
+                "low_total_return": price * 0.99,
+                "close_total_return": price,
+                "volume": 1000,
+                "amount": 10000,
+                "factor_version": "factor-test",
+            }
+        )
     return rows
 
 
@@ -63,8 +74,50 @@ def test_walk_forward_filter_rejects_future_and_unmatured_samples():
 
 
 def test_label_store_writes_versioned_parquet(tmp_path):
-    rows = [{"exchange": "sh", "code": "600000", "signal_date": date(2024, 1, 1), "snapshot_version": "snapshot-x"}]
+    rows = [
+        {
+            "exchange": "sh",
+            "code": "600000",
+            "signal_date": date(2024, 1, 1),
+            "snapshot_version": "snapshot-x",
+        }
+    ]
     report = LabelDatasetStore(tmp_path).write("sh", "600000", rows)
     assert report.status == "written"
     assert Path(report.path).exists()
     assert "snapshot-x" in report.path
+
+
+def test_label_store_reuses_only_current_versions(tmp_path):
+    store = LabelDatasetStore(tmp_path)
+    rows = [
+        {
+            "exchange": "sh",
+            "code": "600000",
+            "signal_date": date(2024, 1, 1),
+            "snapshot_version": "snapshot-x",
+            "label_definition_version": "daily-v2-exit-delay",
+            "limit_rule_version": "cn-equity-v1",
+        }
+    ]
+    store.write("sh", "600000", rows)
+
+    current = store.reuse_current(
+        "sh",
+        "600000",
+        "snapshot-x",
+        label_definition_version="daily-v2-exit-delay",
+        limit_rule_version="cn-equity-v1",
+    )
+    stale = store.reuse_current(
+        "sh",
+        "600000",
+        "snapshot-x",
+        label_definition_version="daily-v3",
+        limit_rule_version="cn-equity-v1",
+    )
+
+    assert current is not None
+    assert current.status == "reused"
+    assert current.rows == 1
+    assert stale is None
