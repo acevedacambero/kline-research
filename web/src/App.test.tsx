@@ -97,6 +97,7 @@ describe('App', () => {
 
     expect(await screen.findByText(/已补全 3 · 新股 1 · 错误 1/)).toBeInTheDocument()
     expect(screen.getByText(/检查错误后，再手动生成 P1 和 P2/)).toBeInTheDocument()
+    expect(screen.getByText('sh600000')).toBeInTheDocument()
   })
 
   it('starts P3 score build and polls progress', async () => {
@@ -117,6 +118,9 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('button', { name: '生成 P3 评分' }))
 
     expect(await screen.findByText(/P3 评分：2\/2，已生成 520 行/)).toBeInTheDocument()
+    expect(screen.getByLabelText('任务进度')).toBeInTheDocument()
+    expect(screen.getByText('任务 ID score-task-1')).toBeInTheDocument()
+    expect(screen.getByText('生成 520 行')).toBeInTheDocument()
   })
 
   it('runs P4 single factor validation and renders bucket metrics', async () => {

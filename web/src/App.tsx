@@ -23,6 +23,8 @@ const ResultLabelOptions = () => <>
   <option value="p60_executable_return">P60 计划收盘卖出</option>
   <option value="p60_delayed_executable_return">P60 可执行顺延卖出</option>
 </>
+type TaskView = { kind: string; id: string; status: string; done: number; total: number; rows?: number; errors: number; errorItems: unknown[]; current?: string | null; speed?: number; etaSeconds?: number | null }
+const taskErrorText = (error: unknown) => typeof error === 'string' ? error : error && typeof error === 'object' ? [String('security' in error ? error.security : ''), String('message' in error ? error.message : '')].filter(Boolean).join('：') : String(error)
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null)
@@ -59,6 +61,11 @@ export function App() {
   const [busy, setBusy] = useState(false)
   const [cachedCount, setCachedCount] = useState<number | null>(null)
   const [approximateRuleRatio, setApproximateRuleRatio] = useState<number | null>(null)
+  const [taskView, setTaskView] = useState<TaskView | null>(null)
+
+  const showTask = (kind: string, id: string, task: { status: string; done: number; total: number; rows?: number; errors: unknown[]; currentSecurity?: string | null; speed?: number; etaSeconds?: number | null }) => {
+    setTaskView({ kind, id, status: task.status, done: task.done, total: task.total, rows: task.rows, errors: task.errors.length, errorItems: task.errors, current: task.currentSecurity, speed: task.speed, etaSeconds: task.etaSeconds })
+  }
 
   useEffect(() => {
     api.health().then(setHealth).catch(e => setMessage(e.message))
@@ -84,6 +91,7 @@ export function App() {
       setMessage(`任务 ${result.taskId} 已启动：待下载 ${result.total}，已跳过缓存 ${result.skipped}`)
       const poll = async () => {
         const task = await api.importTask(result.taskId)
+        showTask(scope === 'all' ? '全市场行情' : '代表样本行情', result.taskId, task)
         const current = task.currentSecurity ? `，最近 ${task.currentSecurity}` : ''
         const speed = task.speed ? `，${task.speed.toFixed(2)} 只/秒，ETA ${task.etaSeconds ?? '—'} 秒` : ''
         const provider = task.directAvailable === false ? '，已切换 AkShare/Sina' : ''
@@ -104,6 +112,7 @@ export function App() {
       setMessage(`P1 标签任务 ${result.taskId.slice(0, 8)} 已启动`)
       const poll = async () => {
         const task = await api.labelTask(result.taskId)
+        showTask('P1 标签', result.taskId, task)
         setMessage(`P1 标签：${task.done}/${task.total}，已生成 ${task.rows} 条`)
         if (task.status === 'queued' || task.status === 'running') window.setTimeout(poll, 1000)
         else {
@@ -123,6 +132,7 @@ export function App() {
       setMessage(`历史补全任务 ${result.taskId.slice(0, 8)} 已启动：候选 ${result.total} 只`)
       const poll = async () => {
         const task = await api.historyBackfillTask(result.taskId)
+        showTask('历史补全', result.taskId, task)
         const current = task.currentSecurity ? ` · 当前 ${task.currentSecurity}` : ''
         const speed = task.speed ? ` · ${task.speed.toFixed(2)} 只/秒 · ETA ${task.etaSeconds ?? '—'} 秒` : ''
         setMessage(`历史补全 ${task.done}/${task.total} · 已补全 ${task.completed} · 新股 ${task.listingHistoryShort} · 错误 ${task.errors.length}${current}${speed}`)
@@ -143,6 +153,7 @@ export function App() {
       setMessage(`P2 特征任务 ${result.taskId.slice(0, 8)} 已启动`)
       const poll = async () => {
         const task = await api.featureTask(result.taskId)
+        showTask('P2 特征', result.taskId, task)
         setMessage(`P2 特征：${task.done}/${task.total}，已生成 ${task.rows} 行`)
         if (task.status === 'queued' || task.status === 'running') window.setTimeout(poll, 1000)
         else { setBusy(false); if (task.errors.length) setMessage(`特征完成，但有 ${task.errors.length} 个错误`) }
@@ -158,6 +169,7 @@ export function App() {
       setMessage(`P3 评分任务 ${result.taskId.slice(0, 8)} 已启动`)
       const poll = async () => {
         const task = await api.scoreTask(result.taskId)
+        showTask('P3 评分', result.taskId, task)
         setMessage(`P3 评分：${task.done}/${task.total}，已生成 ${task.rows} 行`)
         if (task.status === 'queued' || task.status === 'running') window.setTimeout(poll, 1000)
         else { setBusy(false); if (task.errors.length) setMessage(`评分完成，但有 ${task.errors.length} 个错误`) }
@@ -280,6 +292,12 @@ export function App() {
       <button className="secondary" disabled={busy} onClick={runWalkForward}>运行 P7 Walk-forward</button>
       <button className="secondary" disabled={busy} onClick={runPortfolio}>验证 P8 高分组合</button>
     </section>
+    {taskView && <section className="panel task-panel" aria-label="任务进度">
+      <div className="section-title"><div><span className="eyebrow">BACKGROUND TASK</span><h2>{taskView.kind}</h2></div><span className="message">{taskView.status}</span></div>
+      <progress max={Math.max(1, taskView.total)} value={taskView.done} />
+      <div className="task-facts"><strong>{taskView.done} / {taskView.total}</strong><span>任务 ID {taskView.id}</span>{taskView.rows != null && <span>生成 {taskView.rows} 行</span>}{taskView.current && <span>当前 {taskView.current}</span>}{taskView.speed ? <span>{taskView.speed.toFixed(2)} 只/秒 · ETA {taskView.etaSeconds ?? '—'} 秒</span> : null}<span>错误 {taskView.errors}</span></div>
+      {taskView.errorItems.length > 0 && <ul className="task-errors">{taskView.errorItems.slice(0, 5).map((error, index) => <li key={index}>{taskErrorText(error)}</li>)}</ul>}
+    </section>}
     <section className="panel"><div className="section-title"><div><span className="eyebrow">P7 WALK-FORWARD</span><h2>P7 多窗口验证</h2></div>{walkForward && <span className="message">{walkForward.version}</span>}</div>{walkForward ? <div className="validation-panel"><article><span>平均 AUC</span><strong>{walkForward.averageAuc == null ? '—' : walkForward.averageAuc.toFixed(3)}</strong><small>平均准确率 {walkForward.averageAccuracy == null ? '—' : `${(walkForward.averageAccuracy * 100).toFixed(1)}%`}</small></article><table><thead><tr><th>训练截止</th><th>测试截止</th><th>状态</th><th>训练</th><th>测试</th><th>AUC</th><th>准确率</th></tr></thead><tbody>{walkForward.folds.map(fold => <tr key={fold.trainUntil}><td>{fold.trainUntil}</td><td>{fold.testUntil}</td><td>{fold.status}</td><td>{fold.trainCount}</td><td>{fold.testCount}</td><td>{fold.auc == null ? '—' : fold.auc.toFixed(3)}</td><td>{fold.accuracy == null ? '—' : `${(fold.accuracy * 100).toFixed(1)}%`}</td></tr>)}</tbody></table></div> : <p className="muted">使用多个训练截止日期滚动验证 P3 分数的样本外稳定性。</p>}</section>
     <section className="panel"><div className="section-title"><div><span className="eyebrow">P7 MULTI-FEATURE</span><h2>P7 多特征基线</h2></div>{multifeature && <span className="message">{multifeature.version}</span>}</div>{multifeature ? <div className="validation-panel"><article><span>训练 / 测试样本</span><strong>{multifeature.trainCount} / {multifeature.testCount}</strong><small>状态 {multifeature.status} · AUC {multifeature.auc == null ? '—' : multifeature.auc.toFixed(3)}</small></article><article><span>测试准确率</span><strong>{multifeature.accuracy == null ? '—' : `${(multifeature.accuracy * 100).toFixed(1)}%`}</strong><small>{multifeature.warnings.join('；') || '可用于基线比较'}</small></article><article><span>特征权重</span><strong>{Object.keys(multifeature.weights).length}</strong><small>{Object.entries(multifeature.weights).map(([key, value]) => `${key}:${value.toFixed(2)}`).join(' · ') || '暂无权重'}</small></article><button className="secondary" onClick={exportMultifeature}>导出 CSV</button></div> : <p className="muted">通过 P7 特征 ready gate 后，训练 P2/P3 多特征基线模型。</p>}</section>
     <section className="panel"><div className="section-title"><div><span className="eyebrow">P8 VALIDATION</span><h2>P8 高分组合验证</h2></div>{portfolio && <span className="message">{portfolio.version}</span>}</div><div className="calibration-controls"><label>选取比例<input type="number" min="1" max="50" value={portfolioFraction} onChange={e => setPortfolioFraction(Math.max(1, Math.min(50, Number(e.target.value) || 10)))} />%</label><label>结果口径<select value={portfolioLabel} onChange={e => setPortfolioLabel(e.target.value)}><ResultLabelOptions /></select></label><label>截至日期<input type="date" value={portfolioAsOfDate} onChange={e => setPortfolioAsOfDate(e.target.value)} /></label><label>成本 bps<input type="number" min="0" max="1000" value={transactionCostBps} onChange={e => setTransactionCostBps(Math.max(0, Math.min(1000, Number(e.target.value) || 0)))} /></label><label>滑点 bps<input type="number" min="0" max="1000" value={slippageBps} onChange={e => setSlippageBps(Math.max(0, Math.min(1000, Number(e.target.value) || 0)))} /></label>{portfolio ? <button className="secondary" onClick={exportPortfolio}>导出 CSV</button> : null}</div>{portfolio ? <div className="validation-panel"><article><span>净组合 / 全样本收益</span><strong>{pct(portfolio.netAverageReturn)} / {pct(portfolio.benchmarkReturn)}</strong><small>毛收益 {pct(portfolio.averageReturn)} · 成本 {portfolio.transactionCostBps + portfolio.slippageBps} bps · 入选 {portfolio.selectedCount}</small></article><article><span>净超额收益</span><strong>{pct(portfolio.netExcessReturn)}</strong><small>胜率 {pct(portfolio.winRate)} · 最大回撤 {pct(portfolio.maxDrawdown)}</small></article><article><span>回测口径</span><strong>非重叠</strong><small>{portfolio.warnings.join('；')}</small></article></div> : <p className="muted">按每日 P3 评分最高的指定比例构建研究组合，与所选持有期的全样本收益比较。</p>}</section>
