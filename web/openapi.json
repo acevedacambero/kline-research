@@ -21,6 +21,60 @@
         }
       }
     },
+    "/api/system/provider-gate": {
+      "get": {
+        "summary": "Provider Gate Status",
+        "operationId": "provider_gate_status_api_system_provider_gate_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/provider-gate/probe": {
+      "post": {
+        "summary": "Start Provider Gate Probe",
+        "operationId": "start_provider_gate_probe_api_system_provider_gate_probe_post",
+        "parameters": [
+          {
+            "name": "quick",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Quick"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/labels/status": {
       "get": {
         "summary": "Label Dataset Status",

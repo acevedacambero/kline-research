@@ -79,6 +79,43 @@ def test_generic_task_status_returns_404_for_unknown_id(tmp_path):
     assert response.json()["detail"]["code"] == "TASK_NOT_FOUND"
 
 
+def test_provider_gate_probe_is_persisted_and_queryable(tmp_path):
+    class FakeReport:
+        def to_dict(self):
+            return {"gateVersion": "test-gate", "passed": True, "reasons": []}
+
+    class FakeRunner:
+        def run(self, *, quick=False):
+            assert quick is True
+            return FakeReport()
+
+    data_path = tmp_path / "data"
+    original_run = api_module.ProviderProbeRunner.run
+    api_module.ProviderProbeRunner.run = FakeRunner.run
+    try:
+        app = create_app(Settings(data_path=data_path), FakeSource())
+        with TestClient(app) as client:
+            assert client.get("/api/system/provider-gate").json() == {
+                "available": False, "report": None
+            }
+            submitted = client.post("/api/system/provider-gate/probe?quick=true")
+            assert submitted.status_code == 202
+            task_id = submitted.json()["taskId"]
+            for _ in range(100):
+                task = client.get(f"/api/tasks/{task_id}").json()
+                if task["status"] == "completed":
+                    break
+                time.sleep(0.01)
+            assert task["status"] == "completed", task
+            assert task["report"]["passed"] is True
+            latest = client.get("/api/system/provider-gate").json()
+            assert latest["available"] is True
+            assert latest["report"]["gateVersion"] == "test-gate"
+            assert latest["report"]["probedAt"]
+    finally:
+        api_module.ProviderProbeRunner.run = original_run
+
+
 def test_label_status_reports_stale_and_current_files(tmp_path):
     data_path = tmp_path / "data"
     label_dir = data_path / "data-foundation-v1" / "labels" / "snapshot" / "sh"

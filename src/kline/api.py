@@ -51,6 +51,8 @@ from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
 from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
 from .model import train_multifeature_baseline, train_score_baseline, walk_forward_score_baseline
+from .ops.provider_probe import ProviderProbeRunner
+from .storage import atomic_write_text
 
 
 class _InjectedProviderAdapter:
@@ -597,6 +599,9 @@ def create_app(
             TencentHttpSource(retries=settings.request_retries), source
         )
     app.state.download_source = download_source
+    provider_probe_runner = ProviderProbeRunner()
+    app.state.provider_probe_runner = provider_probe_runner
+    provider_report_path = settings.data_path / "provider-gate-latest.json"
     submission_lock = threading.Lock()
     tasks = TaskStore(coordinator, job_store, submission_lock, settings.download_workers)
     label_tasks = LabelTaskStore(coordinator, job_store, submission_lock)
@@ -653,6 +658,47 @@ def create_app(
                 job.resumable for job in job_store.list(status=JobStatus.INTERRUPTED)
             ),
         }
+
+    @app.get("/api/system/provider-gate")
+    def provider_gate_status():
+        if not provider_report_path.exists():
+            return {"available": False, "report": None}
+        try:
+            report = json.loads(provider_report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise HTTPException(
+                500,
+                detail={"code": "PROVIDER_REPORT_INVALID", "message": str(exc)},
+            ) from exc
+        return {"available": True, "report": report}
+
+    @app.post("/api/system/provider-gate/probe", status_code=202)
+    def start_provider_gate_probe(quick: bool = False):
+        with submission_lock:
+            active = coordinator.active()
+            if active:
+                raise HTTPException(409, detail={
+                    "code": "HEAVY_JOB_ALREADY_RUNNING",
+                    "message": f"A heavy job is already running: {active[0].id}",
+                    "taskId": active[0].id,
+                })
+
+            def operation(payload, progress):
+                progress({"done": 0, "total": 1, "stage": "probing"})
+                report = provider_probe_runner.run(quick=bool(payload["quick"]))
+                result = report.to_dict()
+                result["probedAt"] = pd.Timestamp.now(tz="Asia/Shanghai").isoformat()
+                atomic_write_text(
+                    json.dumps(result, ensure_ascii=False, indent=2),
+                    provider_report_path,
+                )
+                progress({"done": 1, "total": 1, "stage": "completed"})
+                return {"done": 1, "total": 1, "report": result}
+
+            submitted = coordinator.submit(
+                "provider_probe", {"quick": quick}, operation, resumable=False
+            )
+        return {"taskId": submitted.job_id, "quick": quick}
 
     label_status_cache: dict[str, object] = {"expires": 0.0, "value": None}
     label_status_lock = threading.Lock()

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type LabelStatus, type Security, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type LabelStatus, type Security, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult, type ProviderGateStatus } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -28,6 +28,7 @@ const taskErrorText = (error: unknown) => typeof error === 'string' ? error : er
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null)
+  const [providerGate, setProviderGate] = useState<ProviderGateStatus | null>(null)
   const [labelStatus, setLabelStatus] = useState<LabelStatus | null>(null)
   const [exchange, setExchange] = useState('sh')
   const [code, setCode] = useState('600000')
@@ -70,6 +71,7 @@ export function App() {
 
   useEffect(() => {
     api.health().then(setHealth).catch(e => setMessage(e.message))
+    api.providerGate().then(setProviderGate).catch(() => undefined)
     api.labelStatus().then(setLabelStatus).catch(() => undefined)
     const restoreTask = (task: import('./api').GenericTask) => {
       const names: Record<string, string> = { import: '行情导入', history_backfill: '历史补全', labels: 'P1 标签', features: 'P2 特征', scores: 'P3 评分' }
@@ -184,6 +186,23 @@ export function App() {
       }
       await poll()
     } catch (error) { setMessage(error instanceof Error ? error.message : '特征任务启动失败'); setBusy(false) }
+  }
+
+  async function probeProviders(quick: boolean) {
+    setBusy(true); setMessage(quick ? '正在快速诊断数据源…' : '正在执行完整上线 Gate…')
+    try {
+      const result = await api.probeProviders(quick)
+      const poll = async () => {
+        const task = await api.taskStatus(result.taskId)
+        showTask(quick ? '数据源快速诊断' : '数据源上线 Gate', result.taskId, task)
+        if (task.status === 'queued' || task.status === 'running') window.setTimeout(poll, 1000)
+        else {
+          const latest = await api.providerGate(); setProviderGate(latest); setBusy(false)
+          setMessage(latest.report?.passed ? '数据源上线 Gate 已通过' : quick ? '快速诊断完成（不作为上线依据）' : `上线 Gate 未通过：${latest.report?.reasons.join('；') || '请查看任务错误'}`)
+        }
+      }
+      await poll()
+    } catch (error) { setMessage(error instanceof Error ? error.message : '数据源探测失败'); setBusy(false) }
   }
 
   async function startScores() {
@@ -301,6 +320,9 @@ export function App() {
       <div className="version"><span>滚动验证</span><strong>{health?.versions.walkForwardModelDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>组合验证版本</span><strong>{health?.versions.portfolioValidationVersion ?? '—'}</strong></div>
       <div className="version"><span>行情策略</span><strong>{health?.versions.providerPolicyVersion ?? '—'}</strong></div>
+      <div className="version"><span>数据源上线 Gate</span><strong>{providerGate?.report ? (providerGate.report.passed ? '通过' : '未通过') : '未执行'}</strong><small>{providerGate?.report ? `${providerGate.report.gateVersion} · ${providerGate.report.probedAt ? new Date(providerGate.report.probedAt).toLocaleString('zh-CN') : '时间未知'}` : '完整探测后可作为上线依据'}</small></div>
+      <button className="secondary" disabled={busy} onClick={() => probeProviders(true)}>快速诊断数据源</button>
+      <button className="secondary" disabled={busy} onClick={() => probeProviders(false)}>执行数据源上线 Gate</button>
       <button disabled={busy} onClick={() => startImport('representative')}>拉取代表样本</button>
       <button className="secondary" disabled={busy} onClick={() => startImport('all')}>高速下载全市场</button>
       <button className="secondary" disabled={busy} onClick={startHistoryBackfill}>补全短历史</button>
