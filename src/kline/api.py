@@ -387,7 +387,10 @@ class LabelTaskStore(_TaskFacade):
                         security["snapshot_version"],
                         st_status=status_from_name(names.get(key, "")).is_st,
                     )
-                    state["rows"] += output.write(exchange, security["code"], rows).rows
+                    if rows:
+                        state["rows"] += output.write(exchange, security["code"], rows).rows
+                    else:
+                        output.remove_security(exchange, security["code"])
                 except Exception as exc:
                     state["errors"].append({"security": key, "message": str(exc)})
                 finally:

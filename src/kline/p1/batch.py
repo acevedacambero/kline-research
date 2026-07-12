@@ -51,6 +51,13 @@ class LabelDatasetStore:
             / f"{code}.parquet"
         )
 
+    def remove_security(self, exchange: str, code: str) -> int:
+        root = self.output_root / "data-foundation-v1" / "labels"
+        paths = list(root.glob(f"*/{exchange}/{code}.parquet"))
+        for path in paths:
+            path.unlink(missing_ok=True)
+        return len(paths)
+
     def reuse_current(
         self,
         exchange: str,

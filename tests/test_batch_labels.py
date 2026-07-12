@@ -121,3 +121,19 @@ def test_label_store_reuses_only_current_versions(tmp_path):
     assert current.status == "reused"
     assert current.rows == 1
     assert stale is None
+
+
+def test_label_store_removes_all_snapshots_for_empty_current_result(tmp_path):
+    store = LabelDatasetStore(tmp_path)
+    base = {
+        "exchange": "sh",
+        "code": "600000",
+        "signal_date": date(2024, 1, 1),
+        "label_definition_version": "daily-v2-exit-delay",
+        "limit_rule_version": "cn-equity-v1",
+    }
+    for snapshot in ("snapshot-old", "snapshot-new"):
+        store.write("sh", "600000", [{**base, "snapshot_version": snapshot}])
+
+    assert store.remove_security("sh", "600000") == 2
+    assert not list((tmp_path / "data-foundation-v1" / "labels").rglob("600000.parquet"))
