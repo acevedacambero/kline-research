@@ -1185,9 +1185,30 @@ def create_app(
         ]
         if request.scope == "representative":
             cached = cached[:3]
+        elif request.scope == "failed":
+            previous = next(
+                (
+                    job for job in reversed(job_store.list())
+                    if job.job_type == "labels" and isinstance(job.result, dict)
+                    and job.result.get("errors")
+                ),
+                None,
+            )
+            failed_keys = {
+                str(item.get("security"))
+                for item in (previous.result.get("errors", []) if previous else [])
+                if isinstance(item, dict) and item.get("security")
+            }
+            cached = [
+                item for item in cached
+                if f'{item["exchange"]}{item["code"]}' in failed_keys
+            ]
         elif request.scope != "all":
             raise HTTPException(
-                422, detail={"code": "INVALID_LABEL_SCOPE", "message": "scope must be representative or all"}
+                422, detail={
+                    "code": "INVALID_LABEL_SCOPE",
+                    "message": "scope must be representative, failed, or all",
+                }
             )
         try:
             names = {

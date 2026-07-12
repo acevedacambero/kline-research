@@ -170,7 +170,7 @@ def test_walk_forward_returns_multiple_time_folds():
 
 def test_top_score_portfolio_reports_excess_return():
     result = validate_top_score_portfolio(score_rows(20), mature_label_rows(20), top_fraction=0.2)
-    assert result["version"] == "p8-top-score-portfolio-v2-executable"
+    assert result["version"] == "p8-top-score-portfolio-v3-equity"
     assert result["selectedCount"] > 0
     assert result["tradingDayCount"] == 20
     assert result["maxDrawdown"] is None
@@ -222,6 +222,10 @@ def test_non_overlapping_portfolio_computes_drawdown():
     assert result["nonOverlapping"] is True
     assert result["tradingDayCount"] == 2
     assert result["maxDrawdown"] is not None
+    assert result["annualizedReturn"] is not None
+    assert result["annualizedVolatility"] is not None
+    assert result["sharpeRatio"] is not None
+    assert len(result["equityCurve"]) == result["tradingDayCount"]
 
 
 def test_portfolio_reports_net_returns_after_costs():

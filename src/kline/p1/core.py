@@ -159,7 +159,11 @@ def resolve_executable_entry(
         if rule.no_limit:
             return EntryResult(False, "noLimit-excluded")
         price_suffix = "" if "open" in current and "close" in previous else "_qfq"
-        gain = float(current[f"open{price_suffix}"]) / float(previous[f"close{price_suffix}"]) - 1
+        current_open = float(current[f"open{price_suffix}"])
+        previous_close = float(previous[f"close{price_suffix}"])
+        if current_open <= 0 or previous_close <= 0:
+            return EntryResult(False, "invalid-entry-price", entry_reason="non-positive entry price")
+        gain = current_open / previous_close - 1
         if gain < float(rule.executable_threshold):
             return EntryResult(
                 True,
@@ -194,6 +198,8 @@ def resolve_executable_exit(
         previous_close = float(previous[f"close{suffix}"])
         high = float(current[f"high{suffix}"])
         low = float(current[f"low{suffix}"])
+        if previous_close <= 0 or high <= 0 or low <= 0:
+            continue
         rule = limit_rule(code, current["date"], exchange, st_status)
         locked_limit_down = (
             rule.executable_threshold is not None

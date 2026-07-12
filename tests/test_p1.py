@@ -78,6 +78,16 @@ def test_executable_entry_delays_until_buyable_day():
     assert entry.entry_delay == 2
 
 
+def test_executable_entry_rejects_non_positive_previous_close():
+    series = bars()
+    series[250]["close_qfq"] = 0.0
+
+    entry = resolve_executable_entry(series, 250, code="600000", exchange="sh")
+
+    assert entry.executable is False
+    assert entry.status == "invalid-entry-price"
+
+
 def test_executable_entry_uses_raw_not_qfq_prices():
     series = bars()
     signal = 250

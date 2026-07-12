@@ -40,6 +40,18 @@ def test_batch_builder_emits_versioned_mature_multi_horizon_labels():
     assert first["label_maturity_date"] > first["signal_date"]
 
 
+def test_batch_builder_skips_non_positive_total_return_entry_without_failing_security():
+    bars = make_bars(340)
+    bars[251]["open_total_return"] = 0.0
+
+    rows = BatchLabelBuilder(sample_step=5).build(
+        "sh", "688143", bars, make_bars(340, 100.0), "snapshot-test"
+    )
+
+    assert rows
+    assert all(row["signal_index"] != 250 for row in rows)
+
+
 def test_walk_forward_filter_rejects_future_and_unmatured_samples():
     samples = [
         {"signal_date": date(2024, 1, 1), "label_maturity_date": date(2024, 2, 1)},

@@ -46,7 +46,7 @@ def test_health_exposes_all_version_keys(tmp_path):
     assert body["versions"]["modelDefinitionVersion"] == "p7-score-logistic-v1"
     assert body["versions"]["multiFeatureModelDefinitionVersion"] == "p7-multifeature-logistic-v1"
     assert body["versions"]["walkForwardModelDefinitionVersion"] == "p7-walk-forward-v2-nonoverlap"
-    assert body["versions"]["portfolioValidationVersion"] == "p8-top-score-portfolio-v2-executable"
+    assert body["versions"]["portfolioValidationVersion"] == "p8-top-score-portfolio-v3-equity"
     assert body["versions"]["transactionCostVersion"] == "p8-flat-bps-v1"
     assert body["recoverableTasks"] == 0
 
@@ -169,6 +169,25 @@ def test_feature_build_resumes_interrupted_task_with_same_id(tmp_path):
         response = client.post("/api/features/build", json={"scope": "all"})
         assert response.status_code == 202
         assert response.json()["taskId"] == interrupted.id
+
+
+def test_label_failed_scope_retries_only_previous_error_securities(tmp_path):
+    data_path = tmp_path / "data"
+    seed_security(data_path)
+    jobs_path = data_path / "jobs.duckdb"
+    with JobStore(jobs_path) as store:
+        previous = store.create("labels", [{"exchange": "sh", "code": "600000"}])
+        store.transition(previous.id, JobStatus.RUNNING)
+        store.complete(previous.id, {
+            "done": 1, "total": 1, "rows": 0,
+            "errors": [{"security": "sh600000", "message": "zero price"}],
+        })
+
+    app = create_app(Settings(data_path=data_path), FakeSource())
+    with TestClient(app) as client:
+        response = client.post("/api/labels/build", json={"scope": "failed"})
+        assert response.status_code == 202
+        assert response.json()["total"] == 1
 
 
 def test_generic_task_status_returns_404_for_unknown_id(tmp_path):
@@ -673,7 +692,7 @@ def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
         "/api/validation/portfolio", json={"label_column": "p20_executable_return", "top_fraction": 0.1}
     )
     assert response.status_code == 200
-    assert response.json()["version"] == "p8-top-score-portfolio-v2-executable"
+    assert response.json()["version"] == "p8-top-score-portfolio-v3-equity"
     assert response.json()["sampleCount"] == 0
 
 

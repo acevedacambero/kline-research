@@ -113,6 +113,14 @@ class BatchLabelBuilder:
             )
             if not entry.executable or entry.entry_index is None:
                 continue
+            entry_basis = float(bars[entry.entry_index].get(
+                "open_total_return", bars[entry.entry_index]["open_qfq"]
+            ))
+            signal_basis = float(bars[signal_index].get(
+                "close_total_return", bars[signal_index]["close_qfq"]
+            ))
+            if entry_basis <= 0 or signal_basis <= 0:
+                continue
             labels = compute_forward_labels(
                 bars, benchmark, signal_index, entry.entry_index, self.horizons,
                 benchmark_date_index,
@@ -133,9 +141,7 @@ class BatchLabelBuilder:
             }
             if any(value is None for value in maturity_dates.values()):
                 continue
-            path_start = bars[entry.entry_index].get(
-                "open_total_return", bars[entry.entry_index]["open_qfq"]
-            )
+            path_start = entry_basis
             path = compute_path_label(bars, entry.entry_index, path_start)
             drawdown = compute_drawdown_label(
                 bars, entry.entry_index, path_start, 20, 0.08
@@ -176,9 +182,7 @@ class BatchLabelBuilder:
                 row[f"{prefix}_exit_delay"] = exit_result.exit_delay
                 row[f"{prefix}_delayed_executable_return"] = (
                     exit_result.exit_price
-                    / float(bars[entry.entry_index].get(
-                        "open_total_return", bars[entry.entry_index]["open_qfq"]
-                    ))
+                    / entry_basis
                     - 1
                     if exit_result.executable and exit_result.exit_price is not None
                     else None
