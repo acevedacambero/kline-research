@@ -12,6 +12,7 @@ from kline.storage import atomic_write_parquet, atomic_write_text
 
 from kline.config import VERSIONS
 from kline.features import FEATURE_DEFINITION_VERSION, compute_daily_features
+from kline.features.batch import FeatureDatasetStore
 
 from .core import SCORE_DEFINITION_VERSION, compute_rule_score
 
@@ -42,6 +43,10 @@ def compute_score_frame(
     features = compute_daily_features(
         bars, exchange=exchange, code=code, st_status=st_status
     )
+    return compute_score_frame_from_features(features)
+
+
+def compute_score_frame_from_features(features: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for row in features.to_dict("records"):
         score = compute_rule_score(row)
@@ -49,8 +54,8 @@ def compute_score_frame(
         rows.append(
             {
                 "date": row["date"],
-                "exchange": exchange,
-                "code": code,
+                "exchange": row["exchange"],
+                "code": row["code"],
                 "available_history": row["available_history"],
                 "score": score["score"],
                 "grade": score["grade"],
@@ -150,12 +155,23 @@ class BatchScoreBuilder:
             if "factor_version" in frame and not frame["factor_version"].dropna().empty
             else "unknown"
         )
-        scores = compute_score_frame(
-            frame,
-            exchange=security["exchange"],
-            code=security["code"],
-            st_status=bool(security.get("st_status", False)),
+        feature_path = FeatureDatasetStore(self.store.output_root).path_for(
+            security["exchange"], security["code"],
+            snapshot_version=security["snapshot_version"],
+            factor_version=factor_version,
+            limit_rule_version=VERSIONS["limitRuleVersion"],
+            feature_definition_version=FEATURE_DEFINITION_VERSION,
         )
+        features = (
+            pd.read_parquet(feature_path) if feature_path.exists()
+            else compute_daily_features(
+                frame,
+                exchange=security["exchange"],
+                code=security["code"],
+                st_status=bool(security.get("st_status", False)),
+            )
+        )
+        scores = compute_score_frame_from_features(features)
         return self.store.write(
             security["exchange"],
             security["code"],

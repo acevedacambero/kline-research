@@ -5,6 +5,8 @@ from pathlib import Path
 import pandas as pd
 
 from kline.score.batch import BatchScoreBuilder, ScoreDatasetStore, compute_score_frame
+from kline.features import compute_daily_features
+from kline.features.batch import FeatureDatasetStore
 
 
 def derived_frame(count: int = 260) -> pd.DataFrame:
@@ -112,4 +114,33 @@ def test_batch_score_builder_isolates_invalid_security(tmp_path):
     assert len(report.errors) == 1
     assert report.errors[0]["security"] == "sz000001"
     written = pd.read_parquet(report.outputs[0].path)
+    assert written.iloc[-1]["code"] == "600000"
+
+
+def test_score_builder_reuses_matching_offline_features(tmp_path, monkeypatch):
+    derived_path = tmp_path / "derived.parquet"
+    bars = derived_frame()
+    bars.to_parquet(derived_path, index=False)
+    output = tmp_path / "output"
+    features = compute_daily_features(bars, exchange="sh", code="600000")
+    FeatureDatasetStore(output).write(
+        "sh", "600000", features,
+        snapshot_version="snapshot-one",
+        factor_version="factor-v1",
+        limit_rule_version="cn-equity-v1",
+        feature_definition_version="daily-features-v1",
+    )
+
+    def should_not_recompute(*_args, **_kwargs):
+        raise AssertionError("matching P2 features must be reused")
+
+    monkeypatch.setattr("kline.score.batch.compute_daily_features", should_not_recompute)
+    report = BatchScoreBuilder(ScoreDatasetStore(output)).build_security({
+        "exchange": "sh", "code": "600000",
+        "derived_path": str(derived_path), "snapshot_version": "snapshot-one",
+    })
+
+    assert report.status == "written"
+    assert report.rows == len(features)
+    written = pd.read_parquet(report.path)
     assert written.iloc[-1]["code"] == "600000"

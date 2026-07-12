@@ -34,6 +34,24 @@ class FeatureDatasetStore:
     def __init__(self, output_root: Path):
         self.output_root = Path(output_root)
 
+    def path_for(
+        self,
+        exchange: str,
+        code: str,
+        *,
+        snapshot_version: str,
+        factor_version: str,
+        limit_rule_version: str,
+        feature_definition_version: str,
+    ) -> Path:
+        identity = "__".join(
+            (snapshot_version, factor_version, limit_rule_version)
+        ).replace("/", "-").replace("\\", "-")
+        return (
+            self.output_root / "data-foundation-v1" / "features"
+            / feature_definition_version / identity / exchange / f"{code}.parquet"
+        )
+
     def write(
         self,
         exchange: str,
@@ -45,18 +63,14 @@ class FeatureDatasetStore:
         limit_rule_version: str,
         feature_definition_version: str,
     ) -> FeatureStoreReport:
-        identity = "__".join(
-            (snapshot_version, factor_version, limit_rule_version)
-        ).replace("/", "-").replace("\\", "-")
-        root = (
-            self.output_root
-            / "data-foundation-v1"
-            / "features"
-            / feature_definition_version
-            / identity
-            / exchange
+        path = self.path_for(
+            exchange, code,
+            snapshot_version=snapshot_version,
+            factor_version=factor_version,
+            limit_rule_version=limit_rule_version,
+            feature_definition_version=feature_definition_version,
         )
-        path = root / f"{code}.parquet"
+        root = path.parent
         manifest_path = root / f"{code}.manifest.json"
         if path.exists() and manifest_path.exists():
             return FeatureStoreReport("reused", str(path), str(manifest_path), len(frame))
