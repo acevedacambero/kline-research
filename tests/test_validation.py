@@ -3,7 +3,11 @@ from datetime import date, timedelta
 import pandas as pd
 
 from kline.validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
-from kline.model import train_multifeature_baseline, train_score_baseline, walk_forward_score_baseline
+from kline.model import (
+    train_multifeature_baseline,
+    train_score_baseline,
+    walk_forward_score_baseline,
+)
 from kline.model.baseline import binary_auc
 
 
@@ -111,7 +115,9 @@ def test_score_calibration_buckets_observed_positive_probability():
     assert result["version"] == "p5-score-calibration-v3-quality"
     assert result["sampleCount"] == 20
     assert len(result["buckets"]) == 4
-    assert result["buckets"][0]["observedProbability"] < result["buckets"][-1]["observedProbability"]
+    assert (
+        result["buckets"][0]["observedProbability"] < result["buckets"][-1]["observedProbability"]
+    )
     assert result["reliability"]["status"] == "review"
     assert result["reliability"]["warnings"]
     assert result["buckets"][0]["observedProbabilityInterval"]["confidence"] == 0.95
@@ -134,7 +140,10 @@ def test_score_baseline_trains_time_split_model():
 
 
 def test_binary_auc_matches_perfect_ranking():
-    assert binary_auc(pd.Series([0, 0, 1, 1]).to_numpy(), pd.Series([0.1, 0.2, 0.8, 0.9]).to_numpy()) == 1.0
+    assert (
+        binary_auc(pd.Series([0, 0, 1, 1]).to_numpy(), pd.Series([0.1, 0.2, 0.8, 0.9]).to_numpy())
+        == 1.0
+    )
 
 
 def test_multifeature_baseline_trains_with_p2_columns():
@@ -149,7 +158,13 @@ def test_multifeature_baseline_trains_with_p2_columns():
     result = train_multifeature_baseline(scores, labels, features, train_until=date(2024, 1, 30))
     assert result["version"] == "p7-multifeature-logistic-v1"
     assert result["trainCount"] == 30
-    assert set(result["weights"]) == {"score", "bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"}
+    assert set(result["weights"]) == {
+        "score",
+        "bullish_alignment",
+        "return_20",
+        "volume_ratio_5",
+        "volatility_20",
+    }
 
 
 def test_score_baseline_excludes_labels_immature_at_training_cutoff():
@@ -166,6 +181,15 @@ def test_walk_forward_returns_multiple_time_folds():
     assert len(result["folds"]) == 3
     assert result["folds"][0]["testUntil"] == result["folds"][1]["trainUntil"]
     assert result["folds"][1]["testUntil"] == result["folds"][2]["trainUntil"]
+
+
+def test_walk_forward_cutoffs_follow_mature_label_dates_not_future_scores():
+    labels = label_rows(80)
+    labels["label_maturity_date"] = labels["signal_date"]
+    result = walk_forward_score_baseline(score_rows(140), labels, folds=3)
+
+    assert all(fold["testCount"] > 0 for fold in result["folds"])
+    assert result["folds"][-1]["testUntil"] <= labels["signal_date"].max()
 
 
 def test_top_score_portfolio_reports_excess_return():
@@ -230,8 +254,11 @@ def test_non_overlapping_portfolio_computes_drawdown():
 
 def test_portfolio_reports_net_returns_after_costs():
     result = validate_top_score_portfolio(
-        score_rows(40), label_rows(40), non_overlapping=True,
-        transaction_cost_bps=10, slippage_bps=5,
+        score_rows(40),
+        label_rows(40),
+        non_overlapping=True,
+        transaction_cost_bps=10,
+        slippage_bps=5,
     )
     assert result["totalCostRate"] == 0.0015
     assert result["netAverageReturn"] < result["averageReturn"]

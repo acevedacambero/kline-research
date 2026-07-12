@@ -1529,6 +1529,7 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", request.factor_column, "usable"],
+            tail_rows_per_file=250,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
@@ -1542,6 +1543,7 @@ def create_app(
                 "path_success_p20",
                 "max_drawdown_p20",
             ],
+            tail_rows_per_file=250,
         )
         return validate_single_factor(
             scores,
@@ -1582,6 +1584,7 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "grade", "usable"],
+            tail_rows_per_file=10,
         )
         if scores.empty:
             return {

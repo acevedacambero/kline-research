@@ -32,10 +32,29 @@ def walk_forward_score_baseline(
     folds: int = 3,
 ) -> dict[str, Any]:
     sf = pd.DataFrame(scores).copy()
-    if "date" not in sf:
-        return {"version": WALK_FORWARD_MODEL_VERSION, "folds": [], "averageAuc": None,
-                "averageAccuracy": None, "warnings": ["缺少评分日期"]}
-    dates = sorted(pd.to_datetime(sf["date"]).dt.date.unique())
+    lf = pd.DataFrame(labels).copy()
+    if "date" not in sf or not {"exchange", "code", "signal_date", label_column}.issubset(
+        lf.columns
+    ):
+        return {
+            "version": WALK_FORWARD_MODEL_VERSION,
+            "folds": [],
+            "averageAuc": None,
+            "averageAccuracy": None,
+            "warnings": ["缺少评分日期"],
+        }
+    sf["date"] = pd.to_datetime(sf["date"], errors="coerce").dt.date
+    lf["signal_date"] = pd.to_datetime(lf["signal_date"], errors="coerce").dt.date
+    available_as_of = sf["date"].dropna().max()
+    if "label_maturity_date" in lf and available_as_of is not None:
+        maturity = pd.to_datetime(lf["label_maturity_date"], errors="coerce").dt.date
+        lf = lf.loc[maturity <= available_as_of]
+    eligible_dates = sf[["exchange", "code", "date"]].merge(
+        lf[["exchange", "code", "signal_date"]],
+        left_on=["exchange", "code", "date"],
+        right_on=["exchange", "code", "signal_date"],
+    )["date"]
+    dates = sorted(eligible_dates.dropna().unique())
     fold_count = max(2, min(5, int(folds)))
     cutoffs = []
     for index in range(fold_count):
@@ -57,17 +76,26 @@ def walk_forward_score_baseline(
             train_until=cutoff,
             test_until=test_until,
         )
-        rows.append({"trainUntil": cutoff, "testUntil": test_until,
-                     "status": result["status"],
-                     "trainCount": result["trainCount"],
-                     "testCount": result["testCount"], "auc": result["auc"],
-                     "accuracy": result["accuracy"]})
+        rows.append(
+            {
+                "trainUntil": cutoff,
+                "testUntil": test_until,
+                "status": result["status"],
+                "trainCount": result["trainCount"],
+                "testCount": result["testCount"],
+                "auc": result["auc"],
+                "accuracy": result["accuracy"],
+            }
+        )
     aucs = [row["auc"] for row in rows if row["auc"] is not None]
     accuracies = [row["accuracy"] for row in rows if row["accuracy"] is not None]
-    return {"version": WALK_FORWARD_MODEL_VERSION, "folds": rows,
-            "averageAuc": float(np.mean(aucs)) if aucs else None,
-            "averageAccuracy": float(np.mean(accuracies)) if accuracies else None,
-            "warnings": [] if aucs else ["没有足够成熟样本完成 walk-forward"]}
+    return {
+        "version": WALK_FORWARD_MODEL_VERSION,
+        "folds": rows,
+        "averageAuc": float(np.mean(aucs)) if aucs else None,
+        "averageAccuracy": float(np.mean(accuracies)) if accuracies else None,
+        "warnings": [] if aucs else ["没有足够成熟样本完成 walk-forward"],
+    }
 
 
 def train_score_baseline(
@@ -78,11 +106,20 @@ def train_score_baseline(
     train_until: date | None = None,
     test_until: date | None = None,
 ) -> dict[str, Any]:
-    base = {"version": BASELINE_MODEL_VERSION, "labelColumn": label_column,
-            "status": "insufficient_data", "trainCount": 0, "testCount": 0,
-            "positiveRate": None, "testPositiveRate": None, "accuracy": None,
-            "auc": None, "intercept": None, "coefficient": None,
-            "warnings": []}
+    base = {
+        "version": BASELINE_MODEL_VERSION,
+        "labelColumn": label_column,
+        "status": "insufficient_data",
+        "trainCount": 0,
+        "testCount": 0,
+        "positiveRate": None,
+        "testPositiveRate": None,
+        "accuracy": None,
+        "auc": None,
+        "intercept": None,
+        "coefficient": None,
+        "warnings": [],
+    }
     sf, lf = pd.DataFrame(scores).copy(), pd.DataFrame(labels).copy()
     required = {"exchange", "code", "date", "score"}
     required_label = {"exchange", "code", "signal_date", label_column}
@@ -93,7 +130,9 @@ def train_score_baseline(
     sf["date"] = pd.to_datetime(sf["date"]).dt.date
     available_as_of = sf["date"].max()
     lf["signal_date"] = pd.to_datetime(lf["signal_date"]).dt.date
-    merged = sf.merge(lf, left_on=["exchange", "code", "date"], right_on=["exchange", "code", "signal_date"])
+    merged = sf.merge(
+        lf, left_on=["exchange", "code", "date"], right_on=["exchange", "code", "signal_date"]
+    )
     if "usable" in merged:
         merged = merged.loc[merged["usable"].fillna(False).astype(bool)]
     merged["score"] = pd.to_numeric(merged["score"], errors="coerce")
@@ -101,15 +140,15 @@ def train_score_baseline(
     merged = merged.dropna(subset=["score", label_column]).sort_values("date")
     if train_until is None:
         unique_dates = sorted(merged["date"].unique())
-        train_until = unique_dates[max(0, int(len(unique_dates) * 0.7) - 1)] if unique_dates else None
+        train_until = (
+            unique_dates[max(0, int(len(unique_dates) * 0.7) - 1)] if unique_dates else None
+        )
     if train_until is None:
         base["warnings"] = ["没有可用成熟样本"]
         return base
     evaluation_end = test_until or available_as_of
     train = merged.loc[merged["date"] <= train_until]
-    test = merged.loc[
-        (merged["date"] > train_until) & (merged["date"] <= evaluation_end)
-    ]
+    test = merged.loc[(merged["date"] > train_until) & (merged["date"] <= evaluation_end)]
     if "label_maturity_date" in train:
         maturity = pd.to_datetime(train["label_maturity_date"], errors="coerce").dt.date
         train = train.loc[maturity <= train_until]
@@ -139,9 +178,16 @@ def train_score_baseline(
         warnings.append("分数系数非正，评分方向未获得样本外支持")
     if auc is not None and auc < 0.5:
         warnings.append("样本外 AUC 低于 0.5，需要复核")
-    return {**base, "status": "trained" if not warnings else "review", "positiveRate": float(y.mean()),
-            "testPositiveRate": float(yt.mean()), "accuracy": accuracy,
-            "auc": auc,
-            "intercept": float(intercept), "coefficient": float(coefficient),
-            "trainUntil": train_until, "testUntil": evaluation_end,
-            "warnings": warnings}
+    return {
+        **base,
+        "status": "trained" if not warnings else "review",
+        "positiveRate": float(y.mean()),
+        "testPositiveRate": float(yt.mean()),
+        "accuracy": accuracy,
+        "auc": auc,
+        "intercept": float(intercept),
+        "coefficient": float(coefficient),
+        "trainUntil": train_until,
+        "testUntil": evaluation_end,
+        "warnings": warnings,
+    }
