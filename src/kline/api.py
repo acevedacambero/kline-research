@@ -621,6 +621,8 @@ def create_app(
     history_backfill_candidate_count: int | None = None
     approximate_quality_lock = threading.Lock()
     approximate_quality_cache: dict[str, object] = {"expires": 0.0, "value": None}
+    freshness_quality_lock = threading.Lock()
+    freshness_quality_cache: dict[str, object] = {"expires": 0.0, "value": None}
     security_cache: list[dict[str, str]] | None = None
 
     def securities_list(refresh: bool = False) -> list[dict[str, str]]:
@@ -939,6 +941,55 @@ def create_app(
                 approximate_quality_cache.update(
                     value=approximate_quality, expires=time.monotonic() + 60
                 )
+        with freshness_quality_lock:
+            freshness_quality = freshness_quality_cache["value"]
+            if time.monotonic() >= float(freshness_quality_cache["expires"]):
+                coverage: list[dict[str, object]] = []
+                unreadable: list[str] = []
+                for item in pipeline.cached_securities():
+                    path = Path(item["derived_path"])
+                    security = f'{item["exchange"]}{item["code"]}'
+                    try:
+                        parquet = pq.ParquetFile(path)
+                        if parquet.metadata.num_rows == 0 or "date" not in parquet.schema.names:
+                            raise ValueError("empty file or missing date column")
+                        index = parquet.schema.names.index("date")
+                        stats = parquet.metadata.row_group(
+                            parquet.metadata.num_row_groups - 1
+                        ).column(index).statistics
+                        latest_date = stats.max if stats and stats.has_min_max else None
+                        if latest_date is None:
+                            latest_date = parquet.read(columns=["date"])["date"][-1].as_py()
+                        coverage.append({
+                            "security": security,
+                            "latestDate": pd.Timestamp(latest_date).date(),
+                        })
+                    except Exception as exc:
+                        unreadable.append(f"{security}: {exc}")
+                market_latest = max(
+                    (item["latestDate"] for item in coverage), default=None
+                )
+                threshold = settings.history_backfill_freshness_days
+                stale = [
+                    item for item in coverage
+                    if market_latest is not None
+                    and (market_latest - item["latestDate"]).days > threshold
+                ]
+                freshness_quality = {
+                    "latestDataDate": market_latest.isoformat() if market_latest else None,
+                    "freshSecurities": len(coverage) - len(stale),
+                    "staleSecurities": len(stale),
+                    "freshnessThresholdDays": threshold,
+                    "staleExamples": [
+                        {**item, "latestDate": item["latestDate"].isoformat()}
+                        for item in stale[:20]
+                    ],
+                    "unreadableSecurities": len(unreadable),
+                    "unreadableExamples": unreadable[:20],
+                }
+                freshness_quality_cache.update(
+                    value=freshness_quality, expires=time.monotonic() + 60
+                )
         return {
             "source": "AkShare",
             "cachedSecurities": cached,
@@ -951,6 +1002,7 @@ def create_app(
                 event["event_type"] == "history-backfill-failed" for event in events
             ),
             **approximate_quality,
+            **freshness_quality,
             "qualityEvents": events[:100],
         }
 

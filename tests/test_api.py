@@ -102,11 +102,12 @@ def test_provider_gate_probe_is_persisted_and_queryable(tmp_path):
             submitted = client.post("/api/system/provider-gate/probe?quick=true")
             assert submitted.status_code == 202
             task_id = submitted.json()["taskId"]
-            for _ in range(100):
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
                 task = client.get(f"/api/tasks/{task_id}").json()
                 if task["status"] == "completed":
                     break
-                time.sleep(0.01)
+                time.sleep(0.02)
             assert task["status"] == "completed", task
             assert task["report"]["passed"] is True
             latest = client.get("/api/system/provider-gate").json()
@@ -566,6 +567,41 @@ def test_quality_aggregates_weighted_approximate_rule_ratio(tmp_path):
     assert response.json()["featureRows"] == 400
     assert response.json()["approximateRuleRows"] == 100
     assert response.json()["approximateRuleRatio"] == pytest.approx(0.25)
+
+
+def test_quality_reports_market_relative_data_freshness(tmp_path, monkeypatch):
+    paths = []
+    for code, dates in (
+        ("600000", ["2026-07-10", "2026-07-11"]),
+        ("600001", ["2026-06-20", "2026-06-21"]),
+    ):
+        path = tmp_path / f"{code}.parquet"
+        pd.DataFrame({"date": pd.to_datetime(dates), "close": [10.0, 11.0]}).to_parquet(path)
+        paths.append({
+            "exchange": "sh", "code": code, "derived_path": str(path),
+            "snapshot_version": "test",
+        })
+    monkeypatch.setattr(
+        api_module.DatasetPipeline, "cached_securities", lambda _self: paths
+    )
+
+    body = TestClient(
+        create_app(
+            Settings(
+                data_path=tmp_path / "data",
+                history_backfill_freshness_days=10,
+            ),
+            FakeSource(),
+        )
+    ).get("/api/datasets/quality").json()
+
+    assert body["latestDataDate"] == "2026-07-11"
+    assert body["freshSecurities"] == 1
+    assert body["staleSecurities"] == 1
+    assert body["staleExamples"] == [
+        {"security": "sh600001", "latestDate": "2026-06-21"}
+    ]
+    assert body["unreadableSecurities"] == 0
 
 
 def test_quality_caches_expensive_short_history_scan(tmp_path, monkeypatch):

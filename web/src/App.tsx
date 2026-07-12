@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type LabelStatus, type Security, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult, type ProviderGateStatus } from './api'
+import { api, type Audit, type Bar, type FeatureAudit, type FeatureValue, type Health, type LabelStatus, type Security, type ScoreAudit, type SingleFactorValidation, type ScoreCalibration, type ScanResult, type BaselineModel, type PortfolioValidation, type FeatureCatalog, type MultiFeatureModel, type WalkForwardResult, type ProviderGateStatus, type DatasetQuality } from './api'
 import { KlineChart } from './KlineChart'
 import './styles.css'
 
@@ -63,6 +63,7 @@ export function App() {
   const [busy, setBusy] = useState(false)
   const [cachedCount, setCachedCount] = useState<number | null>(null)
   const [approximateRuleRatio, setApproximateRuleRatio] = useState<number | null>(null)
+  const [datasetQuality, setDatasetQuality] = useState<DatasetQuality | null>(null)
   const [taskView, setTaskView] = useState<TaskView | null>(null)
 
   const showTask = (kind: string, id: string, task: { status: string; done: number; total: number; rows?: number; errors: unknown[]; currentSecurity?: string | null; speed?: number; etaSeconds?: number | null }) => {
@@ -81,7 +82,7 @@ export function App() {
       }
     }
     api.recentTasks(1).then(tasks => { if (tasks[0]) restoreTask(tasks[0]) }).catch(() => undefined)
-    const refresh = () => api.quality().then(q => { setCachedCount(q.totalCached); setApproximateRuleRatio(q.approximateRuleRatio ?? null) }).catch(() => undefined)
+    const refresh = () => api.quality().then(q => { setCachedCount(q.totalCached); setApproximateRuleRatio(q.approximateRuleRatio ?? null); setDatasetQuality(q) }).catch(() => undefined)
     refresh(); const timer = window.setInterval(refresh, 5000)
     return () => window.clearInterval(timer)
   }, [])
@@ -321,6 +322,7 @@ export function App() {
       <div className="version"><span>组合验证版本</span><strong>{health?.versions.portfolioValidationVersion ?? '—'}</strong></div>
       <div className="version"><span>行情策略</span><strong>{health?.versions.providerPolicyVersion ?? '—'}</strong></div>
       <div className="version"><span>数据源上线 Gate</span><strong>{providerGate?.report ? (providerGate.report.passed ? '通过' : '未通过') : '未执行'}</strong><small>{providerGate?.report ? `${providerGate.report.gateVersion} · ${providerGate.report.probedAt ? new Date(providerGate.report.probedAt).toLocaleString('zh-CN') : '时间未知'}` : '完整探测后可作为上线依据'}</small></div>
+      <div className="version"><span>行情新鲜度</span><strong>{datasetQuality?.latestDataDate ?? '暂无数据'}</strong><small>{datasetQuality ? `新鲜 ${datasetQuality.freshSecurities} · 过期 ${datasetQuality.staleSecurities} · 不可读 ${datasetQuality.unreadableSecurities}` : '正在统计覆盖日期'}</small></div>
       <button className="secondary" disabled={busy} onClick={() => probeProviders(true)}>快速诊断数据源</button>
       <button className="secondary" disabled={busy} onClick={() => probeProviders(false)}>执行数据源上线 Gate</button>
       <button disabled={busy} onClick={() => startImport('representative')}>拉取代表样本</button>
