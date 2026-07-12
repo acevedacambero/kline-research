@@ -55,6 +55,10 @@ pnpm test
 pnpm build
 ```
 
+GitHub Actions 对每次 push 和 Pull Request 执行相同的后端、前端和生产构建检查，
+并重新生成 OpenAPI 契约；生成文件与仓库不一致时 CI 直接失败。生产数据和 DuckDB
+不会进入 CI，线上发布仍必须通过独立供应商 Gate、单写者 Gate和人工数据验收。
+
 ## 北交所缓存清理
 
 清理命令默认只生成不可变预览，不修改数据：
