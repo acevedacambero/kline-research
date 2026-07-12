@@ -59,6 +59,7 @@ export type HistoryBackfillTask = {
   listingHistoryShort: number; errors: unknown[]; currentSecurity?: string | null;
   speed: number; etaSeconds?: number | null;
 }
+export type GenericTask = { id: string; jobType: string; status: string; done: number; total: number; rows?: number; errors: unknown[]; currentSecurity?: string | null; speed?: number; etaSeconds?: number | null }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
@@ -78,6 +79,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<Health>('/api/system/health'),
+  recentTasks: (limit = 10) => request<GenericTask[]>(`/api/tasks/recent?limit=${limit}`),
+  taskStatus: (taskId: string) => request<GenericTask>(`/api/tasks/${taskId}`),
   labelStatus: () => request<LabelStatus>('/api/labels/status'),
   bars: (exchange: string, code: string) => request<Bar[]>(`/api/securities/${exchange}/${code}/bars`),
   audit: (exchange: string, code: string, signalDate: string) => request<Audit>('/api/p1/audit', {

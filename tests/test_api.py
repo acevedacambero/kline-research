@@ -62,9 +62,21 @@ def test_feature_build_resumes_interrupted_task_with_same_id(tmp_path):
     app = create_app(Settings(data_path=data_path), FakeSource())
     with TestClient(app) as client:
         assert client.get("/api/system/health").json()["recoverableTasks"] == 1
+        recent = client.get("/api/tasks/recent?limit=1").json()
+        assert recent[0]["id"] == interrupted.id
+        assert recent[0]["jobType"] == "features"
+        assert recent[0]["status"] == "interrupted"
+        assert client.get(f"/api/tasks/{interrupted.id}").status_code == 200
         response = client.post("/api/features/build", json={"scope": "all"})
         assert response.status_code == 202
         assert response.json()["taskId"] == interrupted.id
+
+
+def test_generic_task_status_returns_404_for_unknown_id(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    response = TestClient(app).get("/api/tasks/missing")
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "TASK_NOT_FOUND"
 
 
 def test_label_status_reports_stale_and_current_files(tmp_path):

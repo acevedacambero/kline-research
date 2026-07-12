@@ -16,6 +16,23 @@ describe('App', () => {
     expect(screen.getAllByRole('option', { name: 'P5 可执行顺延卖出' })).toHaveLength(4)
   })
 
+  it('restores the most recent durable task after reload', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      const body = path.startsWith('/api/tasks/recent')
+        ? [{ id: 'durable-1', jobType: 'labels', status: 'completed', done: 3, total: 3, rows: 900, errors: [] }]
+        : path.includes('/quality') ? { totalCached: 2 }
+          : { status: 'ok', dataSource: 'AkShare', cachePath: 'data', versions: {} }
+      return { ok: true, json: async () => body }
+    }))
+
+    render(<App />)
+
+    expect(await screen.findByText('任务 ID durable-1')).toBeInTheDocument()
+    expect(screen.getByText('P1 标签')).toBeInTheDocument()
+    expect(screen.getByText('生成 900 行')).toBeInTheDocument()
+  })
+
   it('renders five P2 groups and explains unavailable history', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)

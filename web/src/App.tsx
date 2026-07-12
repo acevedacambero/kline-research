@@ -70,6 +70,14 @@ export function App() {
   useEffect(() => {
     api.health().then(setHealth).catch(e => setMessage(e.message))
     api.labelStatus().then(setLabelStatus).catch(() => undefined)
+    const restoreTask = (task: import('./api').GenericTask) => {
+      const names: Record<string, string> = { import: '行情导入', history_backfill: '历史补全', labels: 'P1 标签', features: 'P2 特征', scores: 'P3 评分' }
+      showTask(names[task.jobType] ?? task.jobType, task.id, task)
+      if (task.status === 'queued' || task.status === 'running') {
+        window.setTimeout(() => api.taskStatus(task.id).then(restoreTask).catch(() => undefined), 1000)
+      }
+    }
+    api.recentTasks(1).then(tasks => { if (tasks[0]) restoreTask(tasks[0]) }).catch(() => undefined)
     const refresh = () => api.quality().then(q => { setCachedCount(q.totalCached); setApproximateRuleRatio(q.approximateRuleRatio ?? null) }).catch(() => undefined)
     refresh(); const timer = window.setInterval(refresh, 5000)
     return () => window.clearInterval(timer)

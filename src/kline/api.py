@@ -165,7 +165,7 @@ def _task_response(job: Job) -> dict:
         })
     progress = job.progress if isinstance(job.progress, dict) else {}
     result = job.result if isinstance(job.result, dict) else {}
-    item = {"id": job.id, **defaults, **progress, **result}
+    item = {"id": job.id, "jobType": job.job_type, **defaults, **progress, **result}
     status = job.status.value
     if job.status is JobStatus.COMPLETED and item["errors"]:
         status = "completed_with_errors"
@@ -731,6 +731,20 @@ def create_app(
     @app.get("/healthz", include_in_schema=False)
     def healthz():
         return {"status": "ok", "activeTasks": len(coordinator.active())}
+
+    @app.get("/api/tasks/recent")
+    def recent_tasks(limit: int = 10):
+        bounded = max(1, min(50, limit))
+        return [_task_response(job) for job in reversed(job_store.list())][:bounded]
+
+    @app.get("/api/tasks/{task_id}")
+    def generic_task_status(task_id: str):
+        job = job_store.get(task_id)
+        if job is None:
+            raise HTTPException(
+                404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"}
+            )
+        return _task_response(job)
 
     @app.post("/api/datasets/validate")
     def validate_dataset():
