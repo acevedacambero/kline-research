@@ -26,7 +26,7 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Test backend
-        run: pytest -q
+        run: python -m pytest -q
 
   frontend-and-contract:
     runs-on: ubuntu-latest
