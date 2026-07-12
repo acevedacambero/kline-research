@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 
 
-PORTFOLIO_VALIDATION_VERSION = "p8-top-score-portfolio-v1"
+PORTFOLIO_VALIDATION_VERSION = "p8-top-score-portfolio-v2-executable"
 
 
 def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.DataFrame | list[dict], *, label_column: str = "p20_executable_return", top_fraction: float = 0.1, as_of_date: date | None = None, non_overlapping: bool = False, transaction_cost_bps: float = 0, slippage_bps: float = 0) -> dict[str, Any]:

@@ -46,7 +46,7 @@ from .p1 import (
     sample_eligibility,
 )
 from .p1.batch import BatchLabelBuilder, LabelDatasetStore
-from .p1.market_rules import status_from_name
+from .p1.market_rules import is_no_limit_session, status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
 from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
@@ -1258,6 +1258,18 @@ def create_app(
         except Exception:
             name = ""
         security_status = status_from_name(name)
+        listing_date = records[0]["date"]
+        no_limit_indices = {
+            index
+            for index, bar in enumerate(records[:5])
+            if is_no_limit_session(
+                request.exchange,
+                request.code,
+                listing_date,
+                index,
+                bar["date"],
+            )
+        }
         eligibility = sample_eligibility(records, signal_index, rights_status="ok")
         entry = resolve_executable_entry(
             records,
@@ -1265,6 +1277,7 @@ def create_app(
             code=request.code,
             exchange=request.exchange,
             st_status=security_status.is_st,
+            no_limit_indices=no_limit_indices,
         )
         output = {
             "eligibility": asdict(eligibility), "entry": asdict(entry), "labels": {},

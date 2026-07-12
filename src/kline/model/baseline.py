@@ -8,6 +8,7 @@ import pandas as pd
 
 
 BASELINE_MODEL_VERSION = "p7-score-logistic-v1"
+WALK_FORWARD_MODEL_VERSION = "p7-walk-forward-v2-nonoverlap"
 
 
 def binary_auc(labels: np.ndarray, predictions: np.ndarray) -> float | None:
@@ -32,7 +33,7 @@ def walk_forward_score_baseline(
 ) -> dict[str, Any]:
     sf = pd.DataFrame(scores).copy()
     if "date" not in sf:
-        return {"version": "p7-walk-forward-v1", "folds": [], "averageAuc": None,
+        return {"version": WALK_FORWARD_MODEL_VERSION, "folds": [], "averageAuc": None,
                 "averageAccuracy": None, "warnings": ["缺少评分日期"]}
     dates = sorted(pd.to_datetime(sf["date"]).dt.date.unique())
     fold_count = max(2, min(5, int(folds)))
@@ -42,17 +43,28 @@ def walk_forward_score_baseline(
         if dates:
             cutoffs.append(dates[min(len(dates) - 1, position)])
     rows = []
-    for cutoff in dict.fromkeys(cutoffs):
-        result = train_score_baseline(
-            scores, labels, label_column=label_column, train_until=cutoff
+    unique_cutoffs = list(dict.fromkeys(cutoffs))
+    for index, cutoff in enumerate(unique_cutoffs):
+        test_until = (
+            unique_cutoffs[index + 1]
+            if index + 1 < len(unique_cutoffs)
+            else (dates[-1] if dates else cutoff)
         )
-        rows.append({"trainUntil": cutoff, "status": result["status"],
+        result = train_score_baseline(
+            scores,
+            labels,
+            label_column=label_column,
+            train_until=cutoff,
+            test_until=test_until,
+        )
+        rows.append({"trainUntil": cutoff, "testUntil": test_until,
+                     "status": result["status"],
                      "trainCount": result["trainCount"],
                      "testCount": result["testCount"], "auc": result["auc"],
                      "accuracy": result["accuracy"]})
     aucs = [row["auc"] for row in rows if row["auc"] is not None]
     accuracies = [row["accuracy"] for row in rows if row["accuracy"] is not None]
-    return {"version": "p7-walk-forward-v1", "folds": rows,
+    return {"version": WALK_FORWARD_MODEL_VERSION, "folds": rows,
             "averageAuc": float(np.mean(aucs)) if aucs else None,
             "averageAccuracy": float(np.mean(accuracies)) if accuracies else None,
             "warnings": [] if aucs else ["没有足够成熟样本完成 walk-forward"]}
@@ -64,6 +76,7 @@ def train_score_baseline(
     *,
     label_column: str = "p20_executable_return",
     train_until: date | None = None,
+    test_until: date | None = None,
 ) -> dict[str, Any]:
     base = {"version": BASELINE_MODEL_VERSION, "labelColumn": label_column,
             "status": "insufficient_data", "trainCount": 0, "testCount": 0,
@@ -91,10 +104,17 @@ def train_score_baseline(
     if train_until is None:
         base["warnings"] = ["没有可用成熟样本"]
         return base
-    train, test = merged.loc[merged["date"] <= train_until], merged.loc[merged["date"] > train_until]
+    evaluation_end = test_until or merged["date"].max()
+    train = merged.loc[merged["date"] <= train_until]
+    test = merged.loc[
+        (merged["date"] > train_until) & (merged["date"] <= evaluation_end)
+    ]
     if "label_maturity_date" in train:
         maturity = pd.to_datetime(train["label_maturity_date"], errors="coerce").dt.date
         train = train.loc[maturity <= train_until]
+    if "label_maturity_date" in test:
+        maturity = pd.to_datetime(test["label_maturity_date"], errors="coerce").dt.date
+        test = test.loc[maturity <= evaluation_end]
     base["trainCount"], base["testCount"] = int(len(train)), int(len(test))
     if len(train) < 20 or len(test) < 5:
         base["warnings"] = ["训练集至少 20 条、测试集至少 5 条"]
@@ -122,4 +142,5 @@ def train_score_baseline(
             "testPositiveRate": float(yt.mean()), "accuracy": accuracy,
             "auc": auc,
             "intercept": float(intercept), "coefficient": float(coefficient),
-            "trainUntil": train_until, "warnings": warnings}
+            "trainUntil": train_until, "testUntil": evaluation_end,
+            "warnings": warnings}

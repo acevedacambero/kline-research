@@ -148,13 +148,15 @@ def test_walk_forward_returns_multiple_time_folds():
     labels = label_rows(80)
     labels["label_maturity_date"] = labels["signal_date"]
     result = walk_forward_score_baseline(score_rows(80), labels, folds=3)
-    assert result["version"] == "p7-walk-forward-v1"
+    assert result["version"] == "p7-walk-forward-v2-nonoverlap"
     assert len(result["folds"]) == 3
+    assert result["folds"][0]["testUntil"] == result["folds"][1]["trainUntil"]
+    assert result["folds"][1]["testUntil"] == result["folds"][2]["trainUntil"]
 
 
 def test_top_score_portfolio_reports_excess_return():
     result = validate_top_score_portfolio(score_rows(20), label_rows(20), top_fraction=0.2)
-    assert result["version"] == "p8-top-score-portfolio-v1"
+    assert result["version"] == "p8-top-score-portfolio-v2-executable"
     assert result["selectedCount"] > 0
     assert result["tradingDayCount"] == 20
     assert result["maxDrawdown"] is None
