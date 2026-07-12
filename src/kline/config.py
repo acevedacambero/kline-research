@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     download_workers: int = 8
     history_backfill_min_days: int = Field(default=250, ge=1)
     history_backfill_freshness_days: int = Field(default=10, ge=1)
+    research_freshness_min_coverage: float = Field(default=0.95, ge=0, le=1)
     frontend_dist_path: Path | None = None
     cloudflare_access_required: bool = False
     cloudflare_access_team_domain: str = ""
@@ -45,4 +46,5 @@ VERSIONS = {
     "marketRegimeDefinitionVersion": "not-applicable",
     "transactionCostVersion": "p8-flat-bps-v1",
     "slippageModelVersion": "p8-flat-slippage-bps-v1",
+    "researchReadinessVersion": "research-gate-v2-coverage",
 }

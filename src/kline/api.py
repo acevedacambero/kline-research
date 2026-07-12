@@ -531,6 +531,8 @@ def dataframe_records(frame: pd.DataFrame) -> list[dict]:
 def build_research_readiness(
     provider: dict, quality: dict, labels: dict, features: dict
 ) -> dict:
+    freshness_coverage = float(quality.get("freshnessCoverage", 0.0))
+    minimum_coverage = float(quality.get("freshnessMinCoverage", 1.0))
     checks = {
         "providerGate": bool(provider.get("report", {}).get("passed"))
         if provider.get("report") else False,
@@ -538,7 +540,7 @@ def build_research_readiness(
         "marketDataReadable": int(quality.get("unreadableSecurities", 0)) == 0,
         "marketDataFresh": (
             int(quality.get("totalCached", 0)) > 0
-            and int(quality.get("staleSecurities", 0)) == 0
+            and freshness_coverage >= minimum_coverage
         ),
         "labelsAvailable": int(labels.get("files", 0)) > 0,
         "labelsCurrent": (
@@ -568,6 +570,9 @@ def build_research_readiness(
         )),
         "checks": checks,
         "blockers": blockers,
+        "freshnessCoverage": freshness_coverage,
+        "freshnessMinCoverage": minimum_coverage,
+        "version": VERSIONS["researchReadinessVersion"],
     }
 
 
@@ -989,7 +994,8 @@ def create_app(
             if time.monotonic() >= float(freshness_quality_cache["expires"]):
                 coverage: list[dict[str, object]] = []
                 unreadable: list[str] = []
-                for item in pipeline.cached_securities():
+                cached_items = pipeline.cached_securities()
+                for item in cached_items:
                     path = Path(item["derived_path"])
                     security = f'{item["exchange"]}{item["code"]}'
                     try:
@@ -1022,6 +1028,11 @@ def create_app(
                     "latestDataDate": market_latest.isoformat() if market_latest else None,
                     "freshSecurities": len(coverage) - len(stale),
                     "staleSecurities": len(stale),
+                    "freshnessCoverage": (
+                        (len(coverage) - len(stale)) / len(cached_items)
+                        if cached_items else 0.0
+                    ),
+                    "freshnessMinCoverage": settings.research_freshness_min_coverage,
                     "freshnessThresholdDays": threshold,
                     "staleExamples": [
                         {**item, "latestDate": item["latestDate"].isoformat()}

@@ -56,7 +56,8 @@ def test_research_readiness_separates_refresh_audit_and_model_gates():
         {"report": {"passed": False}},
         {
             "totalCached": 100, "unreadableSecurities": 0,
-            "staleSecurities": 0,
+            "staleSecurities": 0, "freshnessCoverage": 1,
+            "freshnessMinCoverage": 0.95,
         },
         {"files": 100, "staleFiles": 0},
         {"ready": True},
@@ -74,7 +75,8 @@ def test_research_readiness_blocks_model_for_stale_labels_and_features():
         {"report": {"passed": True}},
         {
             "totalCached": 10, "unreadableSecurities": 0,
-            "staleSecurities": 0,
+            "staleSecurities": 0, "freshnessCoverage": 1,
+            "freshnessMinCoverage": 0.95,
         },
         {"files": 10, "staleFiles": 2},
         {"ready": False},
@@ -85,6 +87,23 @@ def test_research_readiness_blocks_model_for_stale_labels_and_features():
     assert result["readyForModel"] is False
     assert "存在旧版本 P1 标签" in result["blockers"]
     assert "P2 特征覆盖尚未达到训练门槛" in result["blockers"]
+
+
+def test_research_readiness_allows_small_stale_tail_at_coverage_threshold():
+    result = build_research_readiness(
+        {"report": {"passed": True}},
+        {
+            "totalCached": 100, "unreadableSecurities": 0,
+            "staleSecurities": 5, "freshnessCoverage": 0.95,
+            "freshnessMinCoverage": 0.95,
+        },
+        {"files": 100, "staleFiles": 0},
+        {"ready": True},
+    )
+
+    assert result["checks"]["marketDataFresh"] is True
+    assert result["readyForModel"] is True
+    assert result["version"] == "research-gate-v2-coverage"
 
 
 def test_feature_build_resumes_interrupted_task_with_same_id(tmp_path):
@@ -634,6 +653,8 @@ def test_quality_reports_market_relative_data_freshness(tmp_path, monkeypatch):
     assert body["latestDataDate"] == "2026-07-11"
     assert body["freshSecurities"] == 1
     assert body["staleSecurities"] == 1
+    assert body["freshnessCoverage"] == pytest.approx(0.5)
+    assert body["freshnessMinCoverage"] == pytest.approx(0.95)
     assert body["staleExamples"] == [
         {"security": "sh600001", "latestDate": "2026-06-21"}
     ]
