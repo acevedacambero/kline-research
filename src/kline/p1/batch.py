@@ -7,6 +7,8 @@ from typing import Any, Iterable
 
 import pandas as pd
 
+from ..storage import atomic_write_parquet
+
 from .core import (
     compute_drawdown_label,
     compute_forward_labels,
@@ -54,7 +56,7 @@ class LabelDatasetStore:
             / f"{code}.parquet"
         )
         path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(rows).to_parquet(path, index=False)
+        atomic_write_parquet(pd.DataFrame(rows), path)
         return LabelStoreReport("written", str(path), len(rows))
 
 

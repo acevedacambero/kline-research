@@ -11,6 +11,8 @@ from typing import Iterator
 import duckdb
 import pandas as pd
 
+from ..storage import atomic_write_parquet
+
 from .adjustment import DerivedAdjustmentEngine
 
 
@@ -70,7 +72,7 @@ class DatasetPipeline:
 
     def save_security_master(self, securities: list[dict[str, str]]) -> None:
         self.security_master_path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame(securities).to_parquet(self.security_master_path, index=False)
+        atomic_write_parquet(pd.DataFrame(securities), self.security_master_path)
 
     def load_security_master(self) -> list[dict[str, str]]:
         if not self.security_master_path.exists():
@@ -151,9 +153,9 @@ class DatasetPipeline:
                     str(factor_path), snapshot_version
                 )
             raw_path.parent.mkdir(parents=True, exist_ok=True)
-            raw.to_parquet(raw_path, index=False)
+            atomic_write_parquet(raw, raw_path)
             factor_path.parent.mkdir(parents=True, exist_ok=True)
-            factors.to_parquet(factor_path, index=False)
+            atomic_write_parquet(factors, factor_path)
             try:
                 normalized = DerivedAdjustmentEngine().derive(raw, factors)
             except ValueError as exc:
@@ -174,7 +176,7 @@ class DatasetPipeline:
             for length in (5, 10, 20, 60):
                 normalized[f"ma{length}"] = normalized["close_qfq"].rolling(length).mean().round(6)
             normalized_path.parent.mkdir(parents=True, exist_ok=True)
-            normalized.to_parquet(normalized_path, index=False)
+            atomic_write_parquet(normalized, normalized_path)
             connection.execute(
                 """
                 insert into dataset_manifest(

@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable
 import pandas as pd
 
 from kline.config import VERSIONS
+from kline.storage import atomic_write_parquet, atomic_write_text
 
 from .core import FEATURE_DEFINITION_VERSION, compute_daily_features
 
@@ -61,7 +62,7 @@ class FeatureDatasetStore:
             return FeatureStoreReport("reused", str(path), str(manifest_path), len(frame))
 
         root.mkdir(parents=True, exist_ok=True)
-        frame.to_parquet(path, index=False)
+        atomic_write_parquet(frame, path)
         missing_rates = {
             column: round(float(frame[column].isna().mean()), 8)
             for column in frame.columns
@@ -82,8 +83,8 @@ class FeatureDatasetStore:
                 if "is_approx" in frame else None
             ),
         }
-        manifest_path.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        atomic_write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), manifest_path
         )
         return FeatureStoreReport("written", str(path), str(manifest_path), len(frame))
 
