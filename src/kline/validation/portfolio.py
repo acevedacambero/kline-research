@@ -17,15 +17,16 @@ def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.D
         base["warnings"] = ["缺少评分或标签字段"]
         return base
     sf["date"] = pd.to_datetime(sf["date"]).dt.date
+    available_as_of = sf["date"].max()
     lf["signal_date"] = pd.to_datetime(lf["signal_date"]).dt.date
     merged = sf.merge(lf, left_on=["exchange", "code", "date"], right_on=["exchange", "code", "signal_date"])
     if "usable" in merged:
         merged = merged.loc[merged["usable"].fillna(False).astype(bool)]
-    if as_of_date is not None:
-        merged = merged.loc[merged["date"] <= as_of_date]
-        if "label_maturity_date" in merged:
-            maturity = pd.to_datetime(merged["label_maturity_date"], errors="coerce").dt.date
-            merged = merged.loc[maturity <= as_of_date]
+    effective_as_of = as_of_date or available_as_of
+    merged = merged.loc[merged["date"] <= effective_as_of]
+    if "label_maturity_date" in merged:
+        maturity = pd.to_datetime(merged["label_maturity_date"], errors="coerce").dt.date
+        merged = merged.loc[maturity <= effective_as_of]
     merged["score"] = pd.to_numeric(merged["score"], errors="coerce")
     merged[label_column] = pd.to_numeric(merged[label_column], errors="coerce")
     merged = merged.dropna(subset=["score", label_column])

@@ -91,6 +91,7 @@ def train_score_baseline(
         base["warnings"] = [f"缺少字段: {', '.join(missing)}"]
         return base
     sf["date"] = pd.to_datetime(sf["date"]).dt.date
+    available_as_of = sf["date"].max()
     lf["signal_date"] = pd.to_datetime(lf["signal_date"]).dt.date
     merged = sf.merge(lf, left_on=["exchange", "code", "date"], right_on=["exchange", "code", "signal_date"])
     if "usable" in merged:
@@ -104,7 +105,7 @@ def train_score_baseline(
     if train_until is None:
         base["warnings"] = ["没有可用成熟样本"]
         return base
-    evaluation_end = test_until or merged["date"].max()
+    evaluation_end = test_until or available_as_of
     train = merged.loc[merged["date"] <= train_until]
     test = merged.loc[
         (merged["date"] > train_until) & (merged["date"] <= evaluation_end)

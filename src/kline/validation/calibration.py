@@ -37,6 +37,7 @@ def calibrate_score(
     if missing:
         return base
     score_frame["date"] = pd.to_datetime(score_frame["date"]).dt.date
+    available_as_of = score_frame["date"].max()
     label_frame["signal_date"] = pd.to_datetime(label_frame["signal_date"]).dt.date
     score_frame["score"] = pd.to_numeric(score_frame["score"], errors="coerce")
     label_frame[label_column] = pd.to_numeric(label_frame[label_column], errors="coerce")
@@ -47,8 +48,10 @@ def calibrate_score(
         mask = ~merged["usable"].fillna(False).astype(bool)
         dropped["unusable"] = int(mask.sum())
         merged = merged.loc[~mask].copy()
-    if as_of_date is not None and "label_maturity_date" in merged:
-        mask = pd.to_datetime(merged["label_maturity_date"]).dt.date > as_of_date
+    effective_as_of = as_of_date or available_as_of
+    merged = merged.loc[merged["date"] <= effective_as_of].copy()
+    if "label_maturity_date" in merged:
+        mask = pd.to_datetime(merged["label_maturity_date"]).dt.date > effective_as_of
         dropped["immature"] = int(mask.sum())
         merged = merged.loc[~mask].copy()
     if merged.empty:

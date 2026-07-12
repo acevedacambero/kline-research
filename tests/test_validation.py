@@ -42,6 +42,12 @@ def label_rows(count: int = 20) -> pd.DataFrame:
     )
 
 
+def mature_label_rows(count: int = 20) -> pd.DataFrame:
+    labels = label_rows(count)
+    labels["label_maturity_date"] = labels["signal_date"]
+    return labels
+
+
 def test_single_factor_validation_buckets_scores_against_mature_labels():
     result = validate_single_factor(
         score_rows(),
@@ -155,7 +161,7 @@ def test_walk_forward_returns_multiple_time_folds():
 
 
 def test_top_score_portfolio_reports_excess_return():
-    result = validate_top_score_portfolio(score_rows(20), label_rows(20), top_fraction=0.2)
+    result = validate_top_score_portfolio(score_rows(20), mature_label_rows(20), top_fraction=0.2)
     assert result["version"] == "p8-top-score-portfolio-v2-executable"
     assert result["selectedCount"] > 0
     assert result["tradingDayCount"] == 20
@@ -165,7 +171,7 @@ def test_top_score_portfolio_reports_excess_return():
 
 
 def test_delayed_exit_portfolio_does_not_claim_exit_delay_is_ignored():
-    labels = label_rows(20).rename(
+    labels = mature_label_rows(20).rename(
         columns={"p20_executable_return": "p20_delayed_executable_return"}
     )
     result = validate_top_score_portfolio(
@@ -175,7 +181,7 @@ def test_delayed_exit_portfolio_does_not_claim_exit_delay_is_ignored():
 
 
 def test_top_score_portfolio_warns_on_small_selection():
-    result = validate_top_score_portfolio(score_rows(5), label_rows(5), top_fraction=0.2)
+    result = validate_top_score_portfolio(score_rows(5), mature_label_rows(5), top_fraction=0.2)
     assert any("少于 20" in warning for warning in result["warnings"])
 
 
@@ -186,9 +192,24 @@ def test_portfolio_excludes_labels_immature_at_as_of_date():
     assert result["sampleCount"] == 0
 
 
+def test_validations_default_to_latest_available_score_date_for_maturity():
+    scores = score_rows(40)
+    labels = label_rows(20)
+
+    single = validate_single_factor(
+        scores, labels, factor_column="score", label_column="p20_executable_return"
+    )
+    calibration = calibrate_score(scores, labels)
+    portfolio = validate_top_score_portfolio(scores, labels)
+
+    assert single["sampleCount"] == 10
+    assert calibration["sampleCount"] == 10
+    assert portfolio["sampleCount"] == 10
+
+
 def test_non_overlapping_portfolio_computes_drawdown():
     result = validate_top_score_portfolio(
-        score_rows(40), label_rows(40), non_overlapping=True
+        score_rows(40), mature_label_rows(40), non_overlapping=True
     )
     assert result["nonOverlapping"] is True
     assert result["tradingDayCount"] == 2

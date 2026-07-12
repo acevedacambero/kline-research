@@ -24,6 +24,7 @@ def train_multifeature_baseline(scores: pd.DataFrame | list[dict], labels: pd.Da
         base["warnings"] = ["缺少标签字段"]
         return base
     sf["date"] = pd.to_datetime(sf["date"]).dt.date
+    available_as_of = sf["date"].max()
     ff["date"] = pd.to_datetime(ff["date"]).dt.date
     lf["signal_date"] = pd.to_datetime(lf["signal_date"]).dt.date
     merged = sf.merge(ff, on=["exchange", "code", "date"], suffixes=("", "_feature"))
@@ -47,6 +48,10 @@ def train_multifeature_baseline(scores: pd.DataFrame | list[dict], labels: pd.Da
     if "label_maturity_date" in train:
         maturity = pd.to_datetime(train["label_maturity_date"], errors="coerce").dt.date
         train = train.loc[maturity <= train_until]
+    if "label_maturity_date" in test:
+        evaluation_end = available_as_of
+        maturity = pd.to_datetime(test["label_maturity_date"], errors="coerce").dt.date
+        test = test.loc[maturity <= evaluation_end]
     base["trainCount"] = int(len(train))
     base["testCount"] = int(len(test))
     if len(train) < 30 or len(test) < 10:

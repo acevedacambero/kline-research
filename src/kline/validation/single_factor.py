@@ -67,6 +67,7 @@ def validate_single_factor(
         )
 
     score_frame["date"] = pd.to_datetime(score_frame["date"]).dt.date
+    available_as_of = score_frame["date"].max()
     label_frame["signal_date"] = pd.to_datetime(label_frame["signal_date"]).dt.date
     score_frame[factor_column] = pd.to_numeric(
         score_frame[factor_column], errors="coerce"
@@ -88,9 +89,11 @@ def validate_single_factor(
         unusable = ~merged["usable"].fillna(False).astype(bool)
         dropped["unusable"] = int(unusable.sum())
         merged = merged.loc[~unusable].copy()
-    if as_of_date is not None and "label_maturity_date" in merged:
+    effective_as_of = as_of_date or available_as_of
+    merged = merged.loc[merged["date"] <= effective_as_of].copy()
+    if "label_maturity_date" in merged:
         maturity = pd.to_datetime(merged["label_maturity_date"]).dt.date
-        immature = maturity > as_of_date
+        immature = maturity > effective_as_of
         dropped["immature"] = int(immature.sum())
         merged = merged.loc[~immature].copy()
 
