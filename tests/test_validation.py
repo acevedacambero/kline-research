@@ -192,6 +192,14 @@ def test_walk_forward_cutoffs_follow_mature_label_dates_not_future_scores():
     assert result["folds"][-1]["testUntil"] <= labels["signal_date"].max()
 
 
+def test_walk_forward_windows_allow_long_horizon_labels_to_mature():
+    labels = label_rows(365)
+    labels["label_maturity_date"] = labels["signal_date"] + pd.to_timedelta(60, unit="D")
+    result = walk_forward_score_baseline(score_rows(365), labels, folds=3)
+
+    assert all(fold["testCount"] > 0 for fold in result["folds"])
+
+
 def test_top_score_portfolio_reports_excess_return():
     result = validate_top_score_portfolio(score_rows(20), mature_label_rows(20), top_fraction=0.2)
     assert result["version"] == "p8-top-score-portfolio-v3-equity"

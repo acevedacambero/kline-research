@@ -58,7 +58,9 @@ def walk_forward_score_baseline(
     fold_count = max(2, min(5, int(folds)))
     cutoffs = []
     for index in range(fold_count):
-        position = int(len(dates) * (0.5 + index * 0.3 / max(1, fold_count - 1)))
+        # Reserve wide forward windows so long-horizon labels can mature inside
+        # each fold instead of being excluded by the anti-leakage cutoff.
+        position = int(len(dates) * (0.2 + index * 0.5 / max(1, fold_count - 1)))
         if dates:
             cutoffs.append(dates[min(len(dates) - 1, position)])
     rows = []
