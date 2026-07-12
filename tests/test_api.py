@@ -441,7 +441,7 @@ def test_score_calibration_api_reads_local_files(tmp_path):
     pd.DataFrame([{"exchange": "sh", "code": "600000", "signal_date": d, "p20_executable_return": -0.1 + i * 0.1, "label_maturity_date": date(2024, 3, 1)} for i, d in enumerate(dates)]).to_parquet(label_dir / "600000.parquet", index=False)
     response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post("/api/validation/calibration", json={"buckets": 2, "as_of_date": "2024-03-01"})
     assert response.status_code == 200
-    assert response.json()["version"] == "p5-score-calibration-v2-confidence"
+    assert response.json()["version"] == "p5-score-calibration-v3-quality"
 
 
 def test_p3_scan_returns_latest_usable_scores(tmp_path):

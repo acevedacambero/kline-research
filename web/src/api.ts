@@ -49,7 +49,7 @@ export type SingleFactorValidation = {
   missingColumns: string[]; dropped: Record<string, number>;
 }
 export type CalibrationBucket = { bucket: number; count: number; minScore: number; maxScore: number; avgScore: number; observedProbability: number; observedProbabilityInterval?: ConfidenceInterval | null; avgLabel: number; avgLabelInterval?: ConfidenceInterval | null }
-export type ScoreCalibration = { version: string; labelColumn: string; bucketCount: number; sampleCount: number; buckets: CalibrationBucket[]; missingColumns: string[]; dropped: Record<string, number>; reliability: { status: string; warnings: string[] } }
+export type ScoreCalibration = { version: string; labelColumn: string; bucketCount: number; sampleCount: number; buckets: CalibrationBucket[]; missingColumns: string[]; dropped: Record<string, number>; reliability: { status: string; warnings: string[] }; quality: { brierScore?: number | null; logLoss?: number | null; expectedCalibrationError?: number | null } }
 export type ScanRow = { exchange: string; code: string; date: string; score: number; grade?: string | null }
 export type ScanResult = { version: string; asOfDate?: string | null; exchange?: string | null; minScore: number; scannedCount: number; truncated: boolean; rows: ScanRow[] }
 export type BaselineModel = { version: string; labelColumn: string; status: string; trainCount: number; testCount: number; positiveRate?: number | null; testPositiveRate?: number | null; accuracy?: number | null; auc?: number | null; intercept?: number | null; coefficient?: number | null; trainUntil?: string | null; warnings: string[] }

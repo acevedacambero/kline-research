@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from .statistics import bootstrap_interval
 
 
-CALIBRATION_DEFINITION_VERSION = "p5-score-calibration-v2-confidence"
+CALIBRATION_DEFINITION_VERSION = "p5-score-calibration-v3-quality"
 
 
 def calibrate_score(
@@ -35,6 +36,7 @@ def calibrate_score(
         "missingColumns": missing,
         "dropped": {"unusable": 0, "immature": 0, "missing": 0},
         "reliability": {"status": "insufficient_sample", "warnings": ["暂无可用成熟样本"]},
+        "quality": {"brierScore": None, "logLoss": None, "expectedCalibrationError": None},
     }
     if missing:
         return base
@@ -88,8 +90,26 @@ def calibrate_score(
         warnings.append("样本少于 30，概率仅供探索")
     if not monotonic:
         warnings.append("分桶胜率非单调，暂不视为可靠校准")
+    outcomes = (merged[label_column] > 0).astype(float).to_numpy()
+    predicted = np.clip(merged["score"].to_numpy(float) / 100, 1e-6, 1 - 1e-6)
+    brier_score = float(np.mean((predicted - outcomes) ** 2))
+    log_loss = float(-np.mean(
+        outcomes * np.log(predicted) + (1 - outcomes) * np.log(1 - predicted)
+    ))
+    expected_calibration_error = float(sum(
+        row["count"] / len(merged)
+        * abs(row["avgScore"] / 100 - row["observedProbability"])
+        for row in rows
+    ))
+    if expected_calibration_error > 0.1:
+        warnings.append("ECE 高于 0.10，分数不能直接视为可靠概率")
     reliability = {"status": "usable" if len(merged) >= 30 and monotonic else "review",
                    "warnings": warnings}
     return {**base, "bucketCount": actual, "sampleCount": int(len(merged)),
             "buckets": rows, "missingColumns": [], "dropped": dropped,
-            "reliability": reliability}
+            "reliability": reliability,
+            "quality": {
+                "brierScore": brier_score,
+                "logLoss": log_loss,
+                "expectedCalibrationError": expected_calibration_error,
+            }}

@@ -108,7 +108,7 @@ def test_single_factor_validation_reports_missing_columns():
 
 def test_score_calibration_buckets_observed_positive_probability():
     result = calibrate_score(score_rows(), label_rows(), buckets=4, as_of_date=date(2024, 3, 1))
-    assert result["version"] == "p5-score-calibration-v2-confidence"
+    assert result["version"] == "p5-score-calibration-v3-quality"
     assert result["sampleCount"] == 20
     assert len(result["buckets"]) == 4
     assert result["buckets"][0]["observedProbability"] < result["buckets"][-1]["observedProbability"]
@@ -116,6 +116,9 @@ def test_score_calibration_buckets_observed_positive_probability():
     assert result["reliability"]["warnings"]
     assert result["buckets"][0]["observedProbabilityInterval"]["confidence"] == 0.95
     assert result["buckets"][0]["avgLabelInterval"]["lower"] <= result["buckets"][0]["avgLabel"]
+    assert 0 <= result["quality"]["brierScore"] <= 1
+    assert result["quality"]["logLoss"] > 0
+    assert 0 <= result["quality"]["expectedCalibrationError"] <= 1
 
 
 def test_score_baseline_trains_time_split_model():
