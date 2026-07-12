@@ -1325,8 +1325,31 @@ def create_app(
             result = result.drop_duplicates(unique_keys, keep="last")
         return result
 
+    def require_readable_artifacts(**artifacts: dict) -> None:
+        failures = [
+            {
+                "artifact": name,
+                "unreadableFiles": int(status.get("unreadableFiles", 0)),
+                "examples": list(status.get("unreadableExamples", []))[:5],
+            }
+            for name, status in artifacts.items()
+            if int(status.get("unreadableFiles", 0)) > 0
+        ]
+        if failures:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "RESEARCH_ARTIFACT_UNREADABLE",
+                    "message": "研究数据包含不可读文件，请先重建对应数据层",
+                    "artifacts": failures,
+                },
+            )
+
     @app.post("/api/validation/single-factor")
     def single_factor_validation(request: SingleFactorValidationRequest):
+        require_readable_artifacts(
+            labels=label_dataset_status(), scores=score_dataset_status()
+        )
         scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", request.factor_column, "usable"])
         labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date", "path_success_p20", "max_drawdown_p20"])
         return validate_single_factor(
@@ -1340,6 +1363,9 @@ def create_app(
 
     @app.post("/api/validation/calibration")
     def score_calibration(request: CalibrationRequest):
+        require_readable_artifacts(
+            labels=label_dataset_status(), scores=score_dataset_status()
+        )
         scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
         labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
         return calibrate_score(scores, labels, label_column=request.label_column,
@@ -1347,6 +1373,7 @@ def create_app(
 
     @app.post("/api/scan/p3")
     def scan_p3(request: ScanRequest):
+        require_readable_artifacts(scores=score_dataset_status())
         scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "grade", "usable"])
         if scores.empty:
             return {"version": SCORE_DEFINITION_VERSION, "asOfDate": request.as_of_date,
@@ -1378,6 +1405,9 @@ def create_app(
 
     @app.post("/api/model/p7/baseline")
     def p7_baseline(request: BaselineModelRequest):
+        require_readable_artifacts(
+            labels=label_dataset_status(), scores=score_dataset_status()
+        )
         scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
         labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
         return train_score_baseline(scores, labels, label_column=request.label_column,
@@ -1488,6 +1518,10 @@ def create_app(
 
     @app.post("/api/model/p7/multifeature")
     def p7_multifeature(request: BaselineModelRequest):
+        require_readable_artifacts(
+            labels=label_dataset_status(), features=p7_feature_catalog(),
+            scores=score_dataset_status(),
+        )
         scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
         labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
         features = read_dataset_glob("data-foundation-v1/features/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"])
@@ -1497,6 +1531,9 @@ def create_app(
 
     @app.post("/api/model/p7/walk-forward")
     def p7_walk_forward(request: WalkForwardRequest):
+        require_readable_artifacts(
+            labels=label_dataset_status(), scores=score_dataset_status()
+        )
         scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
         labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
         return walk_forward_score_baseline(scores, labels,
@@ -1505,6 +1542,9 @@ def create_app(
 
     @app.post("/api/validation/portfolio")
     def portfolio_validation(request: PortfolioValidationRequest):
+        require_readable_artifacts(
+            labels=label_dataset_status(), scores=score_dataset_status()
+        )
         scores = read_dataset_glob("data-foundation-v1/scores/*/*/*/*.parquet", ["exchange", "code", "date"], ["exchange", "code", "date", "score", "usable"])
         labels = read_dataset_glob("data-foundation-v1/labels/*/*/*.parquet", ["exchange", "code", "signal_date"], ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"])
         return validate_top_score_portfolio(scores, labels, label_column=request.label_column,

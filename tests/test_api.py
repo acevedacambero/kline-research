@@ -544,6 +544,46 @@ def test_score_status_reports_current_and_unreadable_files(tmp_path):
     assert response.json()["ready"] is False
 
 
+def test_research_endpoint_rejects_unreadable_score_artifact(tmp_path):
+    path = tmp_path / "data" / "data-foundation-v1" / "scores" / "v1" / "identity" / "sh"
+    path.mkdir(parents=True)
+    (path / "600000.parquet").write_bytes(b"not-a-parquet-file")
+    client = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource()))
+
+    response = client.post("/api/scan/p3", json={})
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "RESEARCH_ARTIFACT_UNREADABLE"
+    assert response.json()["detail"]["artifacts"][0]["artifact"] == "scores"
+    assert "600000.parquet" in response.json()["detail"]["artifacts"][0]["examples"][0]
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/api/validation/single-factor", {}),
+        ("/api/validation/calibration", {}),
+        ("/api/model/p7/baseline", {}),
+        ("/api/model/p7/multifeature", {}),
+        ("/api/model/p7/walk-forward", {}),
+        ("/api/validation/portfolio", {}),
+    ],
+)
+def test_all_research_endpoints_share_artifact_readability_gate(tmp_path, path, body):
+    score_path = (
+        tmp_path / "data" / "data-foundation-v1" / "scores" / "v1"
+        / "identity" / "sh" / "600000.parquet"
+    )
+    score_path.parent.mkdir(parents=True)
+    score_path.write_bytes(b"not-a-parquet-file")
+    client = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource()))
+
+    response = client.post(path, json=body)
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "RESEARCH_ARTIFACT_UNREADABLE"
+
+
 def test_score_status_caches_parquet_metadata_scan(tmp_path, monkeypatch):
     path = tmp_path / "data" / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
     path.mkdir(parents=True)
