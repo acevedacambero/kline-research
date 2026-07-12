@@ -199,6 +199,10 @@ export function App() {
         const task = await api.taskStatus(result.taskId)
         showTask(quick ? '数据源快速诊断' : '数据源上线 Gate', result.taskId, task)
         if (task.status === 'queued' || task.status === 'running') window.setTimeout(poll, 1000)
+        else if (task.status !== 'completed' && task.status !== 'completed_with_errors') {
+          setBusy(false)
+          setMessage(`数据源探测失败：${task.errors.map(taskErrorText).join('；') || task.status}`)
+        }
         else {
           const latest = await api.providerGate(); setProviderGate(latest); setBusy(false)
           setMessage(quick ? '快速诊断完成（正式 Gate 结论保持不变）' : latest.report?.passed ? '数据源上线 Gate 已通过' : `上线 Gate 未通过：${latest.report?.reasons.join('；') || '请查看任务错误'}`)

@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 import time
 
 import pandas as pd
@@ -71,8 +71,9 @@ def test_research_readiness_separates_refresh_audit_and_model_gates():
 
 
 def test_research_readiness_blocks_model_for_stale_labels_and_features():
+    now = datetime(2026, 7, 12, 12, tzinfo=timezone.utc)
     result = build_research_readiness(
-        {"report": {"passed": True}},
+        {"report": {"passed": True, "probedAt": "2026-07-12T11:00:00+00:00"}},
         {
             "totalCached": 10, "unreadableSecurities": 0,
             "staleSecurities": 0, "freshnessCoverage": 1,
@@ -80,6 +81,7 @@ def test_research_readiness_blocks_model_for_stale_labels_and_features():
         },
         {"files": 10, "staleFiles": 2},
         {"ready": False},
+        now=now,
     )
 
     assert result["readyForRefresh"] is True
@@ -90,8 +92,9 @@ def test_research_readiness_blocks_model_for_stale_labels_and_features():
 
 
 def test_research_readiness_allows_small_stale_tail_at_coverage_threshold():
+    now = datetime(2026, 7, 12, 12, tzinfo=timezone.utc)
     result = build_research_readiness(
-        {"report": {"passed": True}},
+        {"report": {"passed": True, "probedAt": "2026-07-12T11:00:00+00:00"}},
         {
             "totalCached": 100, "unreadableSecurities": 0,
             "staleSecurities": 5, "freshnessCoverage": 0.95,
@@ -99,11 +102,34 @@ def test_research_readiness_allows_small_stale_tail_at_coverage_threshold():
         },
         {"files": 100, "staleFiles": 0},
         {"ready": True},
+        now=now,
     )
 
     assert result["checks"]["marketDataFresh"] is True
     assert result["readyForModel"] is True
-    assert result["version"] == "research-gate-v2-coverage"
+    assert result["version"] == "research-gate-v3-provider-expiry"
+
+
+def test_research_readiness_expires_old_provider_gate():
+    result = build_research_readiness(
+        {
+            "report": {"passed": True, "probedAt": "2026-07-10T10:00:00+00:00"},
+            "maxAgeHours": 24,
+        },
+        {
+            "totalCached": 1, "unreadableSecurities": 0,
+            "freshnessCoverage": 1, "freshnessMinCoverage": 0.95,
+        },
+        {"files": 1, "staleFiles": 0},
+        {"ready": True},
+        now=datetime(2026, 7, 12, 12, tzinfo=timezone.utc),
+    )
+
+    assert result["checks"]["providerGate"] is True
+    assert result["checks"]["providerGateFresh"] is False
+    assert result["readyForRefresh"] is False
+    assert result["providerGateAgeHours"] == 50
+    assert result["blockers"] == ["数据源上线 Gate 已过期，请重新执行"]
 
 
 def test_feature_build_resumes_interrupted_task_with_same_id(tmp_path):
@@ -152,6 +178,7 @@ def test_provider_gate_probe_is_persisted_and_queryable(tmp_path):
         with TestClient(app) as client:
             assert client.get("/api/system/provider-gate").json() == {
                 "available": False, "report": None,
+                "maxAgeHours": 24,
                 "diagnosticAvailable": False, "diagnostic": None,
             }
             submitted = client.post("/api/system/provider-gate/probe?quick=true")

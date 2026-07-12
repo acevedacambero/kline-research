@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Literal
 import json
@@ -530,13 +530,28 @@ def dataframe_records(frame: pd.DataFrame) -> list[dict]:
 
 
 def build_research_readiness(
-    provider: dict, quality: dict, labels: dict, features: dict
+    provider: dict, quality: dict, labels: dict, features: dict,
+    *, now: datetime | None = None,
 ) -> dict:
+    now = now or datetime.now(timezone.utc)
+    provider_report = provider.get("report") or {}
+    probed_at = provider_report.get("probedAt")
+    try:
+        provider_age_hours = max(
+            0.0,
+            (now - datetime.fromisoformat(str(probed_at)).astimezone(timezone.utc)).total_seconds()
+            / 3600,
+        )
+    except (TypeError, ValueError):
+        provider_age_hours = None
+    provider_max_age = float(provider.get("maxAgeHours", 24))
     freshness_coverage = float(quality.get("freshnessCoverage", 0.0))
     minimum_coverage = float(quality.get("freshnessMinCoverage", 1.0))
     checks = {
-        "providerGate": bool(provider.get("report", {}).get("passed"))
-        if provider.get("report") else False,
+        "providerGate": bool(provider_report.get("passed")),
+        "providerGateFresh": (
+            provider_age_hours is not None and provider_age_hours <= provider_max_age
+        ),
         "hasMarketData": int(quality.get("totalCached", 0)) > 0,
         "marketDataReadable": int(quality.get("unreadableSecurities", 0)) == 0,
         "marketDataFresh": (
@@ -552,6 +567,7 @@ def build_research_readiness(
     }
     messages = {
         "providerGate": "尚未通过完整数据源上线 Gate",
+        "providerGateFresh": "数据源上线 Gate 已过期，请重新执行",
         "hasMarketData": "本地没有行情缓存",
         "marketDataReadable": "存在不可读行情文件",
         "marketDataFresh": "存在过期行情缓存",
@@ -559,9 +575,12 @@ def build_research_readiness(
         "labelsCurrent": "存在旧版本 P1 标签",
         "featuresReady": "P2 特征覆盖尚未达到训练门槛",
     }
-    blockers = [messages[key] for key, passed in checks.items() if not passed]
+    blockers = [
+        messages[key] for key, passed in checks.items()
+        if not passed and not (key == "providerGateFresh" and not checks["providerGate"])
+    ]
     return {
-        "readyForRefresh": checks["providerGate"],
+        "readyForRefresh": checks["providerGate"] and checks["providerGateFresh"],
         "readyForAudit": all(checks[key] for key in (
             "hasMarketData", "marketDataReadable", "marketDataFresh"
         )),
@@ -573,6 +592,8 @@ def build_research_readiness(
         "blockers": blockers,
         "freshnessCoverage": freshness_coverage,
         "freshnessMinCoverage": minimum_coverage,
+        "providerGateAgeHours": provider_age_hours,
+        "providerGateMaxAgeHours": provider_max_age,
         "version": VERSIONS["researchReadinessVersion"],
     }
 
@@ -729,6 +750,7 @@ def create_app(
         return {
             "available": report is not None,
             "report": report,
+            "maxAgeHours": settings.provider_gate_max_age_hours,
             "diagnosticAvailable": diagnostic is not None,
             "diagnostic": diagnostic,
         }

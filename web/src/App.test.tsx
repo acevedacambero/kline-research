@@ -16,6 +16,24 @@ describe('App', () => {
     expect(screen.getAllByRole('option', { name: 'P5 可执行顺延卖出' })).toHaveLength(4)
   })
 
+  it('does not reuse an old provider gate result when a new probe fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      let body: unknown = { status: 'ok', dataSource: 'AkShare', cachePath: 'data', versions: {} }
+      if (path === '/api/system/provider-gate/probe?quick=false' && init?.method === 'POST') body = { taskId: 'probe-failed', quick: false }
+      else if (path === '/api/tasks/probe-failed') body = { id: 'probe-failed', jobType: 'provider_probe', status: 'failed', done: 0, total: 1, errors: [{ message: 'network timeout' }] }
+      else if (path === '/api/system/provider-gate') body = { available: true, report: { passed: true, gateVersion: 'old' }, diagnosticAvailable: false, diagnostic: null, maxAgeHours: 24 }
+      else if (path.includes('/quality')) body = { totalCached: 0 }
+      return { ok: true, json: async () => body }
+    }))
+
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '执行数据源上线 Gate' }))
+
+    expect(await screen.findByText(/数据源探测失败：network timeout/)).toBeInTheDocument()
+    expect(screen.queryByText('数据源上线 Gate 已通过')).not.toBeInTheDocument()
+  })
+
   it('restores the most recent durable task after reload', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)

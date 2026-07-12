@@ -62,9 +62,9 @@ export type HistoryBackfillTask = {
 }
 export type GenericTask = { id: string; jobType: string; status: string; done: number; total: number; rows?: number; errors: unknown[]; currentSecurity?: string | null; speed?: number; etaSeconds?: number | null }
 export type ProviderGateReport = { gateVersion: string; passed: boolean; probedAt?: string; reasons: string[]; warnings?: string[] }
-export type ProviderGateStatus = { available: boolean; report: ProviderGateReport | null; diagnosticAvailable: boolean; diagnostic: ProviderGateReport | null }
+export type ProviderGateStatus = { available: boolean; report: ProviderGateReport | null; maxAgeHours: number; diagnosticAvailable: boolean; diagnostic: ProviderGateReport | null }
 export type DatasetQuality = { totalCached: number; featureRows: number; approximateRuleRows: number; approximateRuleRatio?: number | null; latestDataDate?: string | null; freshSecurities: number; staleSecurities: number; freshnessCoverage: number; freshnessMinCoverage: number; freshnessThresholdDays: number; staleExamples: Array<{ security: string; latestDate: string }>; unreadableSecurities: number; unreadableExamples: string[] }
-export type ResearchReadiness = { version: string; readyForRefresh: boolean; readyForAudit: boolean; readyForModel: boolean; freshnessCoverage: number; freshnessMinCoverage: number; checks: Record<string, boolean>; blockers: string[] }
+export type ResearchReadiness = { version: string; readyForRefresh: boolean; readyForAudit: boolean; readyForModel: boolean; freshnessCoverage: number; freshnessMinCoverage: number; providerGateAgeHours?: number | null; providerGateMaxAgeHours: number; checks: Record<string, boolean>; blockers: string[] }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...init })
