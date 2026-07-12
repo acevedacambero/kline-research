@@ -752,6 +752,13 @@ def create_app(
             )
         return normalized
 
+    def current_cached_keys() -> set[tuple[str, str]]:
+        return {
+            (item["exchange"], item["code"])
+            for item in pipeline.cached_securities()
+            if item["exchange"] in SUPPORTED_EXCHANGES
+        }
+
     @app.get("/api/system/health")
     def health():
         return {
@@ -857,6 +864,7 @@ def create_app(
                     and "unreadableFiles" in persisted
                     and "incompatibleFiles" in persisted
                     and "supersededFiles" in persisted
+                    and "orphanedFiles" in persisted
                 ):
                     with label_status_lock:
                         label_status_cache.update(
@@ -869,6 +877,13 @@ def create_app(
             settings.data_path.glob("data-foundation-v1/labels/*/*/*.parquet"),
             key=lambda item: item.stat().st_mtime,
         )
+        unfiltered_count = len(all_paths)
+        current_keys = current_cached_keys()
+        if current_keys:
+            all_paths = [
+                path for path in all_paths
+                if (path.parent.name, path.stem) in current_keys
+            ]
         latest_paths: dict[tuple[str, str], Path] = {}
         for path in all_paths:
             latest_paths[(path.parent.name, path.stem)] = path
@@ -923,6 +938,7 @@ def create_app(
             "currentVersion": current_version,
             "files": len(paths),
             "supersededFiles": len(all_paths) - len(paths),
+            "orphanedFiles": unfiltered_count - len(all_paths),
             "rows": rows,
             "versionCounts": version_counts,
             "compatibleFiles": compatible_files,
@@ -1353,6 +1369,13 @@ def create_app(
     ) -> pd.DataFrame:
         frames = []
         paths = sorted(settings.data_path.glob(pattern), key=lambda path: path.stat().st_mtime)
+        current_keys = current_cached_keys()
+        if current_keys:
+            paths = [
+                path for path in paths
+                if path.name.endswith(".manifest.json")
+                or (path.parent.name, path.stem) in current_keys
+            ]
         if latest_per_security:
             latest: dict[tuple[str, str], Path] = {}
             for path in paths:
@@ -1507,6 +1530,11 @@ def create_app(
             key=lambda item: item.stat().st_mtime,
         ):
             latest_paths[(path.parent.name, path.stem)] = path
+        current_keys = current_cached_keys()
+        if current_keys:
+            latest_paths = {
+                key: path for key, path in latest_paths.items() if key in current_keys
+            }
         if not latest_paths:
             result = {"version": "daily-features-v1", "featureColumns": [], "missingColumns": expected, "securityCount": 0, "rowCount": 0, "unreadableFiles": 0, "unreadableExamples": [], "ready": False}
             with feature_catalog_lock:
@@ -1544,6 +1572,12 @@ def create_app(
         paths = sorted(
             settings.data_path.glob("data-foundation-v1/scores/*/*/*/*.parquet")
         )
+        current_keys = current_cached_keys()
+        if current_keys:
+            paths = [
+                path for path in paths
+                if (path.parent.name, path.stem) in current_keys
+            ]
         rows = 0
         compatible = 0
         unreadable: list[str] = []

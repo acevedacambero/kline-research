@@ -261,6 +261,7 @@ def test_label_status_reports_stale_and_current_files(tmp_path):
         "currentVersion": "daily-v2-exit-delay",
         "files": 2,
         "supersededFiles": 0,
+        "orphanedFiles": 0,
         "rows": 2,
         "versionCounts": {"daily-v2-exit-delay": 1, "legacy-or-unknown": 1},
         "compatibleFiles": 1,
@@ -293,6 +294,29 @@ def test_label_status_uses_only_latest_snapshot_per_security(tmp_path):
 
     assert body["files"] == 1
     assert body["supersededFiles"] == 1
+    assert body["compatibleFiles"] == 1
+    assert body["staleFiles"] == 0
+
+
+def test_label_status_excludes_orphans_when_current_manifest_exists(tmp_path):
+    data_path = tmp_path / "data"
+    seed_security(data_path)
+    root = data_path / "data-foundation-v1" / "labels" / "snapshot"
+    current = root / "sh" / "600000.parquet"
+    orphan = root / "sh" / "603124.parquet"
+    current.parent.mkdir(parents=True)
+    pd.DataFrame([{
+        "label_definition_version": "daily-v2-exit-delay",
+        "p20_delayed_executable_return": 0.1,
+    }]).to_parquet(current)
+    pd.DataFrame([{"label_definition_version": "daily-v1"}]).to_parquet(orphan)
+
+    body = TestClient(
+        create_app(Settings(data_path=data_path), FakeSource())
+    ).get("/api/labels/status").json()
+
+    assert body["files"] == 1
+    assert body["orphanedFiles"] == 1
     assert body["compatibleFiles"] == 1
     assert body["staleFiles"] == 0
 

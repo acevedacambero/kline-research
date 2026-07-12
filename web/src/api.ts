@@ -1,5 +1,5 @@
 export type Health = { status: string; dataSource: string; cachePath: string; versions: Record<string, string>; recoverableTasks?: number }
-export type LabelStatus = { currentVersion: string; files: number; supersededFiles: number; rows: number; versionCounts: Record<string, number>; compatibleFiles: number; staleFiles: number; unreadableFiles: number; unreadableExamples: string[]; incompatibleFiles: number; legacyFiles: number; delayedExitReady: boolean }
+export type LabelStatus = { currentVersion: string; files: number; supersededFiles: number; orphanedFiles: number; rows: number; versionCounts: Record<string, number>; compatibleFiles: number; staleFiles: number; unreadableFiles: number; unreadableExamples: string[]; incompatibleFiles: number; legacyFiles: number; delayedExitReady: boolean }
 export type Bar = {
   date: string; open: number; high: number; low: number; close: number;
   open_qfq: number; high_qfq: number; low_qfq: number; close_qfq: number;
