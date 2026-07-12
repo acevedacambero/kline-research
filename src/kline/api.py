@@ -603,6 +603,8 @@ def create_app(
     )
     history_backfill_scan_lock = threading.Lock()
     history_backfill_candidate_count: int | None = None
+    approximate_quality_lock = threading.Lock()
+    approximate_quality_cache: dict[str, object] = {"expires": 0.0, "value": None}
     security_cache: list[dict[str, str]] | None = None
 
     def securities_list(refresh: bool = False) -> list[dict[str, str]]:
@@ -818,6 +820,39 @@ def create_app(
         with history_backfill_scan_lock:
             if history_backfill_candidate_count is None:
                 history_backfill_candidate_count = len(history_backfill_service.scan())
+        with approximate_quality_lock:
+            approximate_quality = approximate_quality_cache["value"]
+            if time.monotonic() >= float(approximate_quality_cache["expires"]):
+                latest: dict[str, dict] = {}
+                for path in sorted(
+                    settings.data_path.glob(
+                        "data-foundation-v1/features/*/*/*/*.manifest.json"
+                    ),
+                    key=lambda item: item.stat().st_mtime,
+                ):
+                    try:
+                        manifest = json.loads(path.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        continue
+                    latest[str(manifest.get("security", path.stem))] = manifest
+                feature_rows = 0
+                approximate_rows = 0.0
+                for manifest in latest.values():
+                    rows = int(manifest.get("rows", 0))
+                    ratio = manifest.get("approximateRuleRatio")
+                    feature_rows += rows
+                    if ratio is not None:
+                        approximate_rows += rows * float(ratio)
+                approximate_quality = {
+                    "featureRows": feature_rows,
+                    "approximateRuleRows": round(approximate_rows),
+                    "approximateRuleRatio": (
+                        approximate_rows / feature_rows if feature_rows else None
+                    ),
+                }
+                approximate_quality_cache.update(
+                    value=approximate_quality, expires=time.monotonic() + 60
+                )
         return {
             "source": "AkShare",
             "cachedSecurities": cached,
@@ -829,7 +864,7 @@ def create_app(
             "historyBackfillFailed": sum(
                 event["event_type"] == "history-backfill-failed" for event in events
             ),
-            "approximateRuleRatio": None,
+            **approximate_quality,
             "qualityEvents": events[:100],
         }
 

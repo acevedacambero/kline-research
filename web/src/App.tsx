@@ -58,11 +58,12 @@ export function App() {
   const [message, setMessage] = useState('等待检查')
   const [busy, setBusy] = useState(false)
   const [cachedCount, setCachedCount] = useState<number | null>(null)
+  const [approximateRuleRatio, setApproximateRuleRatio] = useState<number | null>(null)
 
   useEffect(() => {
     api.health().then(setHealth).catch(e => setMessage(e.message))
     api.labelStatus().then(setLabelStatus).catch(() => undefined)
-    const refresh = () => api.quality().then(q => setCachedCount(q.totalCached)).catch(() => undefined)
+    const refresh = () => api.quality().then(q => { setCachedCount(q.totalCached); setApproximateRuleRatio(q.approximateRuleRatio ?? null) }).catch(() => undefined)
     refresh(); const timer = window.setInterval(refresh, 5000)
     return () => window.clearInterval(timer)
   }, [])
@@ -252,7 +253,7 @@ export function App() {
   return <main>
     <header><div><span className="eyebrow">LOCAL RESEARCH SYSTEM</span><h1>K 线结构概率研究台</h1></div><span className={`health ${health?.status === 'ok' ? 'ok' : ''}`}>{health?.status === 'ok' ? '本地服务正常' : '正在连接'}</span></header>
     <section className="panel status-panel">
-      <div><h2>数据状态</h2><p className="muted">{health ? `${health.dataSource} · 缓存 ${health.cachePath} · ${cachedCount ?? '—'} 只证券` : '正在读取配置…'}</p></div>
+      <div><h2>数据状态</h2><p className="muted">{health ? `${health.dataSource} · 缓存 ${health.cachePath} · ${cachedCount ?? '—'} 只证券 · 近似规则 ${approximateRuleRatio == null ? '—' : `${(approximateRuleRatio * 100).toFixed(2)}%`}` : '正在读取配置…'}</p></div>
       <div className="version"><span>标签版本</span><strong>{health?.versions.labelDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>标签数据兼容</span><strong>{labelStatus && Number.isFinite(labelStatus.files) ? `${labelStatus.compatibleFiles}/${labelStatus.files}` : '—'}</strong><small>{labelStatus?.staleFiles ? `${labelStatus.staleFiles} 个文件待重建` : labelStatus?.delayedExitReady ? '顺延卖出口径就绪' : '暂无标签数据'}</small></div>
       <div className="version"><span>交易规则</span><strong>{health?.versions.limitRuleVersion ?? '—'}</strong></div>

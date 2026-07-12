@@ -91,7 +91,7 @@ export const api = {
     method: 'POST', body: JSON.stringify({ scope: 'history_backfill' }),
   }),
   historyBackfillTask: (taskId: string) => request<HistoryBackfillTask>(`/api/datasets/backfill-history/${taskId}`),
-  quality: () => request<{ totalCached: number }>('/api/datasets/quality'),
+  quality: () => request<{ totalCached: number; featureRows: number; approximateRuleRows: number; approximateRuleRatio?: number | null }>('/api/datasets/quality'),
   buildLabels: (scope: 'representative' | 'all') => request<{ taskId: string; total: number }>('/api/labels/build', {
     method: 'POST', body: JSON.stringify({ scope }),
   }),

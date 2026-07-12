@@ -477,6 +477,27 @@ def test_quality_reports_history_backfill_counts(tmp_path):
     assert response.json()["historyBackfillFailed"] == 0
 
 
+def test_quality_aggregates_weighted_approximate_rule_ratio(tmp_path):
+    root = tmp_path / "data" / "data-foundation-v1" / "features" / "v1" / "identity" / "sh"
+    root.mkdir(parents=True)
+    (root / "600000.manifest.json").write_text(
+        '{"security":"sh600000","rows":100,"approximateRuleRatio":0.1}',
+        encoding="utf-8",
+    )
+    (root / "600001.manifest.json").write_text(
+        '{"security":"sh600001","rows":300,"approximateRuleRatio":0.3}',
+        encoding="utf-8",
+    )
+
+    response = TestClient(
+        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    ).get("/api/datasets/quality")
+
+    assert response.json()["featureRows"] == 400
+    assert response.json()["approximateRuleRows"] == 100
+    assert response.json()["approximateRuleRatio"] == pytest.approx(0.25)
+
+
 def test_quality_caches_expensive_short_history_scan(tmp_path, monkeypatch):
     calls = 0
     original = api_module.HistoryBackfillService.scan
