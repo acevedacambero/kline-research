@@ -92,6 +92,16 @@ def test_history_raises_contextual_error_after_retry_budget():
         )
 
 
+def test_sina_raw_history_falls_back_when_daily_payload_has_no_date():
+    client = FakeAkShare()
+    client.stock_zh_a_daily = lambda **kwargs: pd.DataFrame()
+    frame = AkShareSource(client, retries=1, retry_delay=0).sina_raw_history(
+        "sh", "600000", date(2024, 1, 1), date(2024, 1, 3)
+    )
+    assert len(frame) == 1
+    assert frame.attrs["provider"] == "sina-akshare"
+
+
 def test_index_history_falls_back_to_sina_provider():
     client = FakeAkShare()
     client.index_zh_a_hist = lambda **kwargs: (_ for _ in ()).throw(ConnectionError("down"))

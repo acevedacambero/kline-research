@@ -151,15 +151,32 @@ class AkShareSource:
     def sina_raw_history(
         self, exchange: str, code: str, start_date: date, end_date: date
     ) -> pd.DataFrame:
-        frame = self._call(
-            "stock_zh_a_daily:raw",
-            self.client.stock_zh_a_daily,
-            symbol=exchange.lower() + code,
-            start_date=start_date.strftime("%Y%m%d"),
-            end_date=end_date.strftime("%Y%m%d"),
-            adjust="",
-        )
-        result = self._normalize_history(frame)
+        kwargs = {
+            "symbol": exchange.lower() + code,
+            "start_date": start_date.strftime("%Y%m%d"),
+            "end_date": end_date.strftime("%Y%m%d"),
+            "adjust": "",
+        }
+        try:
+            frame = self._call("stock_zh_a_daily:raw", self.client.stock_zh_a_daily, **kwargs)
+            result = self._normalize_history(frame)
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            # Sina's endpoint intermittently returns an empty/malformed payload
+            # (notably a frame without ``date``). Retry the same raw request via
+            # AkShare's EastMoney-backed history endpoint before failing the job.
+            hist = getattr(self.client, "stock_zh_a_hist", None)
+            if not callable(hist):
+                raise
+            frame = self._call(
+                "stock_zh_a_hist:raw-fallback",
+                hist,
+                symbol=code,
+                period="daily",
+                start_date=kwargs["start_date"],
+                end_date=kwargs["end_date"],
+                adjust="",
+            )
+            result = self._normalize_history(frame)
         result.attrs["provider"] = "sina-akshare"
         return result
 
