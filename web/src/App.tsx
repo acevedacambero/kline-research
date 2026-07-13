@@ -216,7 +216,8 @@ export function App() {
           setMessage(`数据源探测失败：${task.errors.map(taskErrorText).join('；') || task.status}`)
         }
         else {
-          const latest = await api.providerGate(); setProviderGate(latest); setBusy(false)
+          const [latest, latestReadiness] = await Promise.all([api.providerGate(), api.readiness()])
+          setProviderGate(latest); setReadiness(latestReadiness); setBusy(false)
           setMessage(quick ? '快速诊断完成（正式 Gate 结论保持不变）' : latest.report?.passed ? '数据源上线 Gate 已通过' : `上线 Gate 未通过：${latest.report?.reasons.join('；') || '请查看任务错误'}`)
         }
       }
