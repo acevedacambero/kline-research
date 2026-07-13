@@ -329,7 +329,8 @@ export function App() {
   return <main>
     <header><div><span className="eyebrow">LOCAL RESEARCH SYSTEM</span><h1>K 线结构概率研究台</h1></div><span className={`health ${health?.status === 'ok' ? 'ok' : ''}`}>{health?.status === 'ok' ? '本地服务正常' : '正在连接'}</span></header>
     <section className="panel status-panel">
-      <div><h2>数据状态</h2><p className="muted">{health ? `${health.dataSource} · 缓存 ${health.cachePath} · ${cachedCount ?? '—'} 只证券 · 近似规则 ${approximateRuleRatio == null ? '—' : `${(approximateRuleRatio * 100).toFixed(2)}%`}` : '正在读取配置…'}</p></div>
+      <div className="status-summary"><h2>数据状态</h2><p className="muted">{health ? `${health.dataSource} · 缓存 ${health.cachePath} · ${cachedCount ?? '—'} 只证券 · 近似规则 ${approximateRuleRatio == null ? '—' : `${(approximateRuleRatio * 100).toFixed(2)}%`}` : '正在读取配置…'}</p></div>
+      <div className="status-grid">
       <div className="version"><span>标签版本</span><strong>{health?.versions.labelDefinitionVersion ?? '—'}</strong></div>
       <div className="version"><span>标签数据兼容</span><strong>{labelStatus && Number.isFinite(labelStatus.files) ? `${labelStatus.compatibleFiles}/${labelStatus.files}` : '—'}</strong><small>{labelStatus?.unreadableFiles ? `${labelStatus.unreadableFiles} 个文件不可读` : labelStatus?.staleFiles ? `${labelStatus.staleFiles} 个文件待重建` : labelStatus?.delayedExitReady ? '顺延卖出口径就绪' : '暂无标签数据'}</small></div>
       <div className="version"><span>可恢复任务</span><strong>{health?.recoverableTasks ?? 0}</strong><small>再次点击对应任务即可续跑</small></div>
@@ -346,6 +347,8 @@ export function App() {
       <div className="version"><span>数据源上线 Gate</span><strong>{providerGate?.report ? (providerGate.report.passed ? '通过' : '未通过') : '未执行'}</strong><small>{providerGate?.report ? `${providerGate.report.gateVersion} · ${providerGate.report.probedAt ? new Date(providerGate.report.probedAt).toLocaleString('zh-CN') : '时间未知'}` : '完整探测后可作为上线依据'}</small></div>
       <div className="version"><span>行情新鲜度</span><strong>{datasetQuality?.latestDataDate ?? '暂无数据'}</strong><small>{datasetQuality ? `覆盖 ${((datasetQuality.freshnessCoverage ?? 0) * 100).toFixed(1)}% · 新鲜 ${datasetQuality.freshSecurities} · 过期 ${datasetQuality.staleSecurities} · 不可读 ${datasetQuality.unreadableSecurities}` : '正在统计覆盖日期'}</small></div>
       <div className="version"><span>研究运行 Gate</span><strong>{readiness?.readyForModel ? '模型就绪' : readiness?.readyForAudit ? '仅审计就绪' : '未就绪'}</strong><small>{readiness?.blockers?.length ? readiness.blockers.slice(0, 3).join('；') : readiness?.readyForModel ? `${readiness.version} · 行情覆盖达到 ${((readiness.freshnessMinCoverage ?? 0) * 100).toFixed(0)}% 门槛` : '正在检查运行条件'}</small></div>
+      </div>
+      <div className="status-actions">
       <button className="secondary" disabled={busy} onClick={() => probeProviders(true)}>快速诊断数据源</button>
       <button className="secondary" disabled={busy} onClick={() => probeProviders(false)}>执行数据源上线 Gate</button>
       <button disabled={busy} onClick={() => startImport('representative')}>拉取代表样本</button>
@@ -363,6 +366,7 @@ export function App() {
       <button className="secondary" disabled={busy || !featureCatalog?.ready} onClick={runMultifeature}>训练 P7 多特征模型</button>
       <button className="secondary" disabled={busy || readiness?.readyForModel === false} onClick={runWalkForward}>运行 P7 Walk-forward</button>
       <button className="secondary" disabled={busy || readiness?.readyForModel === false} onClick={runPortfolio}>验证 P8 高分组合</button>
+      </div>
     </section>
     {taskView && <section className="panel task-panel" aria-label="任务进度">
       <div className="section-title"><div><span className="eyebrow">BACKGROUND TASK</span><h2>{taskView.kind}</h2></div><span className="message">{taskView.status}</span></div>
