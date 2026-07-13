@@ -56,8 +56,10 @@ def test_research_readiness_separates_refresh_audit_and_model_gates():
     result = build_research_readiness(
         {"report": {"passed": False}},
         {
-            "totalCached": 100, "unreadableSecurities": 0,
-            "staleSecurities": 0, "freshnessCoverage": 1,
+            "totalCached": 100,
+            "unreadableSecurities": 0,
+            "staleSecurities": 0,
+            "freshnessCoverage": 1,
             "freshnessMinCoverage": 0.95,
         },
         {"files": 100, "staleFiles": 0},
@@ -76,8 +78,10 @@ def test_research_readiness_blocks_model_for_stale_labels_and_features():
     result = build_research_readiness(
         {"report": {"passed": True, "probedAt": "2026-07-12T11:00:00+00:00"}},
         {
-            "totalCached": 10, "unreadableSecurities": 0,
-            "staleSecurities": 0, "freshnessCoverage": 1,
+            "totalCached": 10,
+            "unreadableSecurities": 0,
+            "staleSecurities": 0,
+            "freshnessCoverage": 1,
             "freshnessMinCoverage": 0.95,
         },
         {"files": 10, "staleFiles": 2},
@@ -97,8 +101,10 @@ def test_research_readiness_allows_small_stale_tail_at_coverage_threshold():
     result = build_research_readiness(
         {"report": {"passed": True, "probedAt": "2026-07-12T11:00:00+00:00"}},
         {
-            "totalCached": 100, "unreadableSecurities": 0,
-            "staleSecurities": 5, "freshnessCoverage": 0.95,
+            "totalCached": 100,
+            "unreadableSecurities": 0,
+            "staleSecurities": 5,
+            "freshnessCoverage": 0.95,
             "freshnessMinCoverage": 0.95,
         },
         {"files": 100, "staleFiles": 0},
@@ -118,8 +124,10 @@ def test_research_readiness_expires_old_provider_gate():
             "maxAgeHours": 24,
         },
         {
-            "totalCached": 1, "unreadableSecurities": 0,
-            "freshnessCoverage": 1, "freshnessMinCoverage": 0.95,
+            "totalCached": 1,
+            "unreadableSecurities": 0,
+            "freshnessCoverage": 1,
+            "freshnessMinCoverage": 0.95,
         },
         {"files": 1, "staleFiles": 0},
         {"ready": True},
@@ -137,8 +145,10 @@ def test_research_readiness_blocks_model_for_missing_scores():
     result = build_research_readiness(
         {"report": {"passed": True, "probedAt": "2026-07-12T11:00:00+00:00"}},
         {
-            "totalCached": 1, "unreadableSecurities": 0,
-            "freshnessCoverage": 1, "freshnessMinCoverage": 0.95,
+            "totalCached": 1,
+            "unreadableSecurities": 0,
+            "freshnessCoverage": 1,
+            "freshnessMinCoverage": 0.95,
         },
         {"files": 1, "staleFiles": 0, "unreadableFiles": 0},
         {"ready": True},
@@ -179,10 +189,15 @@ def test_label_failed_scope_retries_only_previous_error_securities(tmp_path):
     with JobStore(jobs_path) as store:
         previous = store.create("labels", [{"exchange": "sh", "code": "600000"}])
         store.transition(previous.id, JobStatus.RUNNING)
-        store.complete(previous.id, {
-            "done": 1, "total": 1, "rows": 0,
-            "errors": [{"security": "sh600000", "message": "zero price"}],
-        })
+        store.complete(
+            previous.id,
+            {
+                "done": 1,
+                "total": 1,
+                "rows": 0,
+                "errors": [{"security": "sh600000", "message": "zero price"}],
+            },
+        )
 
     app = create_app(Settings(data_path=data_path), FakeSource())
     with TestClient(app) as client:
@@ -215,9 +230,11 @@ def test_provider_gate_probe_is_persisted_and_queryable(tmp_path):
         app = create_app(Settings(data_path=data_path), FakeSource())
         with TestClient(app) as client:
             assert client.get("/api/system/provider-gate").json() == {
-                "available": False, "report": None,
+                "available": False,
+                "report": None,
                 "maxAgeHours": 24,
-                "diagnosticAvailable": False, "diagnostic": None,
+                "diagnosticAvailable": False,
+                "diagnostic": None,
             }
             submitted = client.post("/api/system/provider-gate/probe?quick=true")
             assert submitted.status_code == 202
@@ -244,10 +261,14 @@ def test_label_status_reports_stale_and_current_files(tmp_path):
     data_path = tmp_path / "data"
     label_dir = data_path / "data-foundation-v1" / "labels" / "snapshot" / "sh"
     label_dir.mkdir(parents=True)
-    pd.DataFrame([{
-        "label_definition_version": "daily-v2-exit-delay",
-        "p20_delayed_executable_return": 0.1,
-    }]).to_parquet(label_dir / "600000.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "label_definition_version": "daily-v2-exit-delay",
+                "p20_delayed_executable_return": 0.1,
+            }
+        ]
+    ).to_parquet(label_dir / "600000.parquet", index=False)
     pd.DataFrame([{"p20_executable_return": 0.2}]).to_parquet(
         label_dir / "600001.parquet", index=False
     )
@@ -281,16 +302,22 @@ def test_label_status_uses_only_latest_snapshot_per_security(tmp_path):
     old.parent.mkdir(parents=True)
     new.parent.mkdir(parents=True)
     pd.DataFrame([{"label_definition_version": "daily-v1"}]).to_parquet(old)
-    pd.DataFrame([{
-        "label_definition_version": "daily-v2-exit-delay",
-        "p20_delayed_executable_return": 0.1,
-    }]).to_parquet(new)
+    pd.DataFrame(
+        [
+            {
+                "label_definition_version": "daily-v2-exit-delay",
+                "p20_delayed_executable_return": 0.1,
+            }
+        ]
+    ).to_parquet(new)
     os.utime(old, (1, 1))
     os.utime(new, (2, 2))
 
-    body = TestClient(
-        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
-    ).get("/api/labels/status").json()
+    body = (
+        TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource()))
+        .get("/api/labels/status")
+        .json()
+    )
 
     assert body["files"] == 1
     assert body["supersededFiles"] == 1
@@ -305,15 +332,21 @@ def test_label_status_excludes_orphans_when_current_manifest_exists(tmp_path):
     current = root / "sh" / "600000.parquet"
     orphan = root / "sh" / "603124.parquet"
     current.parent.mkdir(parents=True)
-    pd.DataFrame([{
-        "label_definition_version": "daily-v2-exit-delay",
-        "p20_delayed_executable_return": 0.1,
-    }]).to_parquet(current)
+    pd.DataFrame(
+        [
+            {
+                "label_definition_version": "daily-v2-exit-delay",
+                "p20_delayed_executable_return": 0.1,
+            }
+        ]
+    ).to_parquet(current)
     pd.DataFrame([{"label_definition_version": "daily-v1"}]).to_parquet(orphan)
 
-    body = TestClient(
-        create_app(Settings(data_path=data_path), FakeSource())
-    ).get("/api/labels/status").json()
+    body = (
+        TestClient(create_app(Settings(data_path=data_path), FakeSource()))
+        .get("/api/labels/status")
+        .json()
+    )
 
     assert body["files"] == 1
     assert body["orphanedFiles"] == 1
@@ -323,15 +356,14 @@ def test_label_status_excludes_orphans_when_current_manifest_exists(tmp_path):
 
 def test_label_status_isolates_unreadable_parquet(tmp_path):
     path = (
-        tmp_path / "data" / "data-foundation-v1" / "labels" / "snapshot" / "sh"
-        / "600000.parquet"
+        tmp_path / "data" / "data-foundation-v1" / "labels" / "snapshot" / "sh" / "600000.parquet"
     )
     path.parent.mkdir(parents=True)
     path.write_bytes(b"not-a-parquet-file")
 
-    response = TestClient(
-        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
-    ).get("/api/labels/status")
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get(
+        "/api/labels/status"
+    )
 
     assert response.status_code == 200
     assert response.json()["unreadableFiles"] == 1
@@ -355,14 +387,26 @@ def seed_security(data_path):
     rows = []
     for index in range(260):
         close = 10 + index / 100
-        rows.append({
-            "date": date(2024, 1, 1) + timedelta(days=index),
-            "open": close, "high": close + 0.1, "low": close - 0.1, "close": close,
-            "volume": 1000 + index, "amount": 10000 + index,
-        })
-    factors = pd.DataFrame([{
-        "date": date(1900, 1, 1), "qfq_factor": 1.0, "hfq_factor": 1.0,
-    }])
+        rows.append(
+            {
+                "date": date(2024, 1, 1) + timedelta(days=index),
+                "open": close,
+                "high": close + 0.1,
+                "low": close - 0.1,
+                "close": close,
+                "volume": 1000 + index,
+                "amount": 10000 + index,
+            }
+        )
+    factors = pd.DataFrame(
+        [
+            {
+                "date": date(1900, 1, 1),
+                "qfq_factor": 1.0,
+                "hfq_factor": 1.0,
+            }
+        ]
+    )
     pipeline = DatasetPipeline(data_path)
     pipeline.initialize_catalog()
     pipeline.import_security("sh", "600000", pd.DataFrame(rows), factors)
@@ -393,7 +437,11 @@ def test_feature_build_task_and_point_in_time_audit(tmp_path):
         assert audited.status_code == 200
         body = audited.json()
         assert set(body["groups"]) == {
-            "trend", "position", "momentum", "volumePrice", "tradingBehavior"
+            "trend",
+            "position",
+            "momentum",
+            "volumePrice",
+            "tradingBehavior",
         }
         assert body["versions"]["featureDefinitionVersion"] == "daily-features-v1"
         assert body["availableHistory"] == 260
@@ -407,7 +455,11 @@ def test_feature_build_task_and_point_in_time_audit(tmp_path):
         assert score_body["versions"]["scoreDefinitionVersion"] == "p3-rule-score-v1"
         assert 0 <= score_body["score"]["score"] <= 100
         assert set(score_body["score"]["components"]) == {
-            "trend", "position", "momentum", "volumePrice", "tradingBehavior"
+            "trend",
+            "position",
+            "momentum",
+            "volumePrice",
+            "tradingBehavior",
         }
         assert score_body["featureDefinitionVersion"] == "daily-features-v1"
 
@@ -440,10 +492,7 @@ def test_score_task_unknown_id_is_404(tmp_path):
 
 def test_single_factor_validation_api_reads_local_score_and_label_files(tmp_path):
     data_path = tmp_path / "data"
-    score_dir = (
-        data_path / "data-foundation-v1" / "scores" / "p3-rule-score-v1"
-        / "identity" / "sh"
-    )
+    score_dir = data_path / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
     label_dir = data_path / "data-foundation-v1" / "labels" / "snapshot-v1" / "sh"
     score_dir.mkdir(parents=True)
     label_dir.mkdir(parents=True)
@@ -451,8 +500,11 @@ def test_single_factor_validation_api_reads_local_score_and_label_files(tmp_path
     pd.DataFrame(
         [
             {
-                "exchange": "sh", "code": "600000", "date": item,
-                "score": index * 5, "usable": True,
+                "exchange": "sh",
+                "code": "600000",
+                "date": item,
+                "score": index * 5,
+                "usable": True,
             }
             for index, item in enumerate(score_dates)
         ]
@@ -460,7 +512,9 @@ def test_single_factor_validation_api_reads_local_score_and_label_files(tmp_path
     pd.DataFrame(
         [
             {
-                "exchange": "sh", "code": "600000", "signal_date": item,
+                "exchange": "sh",
+                "code": "600000",
+                "signal_date": item,
                 "p20_executable_return": -0.05 + index * 0.01,
                 "path_success_p20": index >= 10,
                 "max_drawdown_p20": -0.1,
@@ -506,27 +560,114 @@ def test_score_calibration_api_reads_local_files(tmp_path):
     score_dir.mkdir(parents=True)
     label_dir.mkdir(parents=True)
     dates = [date(2024, 1, 1) + timedelta(days=i) for i in range(4)]
-    pd.DataFrame([{"exchange": "sh", "code": "600000", "date": d, "score": i * 30, "usable": True} for i, d in enumerate(dates)]).to_parquet(score_dir / "600000.parquet", index=False)
-    pd.DataFrame([{"exchange": "sh", "code": "600000", "signal_date": d, "p20_executable_return": -0.1 + i * 0.1, "label_maturity_date": date(2024, 3, 1)} for i, d in enumerate(dates)]).to_parquet(label_dir / "600000.parquet", index=False)
-    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post("/api/validation/calibration", json={"buckets": 2, "as_of_date": "2024-03-01"})
+    pd.DataFrame(
+        [
+            {"exchange": "sh", "code": "600000", "date": d, "score": i * 30, "usable": True}
+            for i, d in enumerate(dates)
+        ]
+    ).to_parquet(score_dir / "600000.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "exchange": "sh",
+                "code": "600000",
+                "signal_date": d,
+                "p20_executable_return": -0.1 + i * 0.1,
+                "label_maturity_date": date(2024, 3, 1),
+            }
+            for i, d in enumerate(dates)
+        ]
+    ).to_parquet(label_dir / "600000.parquet", index=False)
+    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post(
+        "/api/validation/calibration", json={"buckets": 2, "as_of_date": "2024-03-01"}
+    )
     assert response.status_code == 200
     assert response.json()["version"] == "p5-score-calibration-v3-quality"
+
+
+def test_interactive_calibration_bounds_rows_per_security(tmp_path):
+    data_path = tmp_path / "data"
+    score_dir = data_path / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
+    label_dir = data_path / "data-foundation-v1" / "labels" / "snapshot-v1" / "sh"
+    score_dir.mkdir(parents=True)
+    label_dir.mkdir(parents=True)
+    dates = [date(2024, 1, 1) + timedelta(days=index) for index in range(120)]
+    pd.DataFrame(
+        [
+            {"exchange": "sh", "code": "600000", "date": item, "score": index % 100, "usable": True}
+            for index, item in enumerate(dates)
+        ]
+    ).to_parquet(score_dir / "600000.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "exchange": "sh",
+                "code": "600000",
+                "signal_date": item,
+                "p20_executable_return": 0.01 if index % 2 else -0.01,
+                "label_maturity_date": date(2024, 6, 1),
+            }
+            for index, item in enumerate(dates)
+        ]
+    ).to_parquet(label_dir / "600000.parquet", index=False)
+
+    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post(
+        "/api/validation/calibration",
+        json={"buckets": 5, "as_of_date": "2024-06-01"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sampleCount"] == 100
 
 
 def test_p3_scan_returns_latest_usable_scores(tmp_path):
     data_path = tmp_path / "data"
     score_dir = data_path / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
     score_dir.mkdir(parents=True)
-    pd.DataFrame([
-        {"exchange": "sh", "code": "600000", "date": date(2024, 1, 1), "score": 80, "grade": "A", "usable": True},
-        {"exchange": "sh", "code": "600000", "date": date(2024, 1, 2), "score": 75, "grade": "B", "usable": True},
-        {"exchange": "sh", "code": "600001", "date": date(2024, 1, 2), "score": 90, "grade": "A", "usable": True},
-        {"exchange": "sz", "code": "000001", "date": date(2024, 1, 2), "score": 95, "grade": "A", "usable": True},
-    ]).to_parquet(score_dir / "scores.parquet", index=False)
-    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post("/api/scan/p3", json={"as_of_date": "2024-01-02", "min_score": 70})
+    pd.DataFrame(
+        [
+            {
+                "exchange": "sh",
+                "code": "600000",
+                "date": date(2024, 1, 1),
+                "score": 80,
+                "grade": "A",
+                "usable": True,
+            },
+            {
+                "exchange": "sh",
+                "code": "600000",
+                "date": date(2024, 1, 2),
+                "score": 75,
+                "grade": "B",
+                "usable": True,
+            },
+            {
+                "exchange": "sh",
+                "code": "600001",
+                "date": date(2024, 1, 2),
+                "score": 90,
+                "grade": "A",
+                "usable": True,
+            },
+            {
+                "exchange": "sz",
+                "code": "000001",
+                "date": date(2024, 1, 2),
+                "score": 95,
+                "grade": "A",
+                "usable": True,
+            },
+        ]
+    ).to_parquet(score_dir / "scores.parquet", index=False)
+    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post(
+        "/api/scan/p3", json={"as_of_date": "2024-01-02", "min_score": 70}
+    )
     assert response.status_code == 200
     assert [row["code"] for row in response.json()["rows"]] == ["000001", "600001", "600000"]
-    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post("/api/scan/p3", json={"exchange": "sh", "min_score": 80})
+    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post(
+        "/api/scan/p3", json={"exchange": "sh", "min_score": 80}
+    )
     assert [row["code"] for row in response.json()["rows"]] == ["600001"]
 
 
@@ -540,7 +681,9 @@ def test_p7_baseline_endpoint_returns_version_when_data_missing(tmp_path):
 
 
 def test_p7_feature_catalog_returns_empty_when_data_missing(tmp_path):
-    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get("/api/model/p7/features")
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get(
+        "/api/model/p7/features"
+    )
     assert response.status_code == 200
     assert response.json()["featureColumns"] == []
     assert "return_20" in response.json()["missingColumns"]
@@ -548,10 +691,32 @@ def test_p7_feature_catalog_returns_empty_when_data_missing(tmp_path):
 
 
 def test_p7_feature_catalog_reports_ready_columns(tmp_path):
-    path = tmp_path / "data" / "data-foundation-v1" / "features" / "daily-features-v1" / "identity" / "sh"
+    path = (
+        tmp_path
+        / "data"
+        / "data-foundation-v1"
+        / "features"
+        / "daily-features-v1"
+        / "identity"
+        / "sh"
+    )
     path.mkdir(parents=True)
-    pd.DataFrame([{"exchange": "sh", "code": "600000", "date": date(2024, 1, 1), "bullish_alignment": True, "return_20": 0.1, "volume_ratio_5": 1.2, "volatility_20": 0.02}]).to_parquet(path / "600000.parquet", index=False)
-    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get("/api/model/p7/features")
+    pd.DataFrame(
+        [
+            {
+                "exchange": "sh",
+                "code": "600000",
+                "date": date(2024, 1, 1),
+                "bullish_alignment": True,
+                "return_20": 0.1,
+                "volume_ratio_5": 1.2,
+                "volatility_20": 0.02,
+            }
+        ]
+    ).to_parquet(path / "600000.parquet", index=False)
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get(
+        "/api/model/p7/features"
+    )
     assert response.json()["ready"] is True
     assert response.json()["securityCount"] == 1
 
@@ -561,9 +726,9 @@ def test_p7_feature_catalog_isolates_unreadable_parquet(tmp_path):
     path.mkdir(parents=True)
     (path / "600000.parquet").write_bytes(b"not-a-parquet-file")
 
-    response = TestClient(
-        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
-    ).get("/api/model/p7/features")
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get(
+        "/api/model/p7/features"
+    )
 
     assert response.status_code == 200
     assert response.json()["ready"] is False
@@ -574,10 +739,16 @@ def test_p7_feature_catalog_isolates_unreadable_parquet(tmp_path):
 def test_p7_feature_catalog_caches_parquet_metadata_scan(tmp_path, monkeypatch):
     path = tmp_path / "data" / "data-foundation-v1" / "features" / "v1" / "identity" / "sh"
     path.mkdir(parents=True)
-    pd.DataFrame([{
-        "bullish_alignment": True, "return_20": 0.1,
-        "volume_ratio_5": 1.2, "volatility_20": 0.02,
-    }]).to_parquet(path / "600000.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "bullish_alignment": True,
+                "return_20": 0.1,
+                "volume_ratio_5": 1.2,
+                "volatility_20": 0.02,
+            }
+        ]
+    ).to_parquet(path / "600000.parquet", index=False)
     calls = 0
     original = api_module.pq.ParquetFile
 
@@ -596,17 +767,24 @@ def test_p7_feature_catalog_caches_parquet_metadata_scan(tmp_path, monkeypatch):
 
 
 def test_score_status_reports_current_and_unreadable_files(tmp_path):
-    path = tmp_path / "data" / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
+    path = (
+        tmp_path / "data" / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
+    )
     path.mkdir(parents=True)
-    pd.DataFrame([{
-        "score": 80.0, "usable": True,
-        "score_definition_version": "p3-rule-score-v1",
-    }]).to_parquet(path / "600000.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "score": 80.0,
+                "usable": True,
+                "score_definition_version": "p3-rule-score-v1",
+            }
+        ]
+    ).to_parquet(path / "600000.parquet", index=False)
     (path / "600001.parquet").write_bytes(b"not-a-parquet-file")
 
-    response = TestClient(
-        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
-    ).get("/api/scores/status")
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get(
+        "/api/scores/status"
+    )
 
     assert response.status_code == 200
     assert response.json()["files"] == 2
@@ -632,21 +810,28 @@ def test_research_endpoint_rejects_unreadable_score_artifact(tmp_path):
 def test_research_endpoint_rejects_explicit_old_score_version(tmp_path):
     path = tmp_path / "data" / "data-foundation-v1" / "scores" / "old" / "identity" / "sh"
     path.mkdir(parents=True)
-    pd.DataFrame([{
-        "score": 80.0, "usable": True,
-        "score_definition_version": "p3-rule-score-v0",
-    }]).to_parquet(path / "600000.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "score": 80.0,
+                "usable": True,
+                "score_definition_version": "p3-rule-score-v0",
+            }
+        ]
+    ).to_parquet(path / "600000.parquet", index=False)
     client = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource()))
 
     response = client.post("/api/scan/p3", json={})
 
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "RESEARCH_ARTIFACT_VERSION_MISMATCH"
-    assert response.json()["detail"]["artifacts"] == [{
-        "artifact": "scores",
-        "incompatibleFiles": 1,
-        "currentVersion": "p3-rule-score-v1",
-    }]
+    assert response.json()["detail"]["artifacts"] == [
+        {
+            "artifact": "scores",
+            "incompatibleFiles": 1,
+            "currentVersion": "p3-rule-score-v1",
+        }
+    ]
 
 
 @pytest.mark.parametrize(
@@ -662,8 +847,14 @@ def test_research_endpoint_rejects_explicit_old_score_version(tmp_path):
 )
 def test_all_research_endpoints_share_artifact_readability_gate(tmp_path, path, body):
     score_path = (
-        tmp_path / "data" / "data-foundation-v1" / "scores" / "v1"
-        / "identity" / "sh" / "600000.parquet"
+        tmp_path
+        / "data"
+        / "data-foundation-v1"
+        / "scores"
+        / "v1"
+        / "identity"
+        / "sh"
+        / "600000.parquet"
     )
     score_path.parent.mkdir(parents=True)
     score_path.write_bytes(b"not-a-parquet-file")
@@ -676,12 +867,19 @@ def test_all_research_endpoints_share_artifact_readability_gate(tmp_path, path, 
 
 
 def test_score_status_caches_parquet_metadata_scan(tmp_path, monkeypatch):
-    path = tmp_path / "data" / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
+    path = (
+        tmp_path / "data" / "data-foundation-v1" / "scores" / "p3-rule-score-v1" / "identity" / "sh"
+    )
     path.mkdir(parents=True)
-    pd.DataFrame([{
-        "score": 80.0, "usable": True,
-        "score_definition_version": "p3-rule-score-v1",
-    }]).to_parquet(path / "600000.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "score": 80.0,
+                "usable": True,
+                "score_definition_version": "p3-rule-score-v1",
+            }
+        ]
+    ).to_parquet(path / "600000.parquet", index=False)
     calls = 0
     original = api_module.pq.ParquetFile
 
@@ -715,16 +913,12 @@ def test_completed_feature_and_score_jobs_invalidate_cached_status(tmp_path):
 
     with TestClient(app) as client:
         assert client.get("/api/model/p7/features").json()["ready"] is False
-        feature_id = client.post(
-            "/api/features/build", json={"scope": "all"}
-        ).json()["taskId"]
+        feature_id = client.post("/api/features/build", json={"scope": "all"}).json()["taskId"]
         assert wait_for_task(client, feature_id)["status"] == "completed"
         assert client.get("/api/model/p7/features").json()["ready"] is True
 
         assert client.get("/api/scores/status").json()["ready"] is False
-        score_id = client.post(
-            "/api/scores/build", json={"scope": "all"}
-        ).json()["taskId"]
+        score_id = client.post("/api/scores/build", json={"scope": "all"}).json()["taskId"]
         assert wait_for_task(client, score_id)["status"] == "completed"
         assert client.get("/api/scores/status").json()["ready"] is True
 
@@ -739,7 +933,8 @@ def test_p7_multifeature_endpoint_returns_version_when_data_missing(tmp_path):
 
 def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
     response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).post(
-        "/api/validation/portfolio", json={"label_column": "p20_executable_return", "top_fraction": 0.1}
+        "/api/validation/portfolio",
+        json={"label_column": "p20_executable_return", "top_fraction": 0.1},
     )
     assert response.status_code == 200
     assert response.json()["version"] == "p8-top-score-portfolio-v3-equity"
@@ -840,8 +1035,7 @@ def test_beijing_market_requests_are_rejected_before_data_access(tmp_path):
         ]
     assert [response.status_code for response in responses] == [422, 422, 422]
     assert all(
-        response.json()["detail"]["code"] == "MARKET_NOT_SUPPORTED"
-        for response in responses
+        response.json()["detail"]["code"] == "MARKET_NOT_SUPPORTED" for response in responses
     )
 
 
@@ -850,14 +1044,19 @@ def test_history_backfill_api_starts_and_is_pollable(tmp_path):
     pipeline = DatasetPipeline(data_path)
     pipeline.initialize_catalog()
     raw = pd.DataFrame(
-        [{
-            "date": date.today(), "open": 10.0, "high": 11.0, "low": 9.0,
-            "close": 10.5, "volume": 100, "amount": 1000.0,
-        }]
+        [
+            {
+                "date": date.today(),
+                "open": 10.0,
+                "high": 11.0,
+                "low": 9.0,
+                "close": 10.5,
+                "volume": 100,
+                "amount": 1000.0,
+            }
+        ]
     )
-    factors = pd.DataFrame(
-        [{"date": date(1900, 1, 1), "qfq_factor": 1.0, "hfq_factor": 1.0}]
-    )
+    factors = pd.DataFrame([{"date": date(1900, 1, 1), "qfq_factor": 1.0, "hfq_factor": 1.0}])
     pipeline.import_security("sh", "600000", raw, factors)
     app = create_app(Settings(data_path=data_path), FakeSource())
 
@@ -871,8 +1070,15 @@ def test_history_backfill_api_starts_and_is_pollable(tmp_path):
 
     assert task.status_code == 200
     assert {
-        "status", "done", "total", "completed", "listingHistoryShort",
-        "errors", "currentSecurity", "speed", "etaSeconds",
+        "status",
+        "done",
+        "total",
+        "completed",
+        "listingHistoryShort",
+        "errors",
+        "currentSecurity",
+        "speed",
+        "etaSeconds",
     }.issubset(task.json())
 
 
@@ -895,9 +1101,7 @@ def test_history_backfill_start_alias_uses_same_contract(tmp_path):
 def test_history_backfill_can_start_through_import_command_bus(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
     with TestClient(app) as client:
-        response = client.post(
-            "/api/datasets/import", json={"scope": "history_backfill"}
-        )
+        response = client.post("/api/datasets/import", json={"scope": "history_backfill"})
     assert response.status_code == 202
     assert response.json()["total"] == 0
     assert response.json()["threshold"] == 250
@@ -924,9 +1128,9 @@ def test_quality_aggregates_weighted_approximate_rule_ratio(tmp_path):
         encoding="utf-8",
     )
 
-    response = TestClient(
-        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
-    ).get("/api/datasets/quality")
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get(
+        "/api/datasets/quality"
+    )
 
     assert response.json()["featureRows"] == 400
     assert response.json()["approximateRuleRows"] == 100
@@ -941,44 +1145,44 @@ def test_quality_reports_market_relative_data_freshness(tmp_path, monkeypatch):
     ):
         path = tmp_path / f"{code}.parquet"
         pd.DataFrame({"date": pd.to_datetime(dates), "close": [10.0, 11.0]}).to_parquet(path)
-        paths.append({
-            "exchange": "sh", "code": code, "derived_path": str(path),
-            "snapshot_version": "test",
-        })
-    monkeypatch.setattr(
-        api_module.DatasetPipeline, "cached_securities", lambda _self: paths
-    )
-
-    body = TestClient(
-        create_app(
-            Settings(
-                data_path=tmp_path / "data",
-                history_backfill_freshness_days=10,
-            ),
-            FakeSource(),
+        paths.append(
+            {
+                "exchange": "sh",
+                "code": code,
+                "derived_path": str(path),
+                "snapshot_version": "test",
+            }
         )
-    ).get("/api/datasets/quality").json()
+    monkeypatch.setattr(api_module.DatasetPipeline, "cached_securities", lambda _self: paths)
+
+    body = (
+        TestClient(
+            create_app(
+                Settings(
+                    data_path=tmp_path / "data",
+                    history_backfill_freshness_days=10,
+                ),
+                FakeSource(),
+            )
+        )
+        .get("/api/datasets/quality")
+        .json()
+    )
 
     assert body["latestDataDate"] == "2026-07-11"
     assert body["freshSecurities"] == 1
     assert body["staleSecurities"] == 1
     assert body["freshnessCoverage"] == pytest.approx(0.5)
     assert body["freshnessMinCoverage"] == pytest.approx(0.95)
-    assert body["staleExamples"] == [
-        {"security": "sh600001", "latestDate": "2026-06-21"}
-    ]
+    assert body["staleExamples"] == [{"security": "sh600001", "latestDate": "2026-06-21"}]
     assert body["unreadableSecurities"] == 0
 
 
-def test_quality_excludes_legacy_beijing_cache_from_counts_and_freshness(
-    tmp_path, monkeypatch
-):
+def test_quality_excludes_legacy_beijing_cache_from_counts_and_freshness(tmp_path, monkeypatch):
     sh_path = tmp_path / "sh.parquet"
     bj_path = tmp_path / "bj.parquet"
     for path in (sh_path, bj_path):
-        pd.DataFrame({
-            "date": pd.to_datetime(["2026-07-10"]), "close": [10.0]
-        }).to_parquet(path)
+        pd.DataFrame({"date": pd.to_datetime(["2026-07-10"]), "close": [10.0]}).to_parquet(path)
     monkeypatch.setattr(
         api_module.DatasetPipeline,
         "cached_market_counts",
@@ -993,9 +1197,11 @@ def test_quality_excludes_legacy_beijing_cache_from_counts_and_freshness(
         ],
     )
 
-    body = TestClient(
-        create_app(Settings(data_path=tmp_path / "data"), FakeSource())
-    ).get("/api/datasets/quality").json()
+    body = (
+        TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource()))
+        .get("/api/datasets/quality")
+        .json()
+    )
 
     assert body["cachedSecurities"] == {"sh": 1, "sz": 0}
     assert body["totalCached"] == 1
