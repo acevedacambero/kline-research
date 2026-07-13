@@ -1657,7 +1657,7 @@ def create_app(
             label_column=request.label_column,
             train_until=request.train_until,
         )
-        if result.get("status") == "trained":
+        if result.get("status") in {"trained", "review"}:
             result.update(
                 model_registry.save(
                     "baseline",
@@ -1842,7 +1842,7 @@ def create_app(
             label_column=request.label_column,
             train_until=request.train_until,
         )
-        if result.get("status") == "trained":
+        if result.get("status") in {"trained", "review"}:
             result.update(
                 model_registry.save(
                     "multifeature",
@@ -1876,9 +1876,30 @@ def create_app(
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
             tail_rows_per_file=WALK_FORWARD_ROWS_PER_SECURITY,
         )
-        return walk_forward_score_baseline(
+        result = walk_forward_score_baseline(
             scores, labels, label_column=request.label_column, folds=request.folds
         )
+        evaluated = [fold for fold in result.get("folds", []) if fold.get("testCount", 0) > 0]
+        if evaluated:
+            result["status"] = (
+                "review"
+                if result.get("warnings")
+                or any(fold.get("status") == "review" for fold in evaluated)
+                else "trained"
+            )
+            result.update(
+                model_registry.save(
+                    "walk-forward",
+                    result,
+                    dependencies={
+                        "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
+                        "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
+                        "labelColumn": request.label_column,
+                        "folds": request.folds,
+                    },
+                )
+            )
+        return result
 
     @app.post("/api/validation/portfolio")
     def portfolio_validation(request: PortfolioValidationRequest):
