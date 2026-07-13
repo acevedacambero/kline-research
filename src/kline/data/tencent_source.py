@@ -32,9 +32,7 @@ class TencentHttpSource:
         symbol = f"{exchange.lower()}{code}"
         return self._fetch_symbol(symbol, start_date, end_date)
 
-    def index_history(
-        self, exchange: str, start_date: date, end_date: date
-    ) -> pd.DataFrame:
+    def index_history(self, exchange: str, start_date: date, end_date: date) -> pd.DataFrame:
         symbols = {"sh": "sh000001", "sz": "sz399001"}
         try:
             symbol = symbols[exchange.lower()]
@@ -44,28 +42,20 @@ class TencentHttpSource:
         result.attrs["provider"] = "tencent-http"
         return result
 
-    def _fetch_symbol(
-        self, symbol: str, start_date: date, end_date: date
-    ) -> pd.DataFrame:
+    def _fetch_symbol(self, symbol: str, start_date: date, end_date: date) -> pd.DataFrame:
         params = {
-            "param": (
-                f"{symbol},day,{start_date.isoformat()},{end_date.isoformat()},90,"
-            ),
+            "param": (f"{symbol},day,{start_date.isoformat()},{end_date.isoformat()},90,"),
         }
         for attempt in range(1, self.retries + 1):
             try:
-                response = self.session.get(
-                    self.url, params=params, timeout=self.timeout_seconds
-                )
+                response = self.session.get(self.url, params=params, timeout=self.timeout_seconds)
                 response.raise_for_status()
                 payload = response.json()
                 if not isinstance(payload, dict) or "code" not in payload:
                     raise ValueError("malformed Tencent response: provider code missing")
                 if payload["code"] != 0:
                     message = payload.get("msg", payload.get("message", "unknown error"))
-                    raise ValueError(
-                        f"Tencent provider error code={payload['code']}: {message}"
-                    )
+                    raise ValueError(f"Tencent provider error code={payload['code']}: {message}")
                 try:
                     instrument = payload["data"][symbol]
                 except (KeyError, TypeError) as exc:
@@ -101,12 +91,18 @@ class TencentHttpSource:
         ):
             raise ValueError("malformed Tencent daily rows")
         columns = ["date", "open", "close", "high", "low", "volume", "amount"]
-        values = [list(row[:7]) + [None] * max(0, 7 - len(row)) for row in rows]
+        values = []
+        for row in rows:
+            amount = (
+                row[6] if len(row) > 6 and not isinstance(row[6], (dict, list, tuple)) else None
+            )
+            values.append([*row[:6], amount])
         result = pd.DataFrame(values, columns=columns)
         try:
             result["date"] = pd.to_datetime(result["date"], errors="raise").dt.date
-            for column in columns[1:]:
+            for column in columns[1:6]:
                 result[column] = pd.to_numeric(result[column], errors="raise")
+            result["amount"] = pd.to_numeric(result["amount"], errors="coerce")
         except Exception as exc:
             raise ValueError(f"malformed Tencent daily rows: {exc}") from exc
         return result.sort_values("date").drop_duplicates("date").reset_index(drop=True)

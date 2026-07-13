@@ -1,6 +1,7 @@
 from datetime import date
 
 import pytest
+import pandas as pd
 import requests
 
 from kline.data.tencent_source import TencentHttpSource
@@ -52,8 +53,13 @@ def test_normalizes_raw_daily_rows_without_adjusted_series_mixing():
 
     assert list(frame.columns) == ["date", "open", "close", "high", "low", "volume", "amount"]
     assert frame.iloc[0].to_dict() == {
-        "date": date(2026, 7, 1), "open": 10, "close": 11, "high": 12,
-        "low": 9, "volume": 100, "amount": 1000,
+        "date": date(2026, 7, 1),
+        "open": 10,
+        "close": 11,
+        "high": 12,
+        "low": 9,
+        "volume": 100,
+        "amount": 1000,
     }
 
 
@@ -70,9 +76,7 @@ def test_uses_raw_daily_query_parameters_and_bounded_timeout():
     assert kwargs["params"] == {
         "param": "sh600000,day,2026-04-01,2026-07-01,90,",
     }
-    assert not any(
-        token in str(kwargs["params"]).lower() for token in ("qfq", "hfq")
-    )
+    assert not any(token in str(kwargs["params"]).lower() for token in ("qfq", "hfq"))
 
 
 def test_six_field_rows_keep_amount_column_with_missing_value():
@@ -86,11 +90,41 @@ def test_six_field_rows_keep_amount_column_with_missing_value():
     assert frame["amount"].isna().all()
 
 
+def test_corporate_action_metadata_in_seventh_field_is_not_treated_as_amount():
+    session = Session(
+        [
+            payload(
+                [
+                    [
+                        "2026-06-12",
+                        "11",
+                        "11.24",
+                        "11.25",
+                        "10.88",
+                        "2032355",
+                        {"djr": "2026-06-11", "cqr": "2026-06-12", "FHcontent": "10派3.6元"},
+                    ]
+                ]
+            )
+        ]
+    )
+
+    frame = TencentHttpSource(session=session).fetch_history(
+        "sh", "600000", date(2026, 6, 1), date(2026, 6, 30)
+    )
+
+    assert len(frame) == 1
+    assert frame.iloc[0]["close"] == 11.24
+    assert pd.isna(frame.iloc[0]["amount"])
+
+
 def test_retries_transient_failure_then_returns_rows():
-    session = Session([
-        requests.Timeout("late"),
-        payload([["2026-07-01", "10", "11", "12", "9", "100"]]),
-    ])
+    session = Session(
+        [
+            requests.Timeout("late"),
+            payload([["2026-07-01", "10", "11", "12", "9", "100"]]),
+        ]
+    )
 
     frame = TencentHttpSource(session=session, retries=2, retry_delay=0).fetch_history(
         "sh", "600000", date(2026, 4, 1), date(2026, 7, 1)
@@ -152,10 +186,12 @@ def test_retries_retryable_http_status_then_returns_rows(status_code):
     response = requests.Response()
     response.status_code = status_code
     http_error = requests.HTTPError("retryable", response=response)
-    session = Session([
-        Response(http_error=http_error),
-        payload([["2026-07-01", "10", "11", "12", "9", "100"]]),
-    ])
+    session = Session(
+        [
+            Response(http_error=http_error),
+            payload([["2026-07-01", "10", "11", "12", "9", "100"]]),
+        ]
+    )
 
     frame = TencentHttpSource(session=session, retries=2, retry_delay=0).fetch_history(
         "sh", "600000", date(2026, 4, 1), date(2026, 7, 1)
@@ -165,13 +201,11 @@ def test_retries_retryable_http_status_then_returns_rows(status_code):
     assert len(frame) == 1
 
 
-@pytest.mark.parametrize(
-    ("exchange", "symbol"), [("sh", "sh000001"), ("sz", "sz399001")]
-)
+@pytest.mark.parametrize(("exchange", "symbol"), [("sh", "sh000001"), ("sz", "sz399001")])
 def test_index_history_uses_explicit_tencent_market_mapping(exchange, symbol):
-    session = Session([
-        symbol_payload(symbol, [["2026-07-01", "3000", "3010", "3020", "2990", "100"]])
-    ])
+    session = Session(
+        [symbol_payload(symbol, [["2026-07-01", "3000", "3010", "3020", "2990", "100"]])]
+    )
 
     frame = TencentHttpSource(session=session).index_history(
         exchange, date(2026, 7, 1), date(2026, 7, 2)
