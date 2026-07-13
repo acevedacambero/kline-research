@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from .config import Settings, VERSIONS
 from .access import AccessDenied, CloudflareAccessVerifier
-from .data.akshare_source import AkShareSource
+from .data.akshare_source import AkShareSource, infer_exchange
 from .data.history_backfill import (
     BackfillCandidate,
     BackfillCoverageError,
@@ -814,9 +814,13 @@ def create_app(
         if security_cache is None or refresh:
             security_cache = source.list_securities()
             pipeline.save_security_master(security_cache)
-        security_cache = [
-            item for item in security_cache if item.get("exchange") in SUPPORTED_EXCHANGES
-        ]
+        corrected: list[dict[str, str]] = []
+        for item in security_cache:
+            code = str(item.get("code", "")).zfill(6)
+            exchange = infer_exchange(code)
+            if exchange in SUPPORTED_EXCHANGES and code.isdigit():
+                corrected.append({**item, "code": code, "exchange": exchange})
+        security_cache = corrected
         return security_cache
 
     def require_supported_market(exchange: str) -> str:
