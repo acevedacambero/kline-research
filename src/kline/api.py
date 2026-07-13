@@ -61,6 +61,7 @@ from .storage import atomic_write_text
 from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
 
 RESEARCH_SAMPLE_ROWS_PER_SECURITY = 100
+MODEL_INPUT_ROWS_PER_SECURITY = 250
 WALK_FORWARD_ROWS_PER_SECURITY = 500
 SCAN_ROWS_PER_SECURITY = 10
 
@@ -1643,7 +1644,7 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
-            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
+            tail_rows_per_file=MODEL_INPUT_ROWS_PER_SECURITY,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
@@ -1813,7 +1814,7 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
-            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
+            tail_rows_per_file=MODEL_INPUT_ROWS_PER_SECURITY,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
@@ -1833,7 +1834,7 @@ def create_app(
                 "volume_ratio_5",
                 "volatility_20",
             ],
-            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
+            tail_rows_per_file=MODEL_INPUT_ROWS_PER_SECURITY,
         )
         result = train_multifeature_baseline(
             scores,
