@@ -50,7 +50,6 @@ from .p1.batch import BatchLabelBuilder, LabelDatasetStore
 from .p1.market_rules import is_no_limit_session, status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
-from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
 from .model import (
     ModelRegistry,
     train_multifeature_baseline,
@@ -59,6 +58,11 @@ from .model import (
 )
 from .ops.provider_probe import ProviderProbeRunner
 from .storage import atomic_write_text
+from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
+
+RESEARCH_SAMPLE_ROWS_PER_SECURITY = 100
+WALK_FORWARD_ROWS_PER_SECURITY = 500
+SCAN_ROWS_PER_SECURITY = 10
 
 
 class _InjectedProviderAdapter:
@@ -1529,7 +1533,7 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", request.factor_column, "usable"],
-            tail_rows_per_file=250,
+            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
@@ -1543,7 +1547,7 @@ def create_app(
                 "path_success_p20",
                 "max_drawdown_p20",
             ],
-            tail_rows_per_file=250,
+            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
         return validate_single_factor(
             scores,
@@ -1561,13 +1565,13 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
-            tail_rows_per_file=250,
+            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
             ["exchange", "code", "signal_date"],
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
-            tail_rows_per_file=250,
+            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
         return calibrate_score(
             scores,
@@ -1584,7 +1588,7 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "grade", "usable"],
-            tail_rows_per_file=10,
+            tail_rows_per_file=SCAN_ROWS_PER_SECURITY,
         )
         if scores.empty:
             return {
@@ -1639,13 +1643,13 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
-            tail_rows_per_file=250,
+            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
             ["exchange", "code", "signal_date"],
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
-            tail_rows_per_file=250,
+            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
         result = train_score_baseline(
             scores,
@@ -1809,13 +1813,13 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
-            tail_rows_per_file=250,
+            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
             ["exchange", "code", "signal_date"],
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
-            tail_rows_per_file=250,
+            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
         features = read_dataset_glob(
             "data-foundation-v1/features/*/*/*/*.parquet",
@@ -1829,7 +1833,7 @@ def create_app(
                 "volume_ratio_5",
                 "volatility_20",
             ],
-            tail_rows_per_file=250,
+            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
         result = train_multifeature_baseline(
             scores,
@@ -1864,13 +1868,13 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
-            tail_rows_per_file=500,
+            tail_rows_per_file=WALK_FORWARD_ROWS_PER_SECURITY,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
             ["exchange", "code", "signal_date"],
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
-            tail_rows_per_file=500,
+            tail_rows_per_file=WALK_FORWARD_ROWS_PER_SECURITY,
         )
         return walk_forward_score_baseline(
             scores, labels, label_column=request.label_column, folds=request.folds
@@ -1883,13 +1887,13 @@ def create_app(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
             ["exchange", "code", "date", "score", "usable"],
-            tail_rows_per_file=250,
+            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
         labels = read_dataset_glob(
             "data-foundation-v1/labels/*/*/*.parquet",
             ["exchange", "code", "signal_date"],
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
-            tail_rows_per_file=250,
+            tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
         return validate_top_score_portfolio(
             scores,
