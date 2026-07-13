@@ -155,6 +155,24 @@ def test_adjustment_factors_normalize_qfq_and_hfq_tables():
     }
 
 
+def test_adjustment_factors_use_identity_when_one_sina_factor_is_unavailable():
+    client = FakeAkShare()
+    calls = []
+
+    def daily(**kwargs):
+        calls.append(kwargs["adjust"])
+        if kwargs["adjust"] == "qfq-factor":
+            raise RuntimeError("sina hfq factor not available")
+        return pd.DataFrame([{"date": "2024-01-02", "hfq_factor": "1.25"}])
+
+    client.stock_zh_a_daily = daily
+    factors = AkShareSource(client, retries=1, retry_delay=0).adjustment_factors("689009")
+    assert factors.iloc[0]["qfq_factor"] == 1.0
+    assert factors.iloc[0]["hfq_factor"] == 1.25
+    assert factors.iloc[0]["factor_source"] == "stock_zh_a_daily_approx"
+    assert calls == ["qfq-factor", "hfq-factor"]
+
+
 def test_trading_calendar_uses_dedicated_calendar_provider():
     dates = AkShareSource(FakeAkShare()).trading_calendar()
     assert dates == [date(2024, 1, 2), date(2024, 1, 3)]

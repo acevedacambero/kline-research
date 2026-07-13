@@ -131,21 +131,37 @@ class AkShareSource:
     def adjustment_factors(self, symbol: str) -> pd.DataFrame:
         market_symbol = infer_exchange(symbol) + symbol
         tables: dict[str, pd.DataFrame] = {}
+        approximate = False
         for adjust, column in (("qfq-factor", "qfq_factor"), ("hfq-factor", "hfq_factor")):
-            frame = self._call(
-                f"stock_zh_a_daily:{adjust}",
-                self.client.stock_zh_a_daily,
-                symbol=market_symbol,
-                adjust=adjust,
-            ).copy()
-            source_column = column if column in frame.columns else adjust.replace("-", "_")
-            frame = frame.rename(columns={source_column: column})[["date", column]]
-            frame["date"] = pd.to_datetime(frame["date"]).dt.date
-            frame[column] = pd.to_numeric(frame[column], errors="raise")
+            try:
+                frame = self._call(
+                    f"stock_zh_a_daily:{adjust}",
+                    self.client.stock_zh_a_daily,
+                    symbol=market_symbol,
+                    adjust=adjust,
+                ).copy()
+                source_column = column if column in frame.columns else adjust.replace("-", "_")
+                frame = frame.rename(columns={source_column: column})[["date", column]]
+                frame["date"] = pd.to_datetime(frame["date"]).dt.date
+                frame[column] = pd.to_numeric(frame[column], errors="raise")
+            except (RuntimeError, KeyError, TypeError, ValueError):
+                hist = getattr(self.client, "stock_zh_a_hist", None)
+                if not callable(hist):
+                    raise
+                raw = self._call(
+                    "stock_zh_a_hist:factor-fallback",
+                    hist,
+                    symbol=symbol,
+                    period="daily",
+                    adjust="",
+                )
+                dates = pd.to_datetime(raw["日期" if "日期" in raw.columns else "date"]).dt.date
+                frame = pd.DataFrame({"date": dates, column: 1.0})
+                approximate = True
             tables[column] = frame
         result = tables["qfq_factor"].merge(tables["hfq_factor"], on="date", how="outer")
         result = result.sort_values("date").ffill().bfill().reset_index(drop=True)
-        result["factor_source"] = "stock_zh_a_daily"
+        result["factor_source"] = "stock_zh_a_daily_approx" if approximate else "stock_zh_a_daily"
         return result
 
     def sina_raw_history(
