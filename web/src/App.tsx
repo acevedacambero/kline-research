@@ -86,6 +86,7 @@ export function App() {
     api.providerGate().then(setProviderGate).catch(() => undefined)
     api.readiness().then(setReadiness).catch(() => undefined)
     api.scoreStatus().then(setScoreStatus).catch(() => undefined)
+    api.featureCatalog().then(setFeatureCatalog).catch(() => undefined)
     api.modelRegistry().then(setModelRegistry).catch(() => undefined)
     api.labelStatus().then(setLabelStatus).catch(() => undefined)
     const restoreTask = (task: import('./api').GenericTask) => {
