@@ -830,6 +830,23 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
+  function exportDatasetQuality() {
+    if (!datasetQuality) return;
+    const payload = JSON.stringify(
+      { exportedAt: new Date().toISOString(), report: datasetQuality },
+      null,
+      2,
+    );
+    const url = URL.createObjectURL(
+      new Blob([payload], { type: "application/json;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `data-quality-${datasetQuality.latestDataDate ?? new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function exportModelRegistry() {
     if (!modelRegistry?.artifacts?.length) return;
     const csv = [
@@ -1045,57 +1062,86 @@ export function App() {
             </strong>
           </summary>
           {datasetQuality ? (
-            <div className="quality-grid">
-              <article>
-                <span>过期行情</span>
-                <strong>{datasetQuality.staleSecurities ?? 0}</strong>
-                <small>
-                  {datasetQuality.staleExamples
-                    ?.slice(0, 5)
-                    .map((item) => `${item.security}(${item.latestDate})`)
-                    .join("、") || "无"}
-                </small>
-              </article>
-              <article>
-                <span>不可读文件</span>
-                <strong>{datasetQuality.unreadableSecurities ?? 0}</strong>
-                <small>
-                  {datasetQuality.unreadableExamples?.slice(0, 5).join("；") ||
-                    "无"}
-                </small>
-              </article>
-              <article>
-                <span>近似复权</span>
-                <strong>
-                  {datasetQuality.approximateFactorSecurities ?? 0}
-                </strong>
-                <small>
-                  {datasetQuality.approximateFactorExamples
-                    ?.slice(0, 5)
-                    .join("、") || "无"}
-                </small>
-              </article>
-              <article>
-                <span>短历史 / 补全失败</span>
-                <strong>
-                  {datasetQuality.shortHistoryCached ?? 0} /{" "}
-                  {datasetQuality.historyBackfillFailed ?? 0}
-                </strong>
-                <small>
-                  上市历史不足 {datasetQuality.listingHistoryShort ?? 0}
-                </small>
-              </article>
-              <article className="quality-events-card">
-                <span>最近质量事件</span>
-                <strong>{datasetQuality.qualityEvents?.length ?? 0}</strong>
-                <small>
-                  {datasetQuality.qualityEvents
-                    ?.slice(0, 5)
-                    .map((event) => `${event.dataset_key}：${event.event_type}`)
-                    .join("；") || "无质量事件"}
-                </small>
-              </article>
-            </div>
+            <>
+              <div className="quality-grid">
+                <article>
+                  <span>过期行情</span>
+                  <strong>{datasetQuality.staleSecurities ?? 0}</strong>
+                  <small>
+                    {datasetQuality.staleExamples
+                      ?.slice(0, 5)
+                      .map((item) => `${item.security}(${item.latestDate})`)
+                      .join("、") || "无"}
+                  </small>
+                </article>
+                <article>
+                  <span>不可读文件</span>
+                  <strong>{datasetQuality.unreadableSecurities ?? 0}</strong>
+                  <small>
+                    {datasetQuality.unreadableExamples
+                      ?.slice(0, 5)
+                      .join("；") || "无"}
+                  </small>
+                </article>
+                <article>
+                  <span>近似复权</span>
+                  <strong>
+                    {datasetQuality.approximateFactorSecurities ?? 0}
+                  </strong>
+                  <small>
+                    {datasetQuality.approximateFactorExamples
+                      ?.slice(0, 5)
+                      .join("、") || "无"}
+                  </small>
+                </article>
+                <article>
+                  <span>短历史 / 补全失败</span>
+                  <strong>
+                    {datasetQuality.shortHistoryCached ?? 0} /{" "}
+                    {datasetQuality.historyBackfillFailed ?? 0}
+                  </strong>
+                  <small>
+                    上市历史不足 {datasetQuality.listingHistoryShort ?? 0}
+                  </small>
+                </article>
+                <article className="quality-events-card">
+                  <span>最近质量事件</span>
+                  <strong>{datasetQuality.qualityEvents?.length ?? 0}</strong>
+                  <small>
+                    {datasetQuality.qualityEvents
+                      ?.slice(0, 5)
+                      .map(
+                        (event) => `${event.dataset_key}：${event.event_type}`,
+                      )
+                      .join("；") || "无质量事件"}
+                  </small>
+                </article>
+              </div>
+              {datasetQuality.qualityEvents?.length > 0 && (
+                <ul className="quality-event-list">
+                  {datasetQuality.qualityEvents.map((event, index) => (
+                    <li
+                      key={`${event.dataset_key}-${event.created_at}-${index}`}
+                    >
+                      <strong>{event.dataset_key}</strong>
+                      <span>
+                        {event.event_type} · {event.severity}
+                        {event.created_at
+                          ? ` · ${new Date(event.created_at).toLocaleString("zh-CN")}`
+                          : ""}
+                      </span>
+                      <small>{event.message || "无补充说明"}</small>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button
+                className="secondary quality-export"
+                onClick={exportDatasetQuality}
+              >
+                导出完整质量报告 JSON
+              </button>
+            </>
           ) : (
             <p className="muted">正在读取质量报告…</p>
           )}

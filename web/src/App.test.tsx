@@ -61,6 +61,9 @@ describe("App", () => {
                   {
                     dataset_key: "stock:sh:689009",
                     event_type: "factor-approximation",
+                    severity: "warning",
+                    message: "新浪复权因子不可用，已使用单位因子",
+                    created_at: "2026-07-15T12:00:00Z",
                   },
                 ],
               }
@@ -79,6 +82,12 @@ describe("App", () => {
     expect(screen.getByText(/sh600000\(2026-07-01\)/)).toBeInTheDocument();
     expect(screen.getByText(/sz000001: broken parquet/)).toBeInTheDocument();
     expect(screen.getAllByText(/stock:sh:689009/).length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("新浪复权因子不可用，已使用单位因子"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "导出完整质量报告 JSON" }),
+    ).toBeInTheDocument();
   });
 
   it("renders persisted P7 model registry artifacts", async () => {
