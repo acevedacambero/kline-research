@@ -119,6 +119,16 @@ const taskStatusNames: Record<string, string> = {
   interrupted: "已中断（可恢复）",
 };
 const taskStatusName = (status: string) => taskStatusNames[status] ?? status;
+const initialAuditParameter = (name: string, fallback: string) => {
+  const value = new URLSearchParams(window.location.search).get(name)?.trim();
+  if (!value) return fallback;
+  if (name === "exchange")
+    return value === "sh" || value === "sz" ? value : fallback;
+  if (name === "code") return /^\d{6}$/.test(value) ? value : fallback;
+  if (name === "signalDate")
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : fallback;
+  return value;
+};
 const providerNames: Record<string, string> = {
   tencent: "腾讯股票",
   "tencent-index": "腾讯指数",
@@ -156,12 +166,18 @@ export function App() {
     null,
   );
   const [labelStatus, setLabelStatus] = useState<LabelStatus | null>(null);
-  const [exchange, setExchange] = useState("sh");
-  const [code, setCode] = useState("600000");
+  const [exchange, setExchange] = useState(() =>
+    initialAuditParameter("exchange", "sh"),
+  );
+  const [code, setCode] = useState(() =>
+    initialAuditParameter("code", "600000"),
+  );
   const [securitySuggestions, setSecuritySuggestions] = useState<Security[]>(
     [],
   );
-  const [signalDate, setSignalDate] = useState("2024-01-02");
+  const [signalDate, setSignalDate] = useState(() =>
+    initialAuditParameter("signalDate", "2024-01-02"),
+  );
   const [bars, setBars] = useState<Bar[]>([]);
   const [audit, setAudit] = useState<Audit | null>(null);
   const [featureAudit, setFeatureAudit] = useState<FeatureAudit | null>(null);
@@ -368,6 +384,18 @@ export function App() {
     if (selected) setExchange(selected.exchange);
   };
 
+  const persistAuditLocation = (nextSignalDate = signalDate) => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("exchange", exchange);
+    params.set("code", code);
+    params.set("signalDate", nextSignalDate);
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}?${params.toString()}#p1-auditor`,
+    );
+  };
+
   async function runAudit(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -383,6 +411,7 @@ export function App() {
       setAudit(nextAudit);
       setFeatureAudit(nextFeatures);
       setScoreAudit(nextScore);
+      persistAuditLocation();
       setMessage(`已载入 ${nextBars.length} 个交易日`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "计算失败");
@@ -406,6 +435,7 @@ export function App() {
       }
       const nextSignalDate = nextBars[signalIndex].date;
       setSignalDate(nextSignalDate);
+      persistAuditLocation(nextSignalDate);
       setMessage(`已选择最近 P60 成熟日 ${nextSignalDate}，可点击“计算并审计”`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "读取交易日失败");

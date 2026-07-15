@@ -9,7 +9,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
 describe("App", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    window.history.replaceState(null, "", "/");
+  });
   it("shows data status and P1 audit workspace", async () => {
     vi.stubGlobal(
       "fetch",
@@ -35,6 +38,37 @@ describe("App", () => {
     expect(
       screen.getAllByRole("option", { name: "P5 可执行顺延卖出" }),
     ).toHaveLength(4);
+  });
+
+  it("restores audit inputs from a bookmarked URL", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?exchange=sz&code=000001&signalDate=2025-01-02#p1-auditor",
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => ({
+        ok: true,
+        json: async () =>
+          String(input).startsWith("/api/tasks/recent")
+            ? []
+            : String(input).includes("/quality")
+              ? { totalCached: 0 }
+              : {
+                  status: "ok",
+                  dataSource: "AkShare",
+                  cachePath: "data",
+                  versions: {},
+                },
+      })),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByDisplayValue("000001")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2025-01-02")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "交易所" })).toHaveValue("sz");
   });
 
   it("selects the latest signal date with a mature P60 window", async () => {
@@ -88,6 +122,7 @@ describe("App", () => {
         `已选择最近 P60 成熟日 ${expectedDate}，可点击“计算并审计”`,
       ),
     ).toBeInTheDocument();
+    expect(window.location.search).toContain(`signalDate=${expectedDate}`);
   });
 
   it("shows actionable data quality examples", async () => {
@@ -506,6 +541,9 @@ describe("App", () => {
     expect(
       screen.getByRole("button", { name: "导出当前审计报告 JSON" }),
     ).toBeInTheDocument();
+    expect(window.location.search).toContain("exchange=sh");
+    expect(window.location.search).toContain("code=600000");
+    expect(window.location.hash).toBe("#p1-auditor");
   });
 
   it("offers Shanghai and Shenzhen markets only", async () => {
