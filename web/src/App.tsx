@@ -812,6 +812,15 @@ export function App() {
             <strong>{health?.versions.limitRuleVersion ?? "—"}</strong>
           </div>
           <div className="version">
+            <span>复权因子近似</span>
+            <strong>{datasetQuality?.approximateFactorSecurities ?? "—"}</strong>
+            <small>
+              {datasetQuality?.approximateFactorSecurities
+                ? `需审计：${datasetQuality.approximateFactorExamples.slice(0, 3).join("、")}`
+                : "未发现近似复权因子"}
+            </small>
+          </div>
+          <div className="version">
             <span>特征版本</span>
             <strong>{health?.versions.featureDefinitionVersion ?? "—"}</strong>
           </div>

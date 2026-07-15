@@ -173,6 +173,17 @@ class DatasetPipeline:
                     ) values (?, 'fields-partial', 'warning', 'fallback rows have partial fields')""",
                     [dataset_key],
                 )
+            if (
+                "factor_source" in factors
+                and factors["factor_source"].astype(str).str.contains("approx", case=False).any()
+            ):
+                connection.execute(
+                    """insert into data_quality_events(
+                        dataset_key, event_type, severity, message, content_hash
+                    ) values (?, 'factor-approximation', 'warning',
+                        'one or more adjustment factors use an audited approximation', ?)""",
+                    [dataset_key, content_hash],
+                )
             for length in (5, 10, 20, 60):
                 normalized[f"ma{length}"] = normalized["close_qfq"].rolling(length).mean().round(6)
             normalized_path.parent.mkdir(parents=True, exist_ok=True)

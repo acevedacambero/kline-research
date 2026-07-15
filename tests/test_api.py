@@ -1116,6 +1116,22 @@ def test_quality_reports_history_backfill_counts(tmp_path):
     assert response.json()["historyBackfillFailed"] == 0
 
 
+def test_quality_reports_current_approximate_factor_securities(tmp_path):
+    data_path = tmp_path / "data"
+    pipeline = DatasetPipeline(data_path)
+    pipeline.initialize_catalog()
+    raw = pd.DataFrame([{"date": date(2024, 1, 2), "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.5, "volume": 100, "amount": 1000.0}])
+    factors = pd.DataFrame([{"date": date(1900, 1, 1), "qfq_factor": 1.0, "hfq_factor": 1.0, "factor_source": "stock_zh_a_daily_approx"}])
+    pipeline.import_security("sh", "689009", raw, factors)
+
+    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).get(
+        "/api/datasets/quality"
+    )
+
+    assert response.json()["approximateFactorSecurities"] == 1
+    assert response.json()["approximateFactorExamples"] == ["stock:sh:689009"]
+
+
 def test_quality_aggregates_weighted_approximate_rule_ratio(tmp_path):
     root = tmp_path / "data" / "data-foundation-v1" / "features" / "v1" / "identity" / "sh"
     root.mkdir(parents=True)

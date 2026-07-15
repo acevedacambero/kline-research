@@ -1172,6 +1172,18 @@ def create_app(
             if market in SUPPORTED_EXCHANGES
         }
         events = pipeline.quality_events(limit=100_000)
+        current_hashes = {
+            item["dataset_key"]: item["content_hash"]
+            for item in pipeline.dataset_manifest_rows()
+        }
+        approximate_factor_securities = sorted(
+            {
+                event["dataset_key"]
+                for event in events
+                if event["event_type"] == "factor-approximation"
+                and event.get("content_hash") == current_hashes.get(event["dataset_key"])
+            }
+        )
         with history_backfill_scan_lock:
             if history_backfill_candidate_count is None:
                 history_backfill_candidate_count = len(history_backfill_service.scan())
@@ -1278,6 +1290,8 @@ def create_app(
             "historyBackfillFailed": sum(
                 event["event_type"] == "history-backfill-failed" for event in events
             ),
+            "approximateFactorSecurities": len(approximate_factor_securities),
+            "approximateFactorExamples": approximate_factor_securities[:20],
             **approximate_quality,
             **freshness_quality,
             "qualityEvents": events[:100],

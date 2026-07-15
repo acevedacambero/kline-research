@@ -89,3 +89,17 @@ def test_factor_coverage_failure_is_recorded_as_quality_event(tmp_path):
         pipeline.import_security("sh", "600000", raw, factors)
     events = pipeline.quality_events()
     assert events[0]["event_type"] == "factor-coverage-error"
+
+
+def test_approximate_factor_source_is_recorded_as_quality_event(tmp_path):
+    raw = pd.DataFrame([{"date": date(2024, 1, 2), "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.5, "volume": 100, "amount": 1000.0}])
+    factors = pd.DataFrame([{"date": date(1900, 1, 1), "qfq_factor": 1.0, "hfq_factor": 1.0, "factor_source": "stock_zh_a_daily_approx"}])
+    pipeline = DatasetPipeline(tmp_path / "output")
+    pipeline.initialize_catalog()
+
+    report = pipeline.import_security("sh", "689009", raw, factors)
+
+    events = pipeline.quality_events()
+    assert events[0]["event_type"] == "factor-approximation"
+    assert events[0]["content_hash"] == pipeline.dataset_manifest_rows()[0]["content_hash"]
+    assert report.status == "imported"
