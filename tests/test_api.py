@@ -1019,6 +1019,30 @@ def test_full_import_filters_beijing_market(tmp_path):
     assert response.json()["requested"] == 2
 
 
+def test_failed_import_scope_retries_latest_failed_securities(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), MixedMarketSource())
+    with TestClient(app) as client:
+        started = client.post("/api/datasets/import", json={"scope": "representative"})
+        task_id = started.json()["taskId"]
+        for _ in range(100):
+            task = client.get(f"/api/datasets/tasks/{task_id}").json()
+            if task["status"] not in {"queued", "running"}:
+                break
+            time.sleep(0.01)
+        retried = client.post("/api/datasets/import", json={"scope": "failed"})
+
+    assert task["errors"]
+    assert retried.status_code == 202
+    assert retried.json()["requested"] == len(task["errors"])
+
+
+def test_failed_import_scope_reports_when_no_failures_exist(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), MixedMarketSource())
+    response = TestClient(app).post("/api/datasets/import", json={"scope": "failed"})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "NO_FAILED_IMPORTS"
+
+
 def test_beijing_market_requests_are_rejected_before_data_access(tmp_path):
     app = create_app(Settings(data_path=tmp_path / "data"), MixedMarketSource())
     with TestClient(app) as client:

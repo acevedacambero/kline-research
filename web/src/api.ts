@@ -102,7 +102,7 @@ export const api = {
   audit: (exchange: string, code: string, signalDate: string) => request<Audit>('/api/p1/audit', {
     method: 'POST', body: JSON.stringify({ exchange, code, signal_date: signalDate }),
   }),
-  importData: (scope: 'representative' | 'all') => request<{ taskId: string; total: number; requested: number; skipped: number }>('/api/datasets/import', {
+  importData: (scope: 'representative' | 'failed' | 'all') => request<{ taskId: string; total: number; requested: number; skipped: number }>('/api/datasets/import', {
     method: 'POST', body: JSON.stringify({ scope }),
   }),
   importTask: (taskId: string) => request<{ status: string; done: number; total: number; errors: unknown[]; currentSecurity?: string; stage?: string; speed?: number; etaSeconds?: number; directAvailable?: boolean }>(`/api/datasets/tasks/${taskId}`),

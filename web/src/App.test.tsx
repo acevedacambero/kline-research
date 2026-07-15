@@ -107,6 +107,7 @@ describe('App', () => {
 
     expect(Array.from(exchangeSelect.options).map(option => option.value)).toEqual(['sh', 'sz'])
     expect(container.querySelector('option[value="bj"]')).toBeNull()
+    expect(screen.getByRole('button', { name: '重试下载错误' })).toBeInTheDocument()
   })
 
   it('starts history backfill and renders its terminal summary', async () => {

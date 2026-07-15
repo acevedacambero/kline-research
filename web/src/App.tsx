@@ -315,7 +315,7 @@ export function App() {
     }
   }
 
-  async function startImport(scope: "representative" | "all") {
+  async function startImport(scope: "representative" | "failed" | "all") {
     setBusy(true);
     try {
       const result = await api.importData(scope);
@@ -325,7 +325,11 @@ export function App() {
       const poll = async () => {
         const task = await api.importTask(result.taskId);
         showTask(
-          scope === "all" ? "全市场行情" : "代表样本行情",
+          scope === "all"
+            ? "全市场行情"
+            : scope === "failed"
+              ? "失败行情重试"
+              : "代表样本行情",
           result.taskId,
           task,
         );
@@ -946,6 +950,13 @@ export function App() {
             onClick={() => startImport("all")}
           >
             高速下载全市场
+          </button>
+          <button
+            className="secondary"
+            disabled={busy}
+            onClick={() => startImport("failed")}
+          >
+            重试下载错误
           </button>
           <button
             className="secondary"

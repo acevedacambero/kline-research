@@ -1120,12 +1120,41 @@ def create_app(
                 raise HTTPException(
                     503, detail={"code": "AKSHARE_UNAVAILABLE", "message": str(exc)}
                 ) from exc
+        elif request.scope == "failed":
+            failed_job = next(
+                (
+                    job
+                    for job in reversed(job_store.list())
+                    if job.job_type == "import"
+                    and isinstance(job.result, dict)
+                    and job.result.get("errors")
+                ),
+                None,
+            )
+            if failed_job is None or not isinstance(failed_job.payload, dict):
+                raise HTTPException(
+                    409,
+                    detail={
+                        "code": "NO_FAILED_IMPORTS",
+                        "message": "没有可重试的数据下载错误",
+                    },
+                )
+            failed_keys = {
+                str(error.get("security"))
+                for error in failed_job.result["errors"]
+                if isinstance(error, dict) and error.get("security")
+            }
+            securities = [
+                item
+                for item in failed_job.payload.get("securities", [])
+                if f"{item.get('exchange', '')}{item.get('code', '')}" in failed_keys
+            ]
         else:
             raise HTTPException(
                 422,
                 detail={
                     "code": "INVALID_IMPORT_SCOPE",
-                    "message": "scope must be representative or all",
+                    "message": "scope must be representative, failed, or all",
                 },
             )
         requested_total = len(securities)
