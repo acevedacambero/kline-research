@@ -693,6 +693,26 @@ select {
   text-align: right;
   overflow-wrap: anywhere;
 }
+.feature-audit-meta {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+.feature-audit-meta article {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #1c2a39;
+  border-radius: 8px;
+  background: #0a1119;
+}
+.feature-audit-meta strong {
+  display: block;
+  color: #b9c5d2;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
 .calibration-controls {
   display: flex;
   min-width: 0;
@@ -1032,7 +1052,8 @@ main > section[id] {
   .score-panel,
   .score-components,
   .validation-panel,
-  .readiness-summary {
+  .readiness-summary,
+  .feature-audit-meta {
     grid-template-columns: minmax(0, 1fr);
   }
   .calibration-controls {

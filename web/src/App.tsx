@@ -44,17 +44,41 @@ const featureNames: Record<string, string> = {
   ma10: "MA10",
   ma20: "MA20",
   ma60: "MA60",
+  ma5_slope: "MA5 五日斜率",
+  ma10_slope: "MA10 五日斜率",
+  ma20_slope: "MA20 五日斜率",
+  ma60_slope: "MA60 五日斜率",
+  close_to_ma5: "收盘偏离 MA5",
+  close_to_ma10: "收盘偏离 MA10",
+  close_to_ma20: "收盘偏离 MA20",
+  close_to_ma60: "收盘偏离 MA60",
   bullish_alignment: "多头排列",
+  bearish_alignment: "空头排列",
   range_position_20: "20 日位置",
+  range_position_60: "60 日位置",
+  range_position_120: "120 日位置",
+  range_position_250: "250 日位置",
   drawdown_from_high_20: "距 20 日高点",
+  drawdown_from_high_60: "距 60 日高点",
+  drawdown_from_high_120: "距 120 日高点",
+  drawdown_from_high_250: "距 250 日高点",
+  return_5: "5 日动量",
+  return_10: "10 日动量",
   return_20: "20 日动量",
+  return_60: "60 日动量",
+  return_120: "120 日动量",
   volume_ratio_5: "5 日量比",
+  volume_percentile_20: "20 日成交量分位",
+  amount: "成交额",
   volatility_20: "20 日波动",
+  amplitude: "当日振幅",
   is_limit_up: "当日涨停",
   limit_up_count_20: "20 日涨停数",
   locked_limit_up_streak: "连续一字板",
   gap_open: "开盘缺口",
   suspension_gap_days: "停牌间隔",
+  is_approx: "交易规则是否近似",
+  rule_reason: "交易规则依据",
 };
 const featureValue = (value: FeatureValue) =>
   value == null
@@ -65,7 +89,7 @@ const featureValue = (value: FeatureValue) =>
         : "否"
       : typeof value === "number"
         ? value.toFixed(4)
-        : value;
+        : p1TermName(value);
 const ResultLabelOptions = () => (
   <>
     <option value="p5_executable_return">P5 计划收盘卖出</option>
@@ -148,9 +172,33 @@ const p1TermNames: Record<string, string> = {
   "target close executable": "计划日收盘可执行卖出",
   "exit delayed": "计划日无法卖出，已顺延",
   "exit blocked through delay window": "整个顺延窗口均无法卖出",
+  "board/date rule": "按交易所、板块和日期适用正式涨跌幅规则",
+  "approximated ST": "历史 ST 状态采用近似推断",
+  "historical status inferred": "历史特殊交易状态由现有信息近似推断",
+  "available_history<120": "有效历史不足 120 个交易日",
+  "limit-rule-approx": "交易规则使用了近似状态",
 };
 const p1TermName = (value?: string | null) =>
   value ? (p1TermNames[value] ?? value) : "—";
+const researchStatusNames: Record<string, string> = {
+  trained: "已完成训练",
+  review: "需要复核",
+  insufficient_data: "数据不足",
+  insufficient_sample: "样本不足",
+  usable: "可用于研究",
+  ready: "就绪",
+};
+const researchStatusName = (status?: string | null) =>
+  status ? (researchStatusNames[status] ?? status) : "—";
+const priceBasisNames: Record<string, string> = {
+  "raw+qfq+total-return": "原始价 + 前复权 + 总回报",
+};
+const versionNames: Record<string, string> = {
+  snapshotVersion: "数据快照",
+  factorVersion: "复权因子",
+  limitRuleVersion: "交易规则",
+  featureDefinitionVersion: "特征定义",
+};
 const initialAuditParameter = (name: string, fallback: string) => {
   const value = new URLSearchParams(window.location.search).get(name)?.trim();
   if (!value) return fallback;
@@ -738,7 +786,7 @@ export function App() {
     try {
       const result = await api.trainBaseline(baselineTrainUntil, baselineLabel);
       setBaseline(result);
-      setMessage(`P7 基线模型：${result.status}`);
+      setMessage(`P7 基线模型：${researchStatusName(result.status)}`);
       void api
         .modelRegistry()
         .then(setModelRegistry)
@@ -771,7 +819,7 @@ export function App() {
         baselineLabel,
       );
       setMultifeature(result);
-      setMessage(`P7 多特征模型：${result.status}`);
+      setMessage(`P7 多特征模型：${researchStatusName(result.status)}`);
       void api
         .modelRegistry()
         .then(setModelRegistry)
@@ -1709,7 +1757,7 @@ export function App() {
                   <tr key={fold.trainUntil}>
                     <td>{fold.trainUntil}</td>
                     <td>{fold.testUntil}</td>
-                    <td>{fold.status}</td>
+                    <td>{researchStatusName(fold.status)}</td>
                     <td>{fold.trainCount}</td>
                     <td>{fold.testCount}</td>
                     <td>{fold.auc == null ? "—" : fold.auc.toFixed(3)}</td>
@@ -1760,7 +1808,7 @@ export function App() {
                   <td>
                     {new Date(artifact.createdAt).toLocaleString("zh-CN")}
                   </td>
-                  <td>{artifact.status ?? "—"}</td>
+                  <td>{researchStatusName(artifact.status)}</td>
                   <td>{artifact.labelColumn ?? "—"}</td>
                   <td>{artifact.version ?? "—"}</td>
                   <td title={artifact.modelId}>{artifact.modelId}</td>
@@ -1792,7 +1840,7 @@ export function App() {
                 {multifeature.trainCount} / {multifeature.testCount}
               </strong>
               <small>
-                状态 {multifeature.status} · AUC{" "}
+                状态 {researchStatusName(multifeature.status)} · AUC{" "}
                 {multifeature.auc == null ? "—" : multifeature.auc.toFixed(3)}
               </small>
             </article>
@@ -1812,7 +1860,10 @@ export function App() {
               <strong>{Object.keys(multifeature.weights).length}</strong>
               <small>
                 {Object.entries(multifeature.weights)
-                  .map(([key, value]) => `${key}:${value.toFixed(2)}`)
+                  .map(
+                    ([key, value]) =>
+                      `${featureNames[key] ?? key}:${value.toFixed(2)}`,
+                  )
                   .join(" · ") || "暂无权重"}
               </small>
             </article>
@@ -2497,7 +2548,7 @@ export function App() {
               <small>
                 {scoreAudit.score.grade} ·{" "}
                 {scoreAudit.score.usable ? "可用" : "需审计"}{" "}
-                {scoreAudit.score.reasons.join(" · ")}
+                {scoreAudit.score.reasons.map(p1TermName).join(" · ")}
               </small>
             </article>
             <div className="score-components">
@@ -2510,7 +2561,10 @@ export function App() {
                       <strong>
                         {item.score.toFixed(1)} / {item.weight}
                       </strong>
-                      <small>{item.reasons.join(" · ") || "无可用特征"}</small>
+                      <small>
+                        {item.reasons.map(p1TermName).join(" · ") ||
+                          "无可用特征"}
+                      </small>
                     </article>
                   );
                 },
@@ -2550,10 +2604,12 @@ export function App() {
               <span>可用特征</span>
               <strong>{featureCatalog.featureColumns?.length ?? 0}</strong>
               <small>
-                {featureCatalog.featureColumns?.slice(0, 5).join("、") ||
-                  "暂无特征"}
+                {featureCatalog.featureColumns
+                  ?.slice(0, 5)
+                  .map((name) => featureNames[name] ?? name)
+                  .join("、") || "暂无特征"}
                 {featureCatalog.missingColumns?.length
-                  ? ` · 缺失 ${featureCatalog.missingColumns.join("、")}`
+                  ? ` · 缺失 ${featureCatalog.missingColumns.map((name) => featureNames[name] ?? name).join("、")}`
                   : ""}
               </small>
             </article>
@@ -2573,30 +2629,53 @@ export function App() {
           {featureAudit && (
             <span className="message">
               历史 {featureAudit.availableHistory} 日 ·{" "}
-              {featureAudit.priceBasis}
+              {priceBasisNames[featureAudit.priceBasis] ??
+                featureAudit.priceBasis}
             </span>
           )}
         </div>
         {featureAudit ? (
-          <div className="feature-groups">
-            {(Object.keys(groupNames) as Array<keyof typeof groupNames>).map(
-              (group) => (
-                <article key={group}>
-                  <h3>{groupNames[group]}</h3>
-                  <dl>
-                    {Object.entries(featureAudit.groups[group]).map(
-                      ([key, value]) => (
-                        <div key={key}>
-                          <dt>{featureNames[key] ?? key}</dt>
-                          <dd>{featureValue(value)}</dd>
-                        </div>
-                      ),
-                    )}
-                  </dl>
-                </article>
-              ),
-            )}
-          </div>
+          <>
+            <div className="feature-groups">
+              {(Object.keys(groupNames) as Array<keyof typeof groupNames>).map(
+                (group) => (
+                  <article key={group}>
+                    <h3>{groupNames[group]}</h3>
+                    <dl>
+                      {Object.entries(featureAudit.groups[group]).map(
+                        ([key, value]) => (
+                          <div key={key}>
+                            <dt>{featureNames[key] ?? key}</dt>
+                            <dd>{featureValue(value)}</dd>
+                          </div>
+                        ),
+                      )}
+                    </dl>
+                  </article>
+                ),
+              )}
+            </div>
+            <div className="feature-audit-meta">
+              <article>
+                <span>审计说明</span>
+                <strong>
+                  {featureAudit.reasons.map(p1TermName).join("；") ||
+                    "时点特征计算完成"}
+                </strong>
+              </article>
+              <article>
+                <span>版本依赖</span>
+                <strong>
+                  {Object.entries(featureAudit.versions)
+                    .map(
+                      ([name, value]) =>
+                        `${versionNames[name] ?? name}：${value ?? "缺失"}`,
+                    )
+                    .join(" · ")}
+                </strong>
+              </article>
+            </div>
+          </>
         ) : (
           <p className="muted">
             使用上方证券与日期执行审计后，展示五组时间点特征。

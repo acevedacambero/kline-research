@@ -456,12 +456,20 @@ describe("App", () => {
                 position: {},
                 momentum: {},
                 volumePrice: {},
-                tradingBehavior: {},
+                tradingBehavior: {
+                  is_approx: true,
+                  rule_reason: "board/date rule",
+                },
               },
               availableHistory: 20,
-              versions: {},
+              versions: {
+                snapshotVersion: "snapshot-1",
+                factorVersion: "factor-1",
+                limitRuleVersion: "rule-1",
+                featureDefinitionVersion: "feature-1",
+              },
               priceBasis: "raw+qfq+total-return",
-              reasons: [],
+              reasons: ["limit-rule-approx"],
             }
           : path.includes("/api/p3/audit")
             ? {
@@ -473,7 +481,7 @@ describe("App", () => {
                   score: 72.5,
                   grade: "B",
                   usable: true,
-                  reasons: [],
+                  reasons: ["available_history<120"],
                   components: {
                     trend: {
                       score: 20,
@@ -544,6 +552,13 @@ describe("App", () => {
     expect(screen.getAllByText("量价").length).toBeGreaterThan(0);
     expect(screen.getAllByText("交易行为").length).toBeGreaterThan(0);
     expect(screen.getByText("历史不足")).toBeInTheDocument();
+    expect(screen.getByText("交易规则是否近似")).toBeInTheDocument();
+    expect(
+      screen.getByText("按交易所、板块和日期适用正式涨跌幅规则"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("交易规则使用了近似状态")).toBeInTheDocument();
+    expect(screen.getByText(/有效历史不足 120 个交易日/)).toBeInTheDocument();
+    expect(screen.getByText(/数据快照：snapshot-1/)).toBeInTheDocument();
     expect(screen.getByText("72.5")).toBeInTheDocument();
     expect(screen.getByText(/p3-rule-score-v1/)).toBeInTheDocument();
     expect(screen.getAllByText("历史不足 250 个交易日").length).toBeGreaterThan(
