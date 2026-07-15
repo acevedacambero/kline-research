@@ -327,6 +327,8 @@ export function App() {
     useState<ModelRegistryStatus | null>(null);
   const [taskView, setTaskView] = useState<TaskView | null>(null);
   const [taskHistory, setTaskHistory] = useState<GenericTask[]>([]);
+  const [taskTypeFilter, setTaskTypeFilter] = useState("");
+  const [taskStatusFilter, setTaskStatusFilter] = useState("");
 
   const showTask = (
     kind: string,
@@ -375,6 +377,18 @@ export function App() {
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "读取任务失败");
+    }
+  }
+
+  async function refreshTaskHistory(announce = true) {
+    try {
+      const tasks = await api.recentTasks(50);
+      const items = Array.isArray(tasks) ? tasks : [];
+      setTaskHistory(items);
+      if (announce) setMessage(`任务历史已刷新，共 ${items.length} 条`);
+    } catch (error) {
+      if (announce)
+        setMessage(error instanceof Error ? error.message : "刷新任务历史失败");
     }
   }
 
@@ -460,7 +474,7 @@ export function App() {
     let didRestoreTask = false;
     const refreshTasks = () =>
       api
-        .recentTasks(10)
+        .recentTasks(50)
         .then((tasks) => {
           const items = Array.isArray(tasks) ? tasks : [];
           setTaskHistory(items);
@@ -1039,6 +1053,37 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
+  function exportTaskHistory() {
+    if (!taskHistory.length) return;
+    const csv = [
+      "task_id,task_type,status,created_at,updated_at,done,total,rows,error_count,resumable",
+      ...taskHistory.map((task) =>
+        [
+          task.id,
+          task.jobType,
+          task.status,
+          task.createdAt,
+          task.updatedAt,
+          task.done ?? 0,
+          task.total ?? 0,
+          task.rows ?? "",
+          task.errors?.length ?? 0,
+          task.resumable,
+        ]
+          .map((value) => `"${String(value).replaceAll('"', '""')}"`)
+          .join(","),
+      ),
+    ].join("\n");
+    const url = URL.createObjectURL(
+      new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `task-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function exportDatasetQuality() {
     if (!datasetQuality) return;
     const payload = JSON.stringify(
@@ -1150,6 +1195,11 @@ export function App() {
   const gateDetailReport = providerGate?.report ?? providerGate?.diagnostic;
   const gateDetailIsDiagnostic =
     !providerGate?.report && Boolean(providerGate?.diagnostic);
+  const filteredTaskHistory = taskHistory.filter(
+    (task) =>
+      (!taskTypeFilter || task.jobType === taskTypeFilter) &&
+      (!taskStatusFilter || task.status === taskStatusFilter),
+  );
 
   return (
     <main>
@@ -1716,7 +1766,55 @@ export function App() {
               <span className="eyebrow">TASK HISTORY</span>
               <h2>最近任务历史</h2>
             </div>
-            <span className="message">最近 {taskHistory.length} 条</span>
+            <span className="message">
+              显示 {filteredTaskHistory.length} / {taskHistory.length} 条
+            </span>
+          </div>
+          <div className="task-history-controls">
+            <label>
+              任务类型
+              <select
+                aria-label="筛选任务类型"
+                value={taskTypeFilter}
+                onChange={(event) => setTaskTypeFilter(event.target.value)}
+              >
+                <option value="">全部类型</option>
+                {Object.entries(taskKindNames).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              任务状态
+              <select
+                aria-label="筛选任务状态"
+                value={taskStatusFilter}
+                onChange={(event) => setTaskStatusFilter(event.target.value)}
+              >
+                <option value="">全部状态</option>
+                {Object.entries(taskStatusNames).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => void refreshTaskHistory()}
+            >
+              刷新任务历史
+            </button>
+            <button
+              className="secondary"
+              type="button"
+              onClick={exportTaskHistory}
+            >
+              导出任务历史 CSV
+            </button>
           </div>
           <table className="task-history-table">
             <thead>
@@ -1731,7 +1829,7 @@ export function App() {
               </tr>
             </thead>
             <tbody>
-              {taskHistory.map((task) => (
+              {filteredTaskHistory.map((task) => (
                 <tr key={task.id}>
                   <td>
                     {task.createdAt
@@ -1770,6 +1868,9 @@ export function App() {
               ))}
             </tbody>
           </table>
+          {!filteredTaskHistory.length && (
+            <p className="muted">当前筛选条件下没有任务。</p>
+          )}
         </section>
       )}
       <section className="panel workflow-p7-walk">

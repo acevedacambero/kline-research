@@ -849,6 +849,22 @@ select {
 .task-row-actions .link-button:disabled {
   cursor: wait;
 }
+.task-history-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+.task-history-controls label {
+  flex: 0 1 190px;
+}
+.task-history-controls select {
+  min-width: 0;
+}
+.task-history-controls button {
+  flex: 0 0 auto;
+}
 .equity-chart {
   min-width: 0;
   margin: 14px 0 0;
@@ -1078,6 +1094,15 @@ main > section[id] {
   .calibration-controls button {
     width: 100%;
   }
+  .task-history-controls {
+    align-items: stretch;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .task-history-controls label,
+  .task-history-controls button {
+    width: 100%;
+  }
   .audit-actions button {
     width: 100%;
   }
@@ -1108,7 +1133,8 @@ main > section[id] {
 
 @media (max-width: 460px) {
   .status-grid,
-  .status-actions {
+  .status-actions,
+  .task-history-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 }

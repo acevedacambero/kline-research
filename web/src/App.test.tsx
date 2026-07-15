@@ -438,7 +438,9 @@ describe("App", () => {
     expect(
       await screen.findByText("已载入任务 durable-1 的完整记录"),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("完成（有错误）")).toHaveLength(1);
+    expect(
+      screen.getByText("完成（有错误）", { selector: "span.message" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("生成 901 行")).toBeInTheDocument();
     fireEvent.click(screen.getByText("查看全部 1 条错误"));
     expect(screen.getByText("sh600000：detail failure")).toBeInTheDocument();
@@ -468,6 +470,18 @@ describe("App", () => {
               rows: 40,
               errors: [],
             },
+            {
+              id: "completed-label",
+              jobType: "labels",
+              status: "completed",
+              resumable: true,
+              createdAt: "2026-07-15T01:00:00Z",
+              updatedAt: "2026-07-15T01:10:00Z",
+              done: 5,
+              total: 5,
+              rows: 80,
+              errors: [],
+            },
           ];
         else if (path === "/api/features/build" && init?.method === "POST")
           body = { taskId: "resume-feature", total: 10 };
@@ -486,8 +500,16 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
+    expect(await screen.findByText("completed-label")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("筛选任务类型"), {
+      target: { value: "features" },
+    });
+    expect(screen.queryByText("completed-label")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "导出任务历史 CSV" }),
+    ).toBeInTheDocument();
     fireEvent.click(
-      await screen.findByRole("button", { name: "续跑任务 resume-feature" }),
+      screen.getByRole("button", { name: "续跑任务 resume-feature" }),
     );
 
     expect(await screen.findByText("生成 120 行")).toBeInTheDocument();
