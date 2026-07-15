@@ -511,9 +511,17 @@ describe("App", () => {
               }
             : path.includes("/api/p1/audit")
               ? {
-                  eligibility: { eligible: true, status: "ok", reasons: [] },
-                  entry: { status: "normal" },
+                  eligibility: {
+                    eligible: false,
+                    status: "insufficient-history",
+                    reasons: ["insufficient-history"],
+                  },
+                  entry: {
+                    status: "abandoned",
+                    entry_reason: "entry blocked through T+3",
+                  },
                   labels: {},
+                  path: { success: false, reason: "same-day-double-hit" },
                 }
               : path.includes("/bars")
                 ? []
@@ -538,6 +546,14 @@ describe("App", () => {
     expect(screen.getByText("历史不足")).toBeInTheDocument();
     expect(screen.getByText("72.5")).toBeInTheDocument();
     expect(screen.getByText(/p3-rule-score-v1/)).toBeInTheDocument();
+    expect(screen.getAllByText("历史不足 250 个交易日").length).toBeGreaterThan(
+      0,
+    );
+    expect(screen.getByText("连续受阻，已放弃")).toBeInTheDocument();
+    expect(screen.getByText("T+1 至 T+3 均无法买入")).toBeInTheDocument();
+    expect(
+      screen.getByText("同日同时触及止盈和止损，保守判失败"),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "导出当前审计报告 JSON" }),
     ).toBeInTheDocument();

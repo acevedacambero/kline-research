@@ -119,6 +119,38 @@ const taskStatusNames: Record<string, string> = {
   interrupted: "已中断（可恢复）",
 };
 const taskStatusName = (status: string) => taskStatusNames[status] ?? status;
+const p1TermNames: Record<string, string> = {
+  ok: "正常",
+  eligible: "符合样本资格",
+  "invalid-ohlc": "价格字段无效",
+  "rights-warn": "权息数据需要复核",
+  "insufficient-history": "历史不足 250 个交易日",
+  "noLimit-excluded": "无涨跌幅限制，已排除",
+  executable: "可正常执行",
+  delayed: "顺延后可执行",
+  "insufficient-forward-data": "未来交易日不足",
+  "suspended-abandoned": "疑似长期停牌，放弃入场",
+  "invalid-entry-price": "入场价格无效",
+  abandoned: "连续受阻，已放弃",
+  success: "成功",
+  failed: "失败",
+  "benchmark-missing": "基准行情缺失",
+  "same-day-double-hit": "同日同时触及止盈和止损，保守判失败",
+  "downside-hit-first": "先触及下行阈值",
+  "upside-hit-first": "先触及上行阈值",
+  "no-upside-hit": "观察期内未触及上行阈值",
+  "current-name approximation": "根据当前证券名称近似推断历史状态",
+  "entry window has no price limit": "入场窗口处于无涨跌幅限制阶段",
+  "non-positive entry price": "入场价格不是有效正数",
+  "entry blocked through T+3": "T+1 至 T+3 均无法买入",
+  "opening gain below executable threshold": "开盘涨幅低于不可买入阈值",
+  "exit window incomplete": "卖出顺延窗口尚未完整结束",
+  "target close executable": "计划日收盘可执行卖出",
+  "exit delayed": "计划日无法卖出，已顺延",
+  "exit blocked through delay window": "整个顺延窗口均无法卖出",
+};
+const p1TermName = (value?: string | null) =>
+  value ? (p1TermNames[value] ?? value) : "—";
 const initialAuditParameter = (name: string, fallback: string) => {
   const value = new URLSearchParams(window.location.search).get(name)?.trim();
   if (!value) return fallback;
@@ -2012,9 +2044,10 @@ export function App() {
           <div className="audit-grid">
             <article>
               <span>样本资格</span>
-              <strong>{audit.eligibility.status}</strong>
+              <strong>{p1TermName(audit.eligibility.status)}</strong>
               <small>
-                {audit.eligibility.reasons.join(" · ") || "检查通过"}
+                {audit.eligibility.reasons.map(p1TermName).join(" · ") ||
+                  "检查通过"}
               </small>
             </article>
             <article>
@@ -2028,17 +2061,19 @@ export function App() {
               </strong>
               <small>
                 {audit.securityStatus?.is_approx
-                  ? `近似：${audit.securityStatus.reason}`
+                  ? `近似：${p1TermName(audit.securityStatus.reason)}`
                   : "正式规则"}
               </small>
             </article>
             <article>
               <span>可执行入口</span>
-              <strong>{audit.entry.status}</strong>
+              <strong>{p1TermName(audit.entry.status)}</strong>
               <small>
                 {audit.entry.entry_date
                   ? `${audit.entry.entry_date}${audit.entry.entry_price ? ` @ ${audit.entry.entry_price}` : ""} · 顺延 ${audit.entry.entry_delay ?? 0} 日`
-                  : audit.entry.entry_reason || "无入口"}
+                  : audit.entry.entry_reason
+                    ? p1TermName(audit.entry.entry_reason)
+                    : "无入口"}
               </small>
             </article>
             {([5, 10, 20, 60] as const).map((horizon) => (
@@ -2052,7 +2087,7 @@ export function App() {
                 </strong>
                 <small>
                   {audit.exits?.[String(horizon)]
-                    ? `${audit.labels[String(horizon)]?.planned_exit_date ?? "无计划卖出日"} → ${audit.exits[String(horizon)].exit_date ?? "无可执行卖出日"} · ${audit.exits[String(horizon)].status} · 顺延 ${audit.exits[String(horizon)].exit_delay ?? "—"} 日`
+                    ? `${audit.labels[String(horizon)]?.planned_exit_date ?? "无计划卖出日"} → ${audit.exits[String(horizon)].exit_date ?? "无可执行卖出日"} · ${p1TermName(audit.exits[String(horizon)].status)} · 顺延 ${audit.exits[String(horizon)].exit_delay ?? "—"} 日`
                     : "等待卖出审计"}
                 </small>
               </article>
@@ -2067,7 +2102,7 @@ export function App() {
             <article>
               <span>路径标签</span>
               <strong>{audit.path?.success ? "成功" : "失败"}</strong>
-              <small>{audit.path?.reason ?? "—"}</small>
+              <small>{p1TermName(audit.path?.reason)}</small>
             </article>
             <article>
               <span>标签成熟日</span>
