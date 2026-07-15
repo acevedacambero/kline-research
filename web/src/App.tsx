@@ -940,6 +940,74 @@ export function App() {
             </small>
           </div>
         </div>
+        <details className="quality-details">
+          <summary>
+            <span>数据质量明细</span>
+            <strong>
+              {datasetQuality
+                ? (datasetQuality.staleSecurities ?? 0) +
+                  (datasetQuality.unreadableSecurities ?? 0) +
+                  (datasetQuality.approximateFactorSecurities ?? 0) +
+                  (datasetQuality.historyBackfillFailed ?? 0)
+                : "—"}
+            </strong>
+          </summary>
+          {datasetQuality ? (
+            <div className="quality-grid">
+              <article>
+                <span>过期行情</span>
+                <strong>{datasetQuality.staleSecurities ?? 0}</strong>
+                <small>
+                  {datasetQuality.staleExamples
+                    ?.slice(0, 5)
+                    .map((item) => `${item.security}(${item.latestDate})`)
+                    .join("、") || "无"}
+                </small>
+              </article>
+              <article>
+                <span>不可读文件</span>
+                <strong>{datasetQuality.unreadableSecurities ?? 0}</strong>
+                <small>
+                  {datasetQuality.unreadableExamples?.slice(0, 5).join("；") ||
+                    "无"}
+                </small>
+              </article>
+              <article>
+                <span>近似复权</span>
+                <strong>
+                  {datasetQuality.approximateFactorSecurities ?? 0}
+                </strong>
+                <small>
+                  {datasetQuality.approximateFactorExamples
+                    ?.slice(0, 5)
+                    .join("、") || "无"}
+                </small>
+              </article>
+              <article>
+                <span>短历史 / 补全失败</span>
+                <strong>
+                  {datasetQuality.shortHistoryCached ?? 0} /{" "}
+                  {datasetQuality.historyBackfillFailed ?? 0}
+                </strong>
+                <small>
+                  上市历史不足 {datasetQuality.listingHistoryShort ?? 0}
+                </small>
+              </article>
+              <article className="quality-events-card">
+                <span>最近质量事件</span>
+                <strong>{datasetQuality.qualityEvents?.length ?? 0}</strong>
+                <small>
+                  {datasetQuality.qualityEvents
+                    ?.slice(0, 5)
+                    .map((event) => `${event.dataset_key}：${event.event_type}`)
+                    .join("；") || "无质量事件"}
+                </small>
+              </article>
+            </div>
+          ) : (
+            <p className="muted">正在读取质量报告…</p>
+          )}
+        </details>
         <div className="status-actions">
           <button
             className="secondary"
