@@ -503,6 +503,9 @@ describe("App", () => {
     expect(screen.getByText("历史不足")).toBeInTheDocument();
     expect(screen.getByText("72.5")).toBeInTheDocument();
     expect(screen.getByText(/p3-rule-score-v1/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "导出当前审计报告 JSON" }),
+    ).toBeInTheDocument();
   });
 
   it("offers Shanghai and Shenzhen markets only", async () => {

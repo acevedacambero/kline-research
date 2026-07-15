@@ -374,6 +374,22 @@ article span {
 .readiness-blockers {
   margin-top: 0;
 }
+.audit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #1c2a39;
+  border-radius: 8px;
+  background: #0a1119;
+  color: #91a1b3;
+  font-size: 12px;
+}
+.audit-actions button {
+  flex: 0 0 auto;
+}
 button {
   background: #55d6be;
   color: #07110f;
@@ -912,7 +928,8 @@ main > section[id] {
     padding: 12px;
   }
   header,
-  .section-title {
+  .section-title,
+  .audit-actions {
     align-items: flex-start;
     flex-direction: column;
     gap: 10px;
@@ -954,6 +971,9 @@ main > section[id] {
     flex-direction: column;
   }
   .calibration-controls button {
+    width: 100%;
+  }
+  .audit-actions button {
     width: 100%;
   }
   .status-grid {

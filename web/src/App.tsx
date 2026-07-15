@@ -934,6 +934,36 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
+  function exportCurrentAuditReport() {
+    if (!audit || !featureAudit || !scoreAudit) return;
+    const payload = JSON.stringify(
+      {
+        exportedAt: new Date().toISOString(),
+        security: { exchange, code },
+        signalDate,
+        marketData: {
+          barCount: bars.length,
+          firstDate: bars.at(0)?.date ?? null,
+          lastDate: bars.at(-1)?.date ?? null,
+        },
+        systemVersions: health?.versions ?? {},
+        p1: audit,
+        p2: featureAudit,
+        p3: scoreAudit,
+      },
+      null,
+      2,
+    );
+    const url = URL.createObjectURL(
+      new Blob([payload], { type: "application/json;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `audit-${exchange}${code}-${signalDate}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function exportModelRegistry() {
     if (!modelRegistry?.artifacts?.length) return;
     const csv = [
@@ -1921,6 +1951,18 @@ export function App() {
           </button>
           <button disabled={busy}>计算并审计</button>
         </form>
+        {audit && featureAudit && scoreAudit && (
+          <div className="audit-actions">
+            <span>当前报告包含 P1 标签、P2 特征、P3 评分及版本依赖</span>
+            <button
+              type="button"
+              className="secondary"
+              onClick={exportCurrentAuditReport}
+            >
+              导出当前审计报告 JSON
+            </button>
+          </div>
+        )}
         {bars.length > 0 && (
           <KlineChart
             bars={bars}
