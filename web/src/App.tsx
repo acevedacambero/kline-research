@@ -785,6 +785,33 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
+  function exportModelRegistry() {
+    if (!modelRegistry?.artifacts?.length) return;
+    const csv = [
+      "model_id,kind,created_at,status,label_column,version",
+      ...modelRegistry.artifacts.map((artifact) =>
+        [
+          artifact.modelId,
+          artifact.kind,
+          artifact.createdAt,
+          artifact.status ?? "",
+          artifact.labelColumn ?? "",
+          artifact.version ?? "",
+        ]
+          .map((value) => `"${String(value).replaceAll('"', '""')}"`)
+          .join(","),
+      ),
+    ].join("\n");
+    const url = URL.createObjectURL(
+      new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "p7-model-registry.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <main>
       <header className="workflow-header">
@@ -1240,6 +1267,51 @@ export function App() {
         ) : (
           <p className="muted">
             使用多个训练截止日期滚动验证 P3 分数的样本外稳定性。
+          </p>
+        )}
+      </section>
+      <section className="panel workflow-p7-registry">
+        <div className="section-title">
+          <div>
+            <span className="eyebrow">P7 MODEL REGISTRY</span>
+            <h2>P7 模型注册表</h2>
+          </div>
+          {modelRegistry?.artifacts?.length ? (
+            <button className="secondary" onClick={exportModelRegistry}>
+              导出注册表 CSV
+            </button>
+          ) : null}
+        </div>
+        {modelRegistry?.artifacts?.length ? (
+          <table className="model-registry-table">
+            <thead>
+              <tr>
+                <th>模型类型</th>
+                <th>创建时间</th>
+                <th>状态</th>
+                <th>标签口径</th>
+                <th>模型版本</th>
+                <th>模型 ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {modelRegistry.artifacts.map((artifact) => (
+                <tr key={artifact.modelId}>
+                  <td>{artifact.kind}</td>
+                  <td>
+                    {new Date(artifact.createdAt).toLocaleString("zh-CN")}
+                  </td>
+                  <td>{artifact.status ?? "—"}</td>
+                  <td>{artifact.labelColumn ?? "—"}</td>
+                  <td>{artifact.version ?? "—"}</td>
+                  <td title={artifact.modelId}>{artifact.modelId}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="muted">
+            完成 P7 模型训练后，模型产物会在这里登记并可追溯。
           </p>
         )}
       </section>

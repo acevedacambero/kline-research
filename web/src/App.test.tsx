@@ -81,6 +81,50 @@ describe("App", () => {
     expect(screen.getAllByText(/stock:sh:689009/).length).toBeGreaterThan(0);
   });
 
+  it("renders persisted P7 model registry artifacts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => ({
+        ok: true,
+        json: async () =>
+          String(input).includes("/api/model/p7/registry")
+            ? {
+                version: "p7-model-registry-v1",
+                unreadableFiles: 0,
+                artifacts: [
+                  {
+                    modelId: "model-20260715-a",
+                    kind: "multifeature",
+                    createdAt: "2026-07-15T12:00:00Z",
+                    status: "ready",
+                    labelColumn: "p20_executable_return",
+                    version: "p7-multifeature-logistic-v1",
+                    artifactPath: "/models/a.json",
+                    dependencies: {},
+                  },
+                ],
+              }
+            : String(input).includes("/quality")
+              ? { totalCached: 0 }
+              : {
+                  status: "ok",
+                  dataSource: "AkShare",
+                  cachePath: "data",
+                  versions: {},
+                },
+      })),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("multifeature")).toBeInTheDocument();
+    expect(screen.getByText("p20_executable_return")).toBeInTheDocument();
+    expect(screen.getByText("model-20260715-a")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "导出注册表 CSV" }),
+    ).toBeInTheDocument();
+  });
+
   it("does not reuse an old provider gate result when a new probe fails", async () => {
     vi.stubGlobal(
       "fetch",
