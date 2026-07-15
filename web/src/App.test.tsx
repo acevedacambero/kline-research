@@ -37,6 +37,59 @@ describe("App", () => {
     ).toHaveLength(4);
   });
 
+  it("selects the latest signal date with a mature P60 window", async () => {
+    const bars = Array.from({ length: 312 }, (_, index) => {
+      const date = new Date(Date.UTC(2024, 0, 1 + index))
+        .toISOString()
+        .slice(0, 10);
+      return {
+        date,
+        open: 10,
+        high: 11,
+        low: 9,
+        close: 10,
+        open_qfq: 10,
+        high_qfq: 11,
+        low_qfq: 9,
+        close_qfq: 10,
+        volume: 1000,
+      };
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        const body =
+          path === "/api/securities/sh/600000/bars"
+            ? bars
+            : path.startsWith("/api/tasks/recent")
+              ? []
+              : path.includes("/quality")
+                ? { totalCached: 1 }
+                : {
+                    status: "ok",
+                    dataSource: "AkShare",
+                    cachePath: "data",
+                    versions: {},
+                  };
+        return { ok: true, json: async () => body };
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "选择最近 P60 成熟日" }),
+    );
+
+    const expectedDate = bars[250].date;
+    expect(await screen.findByDisplayValue(expectedDate)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `已选择最近 P60 成熟日 ${expectedDate}，可点击“计算并审计”`,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("shows actionable data quality examples", async () => {
     vi.stubGlobal(
       "fetch",

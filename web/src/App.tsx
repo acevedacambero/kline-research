@@ -391,6 +391,29 @@ export function App() {
     }
   }
 
+  async function chooseLatestMatureSignalDate() {
+    setBusy(true);
+    setMessage("正在查找最近的 P60 成熟交易日…");
+    try {
+      const nextBars = await api.bars(exchange, code);
+      const futureTradingDays = 61;
+      const signalIndex = nextBars.length - 1 - futureTradingDays;
+      if (signalIndex < 250) {
+        setMessage(
+          `历史不足：共 ${nextBars.length} 个交易日，无法同时满足 250 日历史和 P60 成熟要求`,
+        );
+        return;
+      }
+      const nextSignalDate = nextBars[signalIndex].date;
+      setSignalDate(nextSignalDate);
+      setMessage(`已选择最近 P60 成熟日 ${nextSignalDate}，可点击“计算并审计”`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "读取交易日失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function startImport(scope: "representative" | "failed" | "all") {
     setBusy(true);
     try {
@@ -1888,6 +1911,14 @@ export function App() {
               onChange={(e) => setSignalDate(e.target.value)}
             />
           </label>
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={chooseLatestMatureSignalDate}
+          >
+            选择最近 P60 成熟日
+          </button>
           <button disabled={busy}>计算并审计</button>
         </form>
         {bars.length > 0 && (
