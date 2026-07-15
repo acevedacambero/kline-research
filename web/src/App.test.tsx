@@ -408,6 +408,9 @@ describe("App", () => {
                 done: 3,
                 total: 3,
                 rows: 901,
+                createdAt: "2026-07-16T01:00:00Z",
+                updatedAt: "2026-07-16T01:02:05Z",
+                resumable: true,
                 errors: [{ security: "sh600000", message: "detail failure" }],
               }
             : path.includes("/quality")
@@ -442,6 +445,8 @@ describe("App", () => {
       screen.getByText("完成（有错误）", { selector: "span.message" }),
     ).toBeInTheDocument();
     expect(screen.getByText("生成 901 行")).toBeInTheDocument();
+    expect(screen.getByText("历时 2 分 5 秒")).toBeInTheDocument();
+    expect(screen.getByText("支持中断续跑")).toBeInTheDocument();
     fireEvent.click(screen.getByText("查看全部 1 条错误"));
     expect(screen.getByText("sh600000：detail failure")).toBeInTheDocument();
   });

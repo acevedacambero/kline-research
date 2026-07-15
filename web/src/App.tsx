@@ -131,6 +131,9 @@ type TaskView = {
   current?: string | null;
   speed?: number;
   etaSeconds?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+  resumable?: boolean;
 };
 const taskErrorText = (error: unknown) =>
   typeof error === "string"
@@ -160,6 +163,20 @@ const taskStatusNames: Record<string, string> = {
   interrupted: "已中断（可恢复）",
 };
 const taskStatusName = (status: string) => taskStatusNames[status] ?? status;
+const taskElapsedTime = (createdAt?: string, updatedAt?: string) => {
+  if (!createdAt || !updatedAt) return null;
+  const seconds = Math.max(
+    0,
+    Math.round((Date.parse(updatedAt) - Date.parse(createdAt)) / 1000),
+  );
+  if (!Number.isFinite(seconds)) return null;
+  if (seconds < 60) return `${seconds} 秒`;
+  if (seconds < 3600)
+    return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${hours} 小时 ${minutes} 分`;
+};
 const p1TermNames: Record<string, string> = {
   ok: "正常",
   eligible: "符合样本资格",
@@ -342,6 +359,9 @@ export function App() {
       currentSecurity?: string | null;
       speed?: number;
       etaSeconds?: number | null;
+      createdAt?: string;
+      updatedAt?: string;
+      resumable?: boolean;
     },
   ) => {
     setTaskView({
@@ -356,6 +376,9 @@ export function App() {
       current: task.currentSecurity,
       speed: task.speed,
       etaSeconds: task.etaSeconds,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      resumable: task.resumable,
     });
   };
 
@@ -1734,6 +1757,22 @@ export function App() {
               {taskView.done} / {taskView.total}
             </strong>
             <span>任务 ID {taskView.id}</span>
+            {taskView.createdAt && (
+              <span>
+                创建 {new Date(taskView.createdAt).toLocaleString("zh-CN")}
+              </span>
+            )}
+            {taskView.updatedAt && (
+              <span>
+                更新 {new Date(taskView.updatedAt).toLocaleString("zh-CN")}
+              </span>
+            )}
+            {taskElapsedTime(taskView.createdAt, taskView.updatedAt) && (
+              <span>
+                历时 {taskElapsedTime(taskView.createdAt, taskView.updatedAt)}
+              </span>
+            )}
+            {taskView.resumable && <span>支持中断续跑</span>}
             {taskView.rows != null && <span>生成 {taskView.rows} 行</span>}
             {taskView.current && <span>当前 {taskView.current}</span>}
             {taskView.speed ? (
