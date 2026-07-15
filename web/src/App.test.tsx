@@ -148,6 +148,54 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows every research readiness check and blocker", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        let body: unknown = {
+          status: "ok",
+          dataSource: "AkShare",
+          cachePath: "data",
+          versions: {},
+        };
+        if (path === "/api/system/readiness")
+          body = {
+            version: "research-readiness-v1",
+            readyForRefresh: true,
+            readyForAudit: true,
+            readyForModel: false,
+            freshnessCoverage: 0.98,
+            freshnessMinCoverage: 0.95,
+            providerGateAgeHours: 2.5,
+            providerGateMaxAgeHours: 24,
+            checks: {
+              providerGate: true,
+              marketDataFresh: true,
+              labelsCurrent: false,
+              featuresReady: false,
+            },
+            blockers: ["存在旧版本 P1 标签", "P2 特征覆盖尚未达到训练门槛"],
+          };
+        else if (path.startsWith("/api/tasks/recent")) body = [];
+        else if (path.includes("/quality")) body = { totalCached: 0 };
+        return { ok: true, json: async () => body };
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("研究运行 Gate 明细"));
+    expect(screen.getByText("98.00%")).toBeInTheDocument();
+    expect(screen.getByText("2.5 小时")).toBeInTheDocument();
+    expect(screen.getByText("✓ 行情覆盖新鲜")).toBeInTheDocument();
+    expect(screen.getByText("× P1 标签版本最新")).toBeInTheDocument();
+    expect(screen.getByText("阻断：存在旧版本 P1 标签")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "导出研究 Gate 报告 JSON" }),
+    ).toBeInTheDocument();
+  });
+
   it("renders persisted P7 model registry artifacts", async () => {
     vi.stubGlobal(
       "fetch",

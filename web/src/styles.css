@@ -350,6 +350,30 @@ article span {
 .gate-export {
   margin: 0 12px 12px;
 }
+.readiness-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+.readiness-summary article {
+  padding: 12px;
+  border: 1px solid #1c2a39;
+  border-radius: 7px;
+  background: #111a25;
+}
+.readiness-summary article > strong {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 20px;
+}
+.readiness-checks {
+  border-top: 1px solid #1c2a39;
+  padding-top: 12px;
+}
+.readiness-blockers {
+  margin-top: 0;
+}
 button {
   background: #55d6be;
   color: #07110f;
@@ -917,7 +941,8 @@ main > section[id] {
   .feature-groups,
   .score-panel,
   .score-components,
-  .validation-panel {
+  .validation-panel,
+  .readiness-summary {
     grid-template-columns: minmax(0, 1fr);
   }
   .calibration-controls {

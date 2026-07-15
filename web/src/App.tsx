@@ -135,6 +135,20 @@ const providerCheckNames: Record<string, string> = {
   tradingCalendar: "交易日历",
   eastmoney: "东方财富诊断",
 };
+const readinessCheckNames: Record<string, string> = {
+  providerGate: "数据源 Gate 通过",
+  providerGateFresh: "数据源 Gate 未过期",
+  hasMarketData: "存在本地行情",
+  marketDataReadable: "行情文件可读",
+  marketDataFresh: "行情覆盖新鲜",
+  labelsAvailable: "已有 P1 标签",
+  labelsReadable: "P1 标签可读",
+  labelsCurrent: "P1 标签版本最新",
+  featuresReady: "P2 特征覆盖达标",
+  scoresAvailable: "已有 P3 评分",
+  scoresReadable: "P3 评分可读",
+  scoresCurrent: "P3 评分版本最新",
+};
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -880,6 +894,23 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
+  function exportResearchReadiness() {
+    if (!readiness) return;
+    const payload = JSON.stringify(
+      { exportedAt: new Date().toISOString(), readiness },
+      null,
+      2,
+    );
+    const url = URL.createObjectURL(
+      new Blob([payload], { type: "application/json;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `research-readiness-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function exportModelRegistry() {
     if (!modelRegistry?.artifacts?.length) return;
     const csv = [
@@ -1164,6 +1195,58 @@ export function App() {
               onClick={exportProviderGate}
             >
               导出 Gate 完整报告 JSON
+            </button>
+          </details>
+        )}
+        {readiness && (
+          <details className="gate-details readiness-details">
+            <summary>
+              <span>研究运行 Gate 明细</span>
+              <strong>
+                {readiness.readyForModel
+                  ? "模型就绪"
+                  : readiness.readyForAudit
+                    ? "仅审计就绪"
+                    : "未就绪"}
+              </strong>
+            </summary>
+            <div className="readiness-summary">
+              <article>
+                <span>行情新鲜覆盖</span>
+                <strong>{pct(readiness.freshnessCoverage)}</strong>
+                <small>最低要求 {pct(readiness.freshnessMinCoverage)}</small>
+              </article>
+              <article>
+                <span>数据源 Gate 年龄</span>
+                <strong>
+                  {readiness.providerGateAgeHours == null
+                    ? "—"
+                    : `${readiness.providerGateAgeHours.toFixed(1)} 小时`}
+                </strong>
+                <small>最长 {readiness.providerGateMaxAgeHours} 小时</small>
+              </article>
+            </div>
+            <div className="gate-checks readiness-checks">
+              {Object.entries(readiness.checks ?? {}).map(([name, passed]) => (
+                <span className={passed ? "passed" : "failed"} key={name}>
+                  {passed ? "✓" : "×"} {readinessCheckNames[name] ?? name}
+                </span>
+              ))}
+            </div>
+            {(readiness.blockers?.length ?? 0) > 0 && (
+              <ul className="gate-messages readiness-blockers">
+                {readiness.blockers.map((blocker) => (
+                  <li className="failed" key={blocker}>
+                    阻断：{blocker}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <button
+              className="secondary gate-export"
+              onClick={exportResearchReadiness}
+            >
+              导出研究 Gate 报告 JSON
             </button>
           </details>
         )}
