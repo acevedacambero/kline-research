@@ -444,6 +444,60 @@ describe("App", () => {
     expect(screen.getByText("sh600000：detail failure")).toBeInTheDocument();
   });
 
+  it("resumes an interrupted task directly from task history", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        let body: unknown = {
+          status: "ok",
+          dataSource: "AkShare",
+          cachePath: "data",
+          versions: {},
+        };
+        if (path.startsWith("/api/tasks/recent"))
+          body = [
+            {
+              id: "resume-feature",
+              jobType: "features",
+              status: "interrupted",
+              resumable: true,
+              createdAt: "2026-07-16T01:00:00Z",
+              updatedAt: "2026-07-16T01:01:00Z",
+              done: 2,
+              total: 10,
+              rows: 40,
+              errors: [],
+            },
+          ];
+        else if (path === "/api/features/build" && init?.method === "POST")
+          body = { taskId: "resume-feature", total: 10 };
+        else if (path === "/api/features/tasks/resume-feature")
+          body = {
+            status: "completed",
+            done: 10,
+            total: 10,
+            rows: 120,
+            errors: [],
+          };
+        else if (path.includes("/quality")) body = { totalCached: 2 };
+        return { ok: true, json: async () => body };
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "续跑任务 resume-feature" }),
+    );
+
+    expect(await screen.findByText("生成 120 行")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/features/build",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(screen.getByText("任务 ID resume-feature")).toBeInTheDocument();
+  });
+
   it("renders five P2 groups and explains unavailable history", async () => {
     vi.stubGlobal(
       "fetch",

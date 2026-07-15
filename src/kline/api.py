@@ -189,6 +189,7 @@ def _task_response(job: Job) -> dict:
     item = {
         "id": job.id,
         "jobType": job.job_type,
+        "resumable": job.resumable,
         "createdAt": job.created_at.isoformat(),
         "updatedAt": job.updated_at.isoformat(),
         **defaults,

@@ -137,7 +137,9 @@ def test_durable_queued_import_status_preserves_ui_fields(tmp_path):
     response = TestClient(app).get(f"/api/datasets/tasks/{job.id}")
     assert response.status_code == 200
     assert response.json() == {
-        "id": job.id, "jobType": "import", "status": "queued", "total": 1, "done": 0, "rows": 0,
+        "id": job.id, "jobType": "import", "status": "queued", "resumable": False,
+        "createdAt": job.created_at.isoformat(), "updatedAt": job.updated_at.isoformat(),
+        "total": 1, "done": 0, "rows": 0,
         "errors": [], "currentSecurity": None, "stage": "queued", "speed": 0.0,
         "etaSeconds": None, "directAvailable": None,
     }

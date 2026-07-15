@@ -838,6 +838,17 @@ select {
   padding: 0;
   cursor: pointer;
 }
+.task-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.resume-link {
+  color: #ffd166;
+}
+.task-row-actions .link-button:disabled {
+  cursor: wait;
+}
 .equity-chart {
   min-width: 0;
   margin: 14px 0 0;

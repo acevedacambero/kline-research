@@ -298,6 +298,7 @@ export type GenericTask = {
   id: string;
   jobType: string;
   status: string;
+  resumable: boolean;
   createdAt: string;
   updatedAt: string;
   done: number;

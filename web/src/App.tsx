@@ -378,6 +378,35 @@ export function App() {
     }
   }
 
+  function resumeHistoricalTask(task: GenericTask) {
+    if (task.status !== "interrupted" || !task.resumable) {
+      setMessage(`任务 ${task.id} 当前不可续跑`);
+      return;
+    }
+    setMessage(
+      `正在恢复${taskKindNames[task.jobType] ?? task.jobType}任务 ${task.id}`,
+    );
+    switch (task.jobType) {
+      case "import":
+        void startImport("all");
+        break;
+      case "history_backfill":
+        void startHistoryBackfill();
+        break;
+      case "labels":
+        void startLabels("all");
+        break;
+      case "features":
+        void startFeatures();
+        break;
+      case "scores":
+        void startScores();
+        break;
+      default:
+        setMessage(`任务类型 ${task.jobType} 不支持续跑`);
+    }
+  }
+
   const refreshResearchStatus = () =>
     Promise.all([
       api.labelStatus().then(setLabelStatus),
@@ -1717,13 +1746,25 @@ export function App() {
                   <td>{task.errors?.length ?? 0}</td>
                   <td title={task.id}>{task.id}</td>
                   <td>
-                    <button
-                      className="link-button"
-                      aria-label={`查看任务 ${task.id}`}
-                      onClick={() => inspectTask(task)}
-                    >
-                      查看
-                    </button>
+                    <div className="task-row-actions">
+                      <button
+                        className="link-button"
+                        aria-label={`查看任务 ${task.id}`}
+                        onClick={() => inspectTask(task)}
+                      >
+                        查看
+                      </button>
+                      {task.status === "interrupted" && task.resumable && (
+                        <button
+                          className="link-button resume-link"
+                          aria-label={`续跑任务 ${task.id}`}
+                          disabled={busy}
+                          onClick={() => resumeHistoricalTask(task)}
+                        >
+                          续跑
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
