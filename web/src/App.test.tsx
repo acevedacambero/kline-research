@@ -90,6 +90,64 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows provider gate metrics and blocking reasons", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        let body: unknown = {
+          status: "ok",
+          dataSource: "AkShare",
+          cachePath: "data",
+          versions: {},
+        };
+        if (path === "/api/system/provider-gate")
+          body = {
+            available: true,
+            maxAgeHours: 24,
+            diagnosticAvailable: false,
+            diagnostic: null,
+            report: {
+              gateVersion: "sh-sz-provider-g2-v2",
+              passed: false,
+              probedAt: "2026-07-16T08:00:00+08:00",
+              reasons: ["Tencent stock checks did not meet the 80% threshold."],
+              warnings: ["EastMoney diagnostics failed."],
+              requiredChecks: { tencentStocks: false, tradingCalendar: true },
+              diagnosticChecks: { eastmoney: false },
+              providers: {
+                tencent: {
+                  observations: 10,
+                  successes: 7,
+                  success_rate: 0.7,
+                  mean_latency_seconds: 0.42,
+                  p95_latency_seconds: 1.25,
+                  empty_response_count: 1,
+                  missing_field_count: 0,
+                  error_categories: { network: 2 },
+                },
+              },
+            },
+          };
+        else if (path.startsWith("/api/tasks/recent")) body = [];
+        else if (path.includes("/quality")) body = { totalCached: 0 };
+        return { ok: true, json: async () => body };
+      }),
+    );
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByText("数据源上线 Gate 明细"));
+    expect(screen.getByText("腾讯股票")).toBeInTheDocument();
+    expect(screen.getByText("70.00%")).toBeInTheDocument();
+    expect(screen.getByText("1.25 秒")).toBeInTheDocument();
+    expect(screen.getByText("× 腾讯沪深股票")).toBeInTheDocument();
+    expect(screen.getByText(/阻断：Tencent stock checks/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "导出 Gate 完整报告 JSON" }),
+    ).toBeInTheDocument();
+  });
+
   it("renders persisted P7 model registry artifacts", async () => {
     vi.stubGlobal(
       "fetch",

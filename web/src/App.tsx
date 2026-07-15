@@ -119,6 +119,22 @@ const taskStatusNames: Record<string, string> = {
   interrupted: "已中断（可恢复）",
 };
 const taskStatusName = (status: string) => taskStatusNames[status] ?? status;
+const providerNames: Record<string, string> = {
+  tencent: "腾讯股票",
+  "tencent-index": "腾讯指数",
+  "sina-factor": "新浪复权因子",
+  "sina-raw": "新浪原始行情",
+  calendar: "交易日历",
+  eastmoney: "东方财富诊断",
+};
+const providerCheckNames: Record<string, string> = {
+  tencentStocks: "腾讯沪深股票",
+  tencentIndexes: "腾讯沪深指数",
+  sinaFactors: "新浪复权因子",
+  sinaRawFallback: "新浪行情回退",
+  tradingCalendar: "交易日历",
+  eastmoney: "东方财富诊断",
+};
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -847,6 +863,23 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
+  function exportProviderGate() {
+    if (!providerGate) return;
+    const payload = JSON.stringify(
+      { exportedAt: new Date().toISOString(), ...providerGate },
+      null,
+      2,
+    );
+    const url = URL.createObjectURL(
+      new Blob([payload], { type: "application/json;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `provider-gate-${providerGate.report?.probedAt?.slice(0, 10) ?? "latest"}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function exportModelRegistry() {
     if (!modelRegistry?.artifacts?.length) return;
     const csv = [
@@ -873,6 +906,10 @@ export function App() {
     link.click();
     URL.revokeObjectURL(url);
   }
+
+  const gateDetailReport = providerGate?.report ?? providerGate?.diagnostic;
+  const gateDetailIsDiagnostic =
+    !providerGate?.report && Boolean(providerGate?.diagnostic);
 
   return (
     <main>
@@ -1049,6 +1086,87 @@ export function App() {
             </small>
           </div>
         </div>
+        {gateDetailReport && (
+          <details className="gate-details">
+            <summary>
+              <span>
+                {gateDetailIsDiagnostic
+                  ? "数据源快速诊断明细"
+                  : "数据源上线 Gate 明细"}
+              </span>
+              <strong>{gateDetailReport.passed ? "通过" : "未通过"}</strong>
+            </summary>
+            <div className="gate-checks">
+              {Object.entries({
+                ...(gateDetailReport.requiredChecks ?? {}),
+                ...(gateDetailReport.diagnosticChecks ?? {}),
+              }).map(([name, passed]) => (
+                <span className={passed ? "passed" : "failed"} key={name}>
+                  {passed ? "✓" : "×"} {providerCheckNames[name] ?? name}
+                </span>
+              ))}
+            </div>
+            {gateDetailReport.providers && (
+              <div className="gate-table-wrap">
+                <table className="gate-table">
+                  <thead>
+                    <tr>
+                      <th>数据源</th>
+                      <th>成功</th>
+                      <th>成功率</th>
+                      <th>平均延迟</th>
+                      <th>P95 延迟</th>
+                      <th>空响应</th>
+                      <th>缺失字段</th>
+                      <th>错误分类</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(gateDetailReport.providers).map(
+                      ([name, metric]) => (
+                        <tr key={name}>
+                          <td>{providerNames[name] ?? name}</td>
+                          <td>
+                            {metric.successes}/{metric.observations}
+                          </td>
+                          <td>{pct(metric.success_rate)}</td>
+                          <td>{metric.mean_latency_seconds.toFixed(2)} 秒</td>
+                          <td>{metric.p95_latency_seconds.toFixed(2)} 秒</td>
+                          <td>{metric.empty_response_count}</td>
+                          <td>{metric.missing_field_count}</td>
+                          <td>
+                            {Object.entries(metric.error_categories ?? {})
+                              .map(([kind, count]) => `${kind} ${count}`)
+                              .join("；") || "无"}
+                          </td>
+                        </tr>
+                      ),
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {(gateDetailReport.reasons?.length > 0 ||
+              (gateDetailReport.warnings?.length ?? 0) > 0) && (
+              <ul className="gate-messages">
+                {gateDetailReport.reasons?.map((reason) => (
+                  <li className="failed" key={`reason-${reason}`}>
+                    阻断：{reason}
+                  </li>
+                ))}
+                {gateDetailReport.warnings?.map((warning) => (
+                  <li key={`warning-${warning}`}>警告：{warning}</li>
+                ))}
+              </ul>
+            )}
+            <button
+              className="secondary gate-export"
+              onClick={exportProviderGate}
+            >
+              导出 Gate 完整报告 JSON
+            </button>
+          </details>
+        )}
         <details className="quality-details">
           <summary>
             <span>数据质量明细</span>
