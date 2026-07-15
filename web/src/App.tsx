@@ -765,6 +765,26 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
+  function exportTaskErrors() {
+    if (!taskView?.errorItems.length) return;
+    const csv = [
+      "task_id,task_kind,index,error",
+      ...taskView.errorItems.map((error, index) =>
+        [taskView.id, taskView.kind, index + 1, taskErrorText(error)]
+          .map((value) => `"${String(value).replaceAll('"', '""')}"`)
+          .join(","),
+      ),
+    ].join("\n");
+    const url = URL.createObjectURL(
+      new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `task-errors-${taskView.id.slice(0, 8)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <main>
       <header className="workflow-header">
@@ -1146,11 +1166,17 @@ export function App() {
             <span>错误 {taskView.errors}</span>
           </div>
           {taskView.errorItems.length > 0 && (
-            <ul className="task-errors">
-              {taskView.errorItems.slice(0, 5).map((error, index) => (
-                <li key={index}>{taskErrorText(error)}</li>
-              ))}
-            </ul>
+            <details className="task-error-details">
+              <summary>查看全部 {taskView.errorItems.length} 条错误</summary>
+              <button className="secondary" onClick={exportTaskErrors}>
+                导出错误 CSV
+              </button>
+              <ul className="task-errors">
+                {taskView.errorItems.map((error, index) => (
+                  <li key={index}>{taskErrorText(error)}</li>
+                ))}
+              </ul>
+            </details>
           )}
         </section>
       )}

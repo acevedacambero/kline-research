@@ -130,6 +130,10 @@ describe("App", () => {
     expect(
       screen.queryByText("数据源上线 Gate 已通过"),
     ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("查看全部 1 条错误"));
+    expect(
+      screen.getByRole("button", { name: "导出错误 CSV" }),
+    ).toBeInTheDocument();
   });
 
   it("restores the most recent durable task after reload", async () => {
