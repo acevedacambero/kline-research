@@ -186,7 +186,15 @@ def _task_response(job: Job) -> dict:
         )
     progress = job.progress if isinstance(job.progress, dict) else {}
     result = job.result if isinstance(job.result, dict) else {}
-    item = {"id": job.id, "jobType": job.job_type, **defaults, **progress, **result}
+    item = {
+        "id": job.id,
+        "jobType": job.job_type,
+        "createdAt": job.created_at.isoformat(),
+        "updatedAt": job.updated_at.isoformat(),
+        **defaults,
+        **progress,
+        **result,
+    }
     status = job.status.value
     if job.status is JobStatus.COMPLETED and item["errors"]:
         status = "completed_with_errors"

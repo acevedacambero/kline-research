@@ -176,6 +176,8 @@ def test_feature_build_resumes_interrupted_task_with_same_id(tmp_path):
         assert recent[0]["id"] == interrupted.id
         assert recent[0]["jobType"] == "features"
         assert recent[0]["status"] == "interrupted"
+        assert recent[0]["createdAt"]
+        assert recent[0]["updatedAt"]
         assert client.get(f"/api/tasks/{interrupted.id}").status_code == 200
         response = client.post("/api/features/build", json={"scope": "all"})
         assert response.status_code == 202

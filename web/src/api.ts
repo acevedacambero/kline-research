@@ -62,7 +62,7 @@ export type HistoryBackfillTask = {
   listingHistoryShort: number; errors: unknown[]; currentSecurity?: string | null;
   speed: number; etaSeconds?: number | null;
 }
-export type GenericTask = { id: string; jobType: string; status: string; done: number; total: number; rows?: number; errors: unknown[]; currentSecurity?: string | null; speed?: number; etaSeconds?: number | null }
+export type GenericTask = { id: string; jobType: string; status: string; createdAt: string; updatedAt: string; done: number; total: number; rows?: number; errors: unknown[]; currentSecurity?: string | null; speed?: number; etaSeconds?: number | null }
 export type ProviderGateReport = { gateVersion: string; passed: boolean; probedAt?: string; reasons: string[]; warnings?: string[] }
 export type ProviderGateStatus = { available: boolean; report: ProviderGateReport | null; maxAgeHours: number; diagnosticAvailable: boolean; diagnostic: ProviderGateReport | null }
 export type DatasetQuality = { totalCached: number; shortHistoryCached: number; listingHistoryShort: number; historyBackfillFailed: number; featureRows: number; approximateRuleRows: number; approximateRuleRatio?: number | null; approximateFactorSecurities: number; approximateFactorExamples: string[]; latestDataDate?: string | null; freshSecurities: number; staleSecurities: number; freshnessCoverage: number; freshnessMinCoverage: number; freshnessThresholdDays: number; staleExamples: Array<{ security: string; latestDate: string }>; unreadableSecurities: number; unreadableExamples: string[]; qualityEvents: Array<{ dataset_key: string; event_type: string; severity: string; message: string; created_at: string }> }

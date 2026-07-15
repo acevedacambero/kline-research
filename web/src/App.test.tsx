@@ -216,6 +216,10 @@ describe("App", () => {
       screen.getByRole("heading", { name: "P1 标签" }),
     ).toBeInTheDocument();
     expect(screen.getByText("生成 900 行")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "最近任务历史" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("durable-1")).toBeInTheDocument();
   });
 
   it("renders five P2 groups and explains unavailable history", async () => {

@@ -22,6 +22,7 @@ import {
   type ResearchReadiness,
   type ScoreStatus,
   type ModelRegistryStatus,
+  type GenericTask,
 } from "./api";
 import { KlineChart } from "./KlineChart";
 import { EquityCurveChart } from "./EquityCurveChart";
@@ -101,6 +102,14 @@ const taskErrorText = (error: unknown) =>
           .filter(Boolean)
           .join("：")
       : String(error);
+const taskKindNames: Record<string, string> = {
+  import: "行情导入",
+  history_backfill: "历史补全",
+  labels: "P1 标签",
+  features: "P2 特征",
+  scores: "P3 评分",
+  provider_probe: "数据源诊断",
+};
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -165,6 +174,7 @@ export function App() {
   const [modelRegistry, setModelRegistry] =
     useState<ModelRegistryStatus | null>(null);
   const [taskView, setTaskView] = useState<TaskView | null>(null);
+  const [taskHistory, setTaskHistory] = useState<GenericTask[]>([]);
 
   const showTask = (
     kind: string,
@@ -232,15 +242,8 @@ export function App() {
       .labelStatus()
       .then(setLabelStatus)
       .catch(() => undefined);
-    const restoreTask = (task: import("./api").GenericTask) => {
-      const names: Record<string, string> = {
-        import: "行情导入",
-        history_backfill: "历史补全",
-        labels: "P1 标签",
-        features: "P2 特征",
-        scores: "P3 评分",
-      };
-      showTask(names[task.jobType] ?? task.jobType, task.id, task);
+    const restoreTask = (task: GenericTask) => {
+      showTask(taskKindNames[task.jobType] ?? task.jobType, task.id, task);
       if (task.status === "queued" || task.status === "running") {
         window.setTimeout(
           () =>
@@ -252,12 +255,20 @@ export function App() {
         );
       }
     };
-    api
-      .recentTasks(1)
-      .then((tasks) => {
-        if (tasks[0]) restoreTask(tasks[0]);
-      })
-      .catch(() => undefined);
+    let didRestoreTask = false;
+    const refreshTasks = () =>
+      api
+        .recentTasks(10)
+        .then((tasks) => {
+          const items = Array.isArray(tasks) ? tasks : [];
+          setTaskHistory(items);
+          if (!didRestoreTask && items[0]) {
+            didRestoreTask = true;
+            restoreTask(items[0]);
+          }
+        })
+        .catch(() => undefined);
+    refreshTasks();
     const refresh = () =>
       api
         .quality()
@@ -269,7 +280,11 @@ export function App() {
         .catch(() => undefined);
     refresh();
     const timer = window.setInterval(refresh, 5000);
-    return () => window.clearInterval(timer);
+    const taskTimer = window.setInterval(refreshTasks, 15000);
+    return () => {
+      window.clearInterval(timer);
+      window.clearInterval(taskTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -1205,6 +1220,47 @@ export function App() {
               </ul>
             </details>
           )}
+        </section>
+      )}
+      {taskHistory.length > 0 && (
+        <section className="panel workflow-task-history">
+          <div className="section-title">
+            <div>
+              <span className="eyebrow">TASK HISTORY</span>
+              <h2>最近任务历史</h2>
+            </div>
+            <span className="message">最近 {taskHistory.length} 条</span>
+          </div>
+          <table className="task-history-table">
+            <thead>
+              <tr>
+                <th>开始时间</th>
+                <th>任务类型</th>
+                <th>状态</th>
+                <th>进度</th>
+                <th>错误</th>
+                <th>任务 ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {taskHistory.map((task) => (
+                <tr key={task.id}>
+                  <td>
+                    {task.createdAt
+                      ? new Date(task.createdAt).toLocaleString("zh-CN")
+                      : "—"}
+                  </td>
+                  <td>{taskKindNames[task.jobType] ?? task.jobType}</td>
+                  <td>{task.status}</td>
+                  <td>
+                    {task.done ?? 0}/{task.total ?? 0}
+                  </td>
+                  <td>{task.errors?.length ?? 0}</td>
+                  <td title={task.id}>{task.id}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </section>
       )}
       <section className="panel workflow-p7-walk">
