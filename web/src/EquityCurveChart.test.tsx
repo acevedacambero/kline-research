@@ -11,6 +11,11 @@ it("renders the P8 equity curve and its accessible summary", () => {
         { date: "2024-02-01", value: 1.08 },
         { date: "2024-03-01", value: 1.03 },
       ]}
+      benchmarkPoints={[
+        { date: "2024-01-02", value: 1 },
+        { date: "2024-02-01", value: 1.02 },
+        { date: "2024-03-01", value: 1.01 },
+      ]}
     />,
   );
 
@@ -20,6 +25,10 @@ it("renders the P8 equity curve and its accessible summary", () => {
   expect(
     container.querySelector("polyline")?.getAttribute("points"),
   ).toBeTruthy();
+  expect(
+    container.querySelector(".equity-benchmark-line")?.getAttribute("points"),
+  ).toBeTruthy();
+  expect(screen.getByText("全样本基准")).toBeInTheDocument();
 });
 
 it("does not render an empty curve", () => {

@@ -41,7 +41,7 @@ VERSIONS = {
     "multiFeatureModelDefinitionVersion": "p7-multifeature-logistic-v1",
     "modelRegistryVersion": "p7-model-registry-v1",
     "walkForwardModelDefinitionVersion": "p7-walk-forward-v2-nonoverlap",
-    "portfolioValidationVersion": "p8-top-score-portfolio-v3-equity",
+    "portfolioValidationVersion": "p8-top-score-portfolio-v4-benchmark",
     "labelDefinitionVersion": "daily-v2-exit-delay",
     "limitRuleVersion": "cn-equity-v1",
     "gapRuleVersion": "calendar-10d-v1",

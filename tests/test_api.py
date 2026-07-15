@@ -47,7 +47,7 @@ def test_health_exposes_all_version_keys(tmp_path):
     assert body["versions"]["modelDefinitionVersion"] == "p7-score-logistic-v1"
     assert body["versions"]["multiFeatureModelDefinitionVersion"] == "p7-multifeature-logistic-v1"
     assert body["versions"]["walkForwardModelDefinitionVersion"] == "p7-walk-forward-v2-nonoverlap"
-    assert body["versions"]["portfolioValidationVersion"] == "p8-top-score-portfolio-v3-equity"
+    assert body["versions"]["portfolioValidationVersion"] == "p8-top-score-portfolio-v4-benchmark"
     assert body["versions"]["transactionCostVersion"] == "p8-flat-bps-v1"
     assert body["recoverableTasks"] == 0
 
@@ -937,7 +937,7 @@ def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
         json={"label_column": "p20_executable_return", "top_fraction": 0.1},
     )
     assert response.status_code == 200
-    assert response.json()["version"] == "p8-top-score-portfolio-v3-equity"
+    assert response.json()["version"] == "p8-top-score-portfolio-v4-benchmark"
     assert response.json()["sampleCount"] == 0
 
 

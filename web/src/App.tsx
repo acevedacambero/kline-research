@@ -1323,7 +1323,10 @@ export function App() {
                 <small>{portfolio.warnings.join("；")}</small>
               </article>
             </div>
-            <EquityCurveChart points={portfolio.equityCurve ?? []} />
+            <EquityCurveChart
+              points={portfolio.equityCurve ?? []}
+              benchmarkPoints={portfolio.benchmarkEquityCurve ?? []}
+            />
           </>
         ) : (
           <p className="muted">

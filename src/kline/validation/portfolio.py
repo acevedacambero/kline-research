@@ -7,11 +7,11 @@ import numpy as np
 import pandas as pd
 
 
-PORTFOLIO_VALIDATION_VERSION = "p8-top-score-portfolio-v3-equity"
+PORTFOLIO_VALIDATION_VERSION = "p8-top-score-portfolio-v4-benchmark"
 
 
 def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.DataFrame | list[dict], *, label_column: str = "p20_executable_return", top_fraction: float = 0.1, as_of_date: date | None = None, non_overlapping: bool = False, transaction_cost_bps: float = 0, slippage_bps: float = 0) -> dict[str, Any]:
-    base = {"version": PORTFOLIO_VALIDATION_VERSION, "labelColumn": label_column, "topFraction": top_fraction, "sampleCount": 0, "tradingDayCount": 0, "selectedCount": 0, "averageReturn": None, "benchmarkReturn": None, "excessReturn": None, "winRate": None, "annualizedReturn": None, "annualizedVolatility": None, "sharpeRatio": None, "calmarRatio": None, "equityCurve": [], "warnings": []}
+    base = {"version": PORTFOLIO_VALIDATION_VERSION, "labelColumn": label_column, "topFraction": top_fraction, "sampleCount": 0, "tradingDayCount": 0, "selectedCount": 0, "averageReturn": None, "benchmarkReturn": None, "excessReturn": None, "winRate": None, "annualizedReturn": None, "annualizedVolatility": None, "sharpeRatio": None, "calmarRatio": None, "equityCurve": [], "benchmarkEquityCurve": [], "warnings": []}
     sf, lf = pd.DataFrame(scores).copy(), pd.DataFrame(labels).copy()
     required = {"exchange", "code", "date", "score"} | {"signal_date", label_column}
     if not required.issubset(set(sf.columns) | set(lf.columns)) or not {"exchange", "code", "date", "score"}.issubset(sf.columns) or not {"exchange", "code", "signal_date", label_column}.issubset(lf.columns):
@@ -56,9 +56,12 @@ def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.D
     sharpe_ratio = None
     calmar_ratio = None
     equity_curve = []
+    benchmark_equity_curve = []
     if non_overlapping:
         period_returns = net_returns.groupby(selected["date"]).mean().sort_index()
         curve = (1 + period_returns).cumprod()
+        benchmark_period_returns = merged.groupby("date")[label_column].mean().sort_index()
+        benchmark_curve = (1 + benchmark_period_returns).cumprod()
         max_drawdown = float((curve / curve.cummax() - 1).min()) if not curve.empty else None
         periods_per_year = 252 / horizon
         if not curve.empty and bool((1 + period_returns > 0).all()):
@@ -76,8 +79,12 @@ def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.D
             {"date": item.isoformat(), "value": float(value)}
             for item, value in curve.items()
         ]
+        benchmark_equity_curve = [
+            {"date": item.isoformat(), "value": float(value)}
+            for item, value in benchmark_curve.items()
+        ]
     else:
         warnings.append("前瞻收益窗口存在重叠，暂不计算组合最大回撤")
     if len(selected) < 20:
         warnings.append("入选样本少于 20，仅供探索")
-    return {**base, "sampleCount": int(len(merged)), "tradingDayCount": int(merged["date"].nunique()), "selectedCount": int(len(selected)), "averageReturn": float(selected_returns.mean()), "netAverageReturn": float(net_returns.mean()), "benchmarkReturn": float(benchmark.mean()), "excessReturn": float(selected_returns.mean() - benchmark.mean()), "netExcessReturn": float(net_returns.mean() - benchmark.mean()), "winRate": float((net_returns > 0).mean()), "maxDrawdown": max_drawdown, "annualizedReturn": annualized_return, "annualizedVolatility": annualized_volatility, "sharpeRatio": sharpe_ratio, "calmarRatio": calmar_ratio, "equityCurve": equity_curve, "nonOverlapping": non_overlapping, "transactionCostBps": transaction_cost_bps, "slippageBps": slippage_bps, "totalCostRate": total_cost_rate, "warnings": warnings}
+    return {**base, "sampleCount": int(len(merged)), "tradingDayCount": int(merged["date"].nunique()), "selectedCount": int(len(selected)), "averageReturn": float(selected_returns.mean()), "netAverageReturn": float(net_returns.mean()), "benchmarkReturn": float(benchmark.mean()), "excessReturn": float(selected_returns.mean() - benchmark.mean()), "netExcessReturn": float(net_returns.mean() - benchmark.mean()), "winRate": float((net_returns > 0).mean()), "maxDrawdown": max_drawdown, "annualizedReturn": annualized_return, "annualizedVolatility": annualized_volatility, "sharpeRatio": sharpe_ratio, "calmarRatio": calmar_ratio, "equityCurve": equity_curve, "benchmarkEquityCurve": benchmark_equity_curve, "nonOverlapping": non_overlapping, "transactionCostBps": transaction_cost_bps, "slippageBps": slippage_bps, "totalCostRate": total_cost_rate, "warnings": warnings}
