@@ -24,6 +24,7 @@ import {
   type ModelRegistryStatus,
 } from "./api";
 import { KlineChart } from "./KlineChart";
+import { EquityCurveChart } from "./EquityCurveChart";
 import "./styles.css";
 
 const pct = (value?: number | null) =>
@@ -817,7 +818,9 @@ export function App() {
           </div>
           <div className="version">
             <span>复权因子近似</span>
-            <strong>{datasetQuality?.approximateFactorSecurities ?? "—"}</strong>
+            <strong>
+              {datasetQuality?.approximateFactorSecurities ?? "—"}
+            </strong>
             <small>
               {datasetQuality?.approximateFactorSecurities
                 ? `需审计：${datasetQuality.approximateFactorExamples.slice(0, 3).join("、")}`
@@ -1263,51 +1266,54 @@ export function App() {
           ) : null}
         </div>
         {portfolio ? (
-          <div className="validation-panel">
-            <article>
-              <span>净组合 / 全样本收益</span>
-              <strong>
-                {pct(portfolio.netAverageReturn)} /{" "}
-                {pct(portfolio.benchmarkReturn)}
-              </strong>
-              <small>
-                毛收益 {pct(portfolio.averageReturn)} · 成本{" "}
-                {portfolio.transactionCostBps + portfolio.slippageBps} bps ·
-                入选 {portfolio.selectedCount}
-              </small>
-            </article>
-            <article>
-              <span>净超额收益</span>
-              <strong>{pct(portfolio.netExcessReturn)}</strong>
-              <small>
-                胜率 {pct(portfolio.winRate)} · 最大回撤{" "}
-                {pct(portfolio.maxDrawdown)}
-              </small>
-            </article>
-            <article>
-              <span>年化收益 / 波动</span>
-              <strong>
-                {pct(portfolio.annualizedReturn)} /{" "}
-                {pct(portfolio.annualizedVolatility)}
-              </strong>
-              <small>
-                Sharpe{" "}
-                {portfolio.sharpeRatio == null
-                  ? "—"
-                  : portfolio.sharpeRatio.toFixed(3)}{" "}
-                · Calmar{" "}
-                {portfolio.calmarRatio == null
-                  ? "—"
-                  : portfolio.calmarRatio.toFixed(3)}{" "}
-                · 净值点 {portfolio.equityCurve?.length ?? 0}
-              </small>
-            </article>
-            <article>
-              <span>回测口径</span>
-              <strong>非重叠</strong>
-              <small>{portfolio.warnings.join("；")}</small>
-            </article>
-          </div>
+          <>
+            <div className="validation-panel">
+              <article>
+                <span>净组合 / 全样本收益</span>
+                <strong>
+                  {pct(portfolio.netAverageReturn)} /{" "}
+                  {pct(portfolio.benchmarkReturn)}
+                </strong>
+                <small>
+                  毛收益 {pct(portfolio.averageReturn)} · 成本{" "}
+                  {portfolio.transactionCostBps + portfolio.slippageBps} bps ·
+                  入选 {portfolio.selectedCount}
+                </small>
+              </article>
+              <article>
+                <span>净超额收益</span>
+                <strong>{pct(portfolio.netExcessReturn)}</strong>
+                <small>
+                  胜率 {pct(portfolio.winRate)} · 最大回撤{" "}
+                  {pct(portfolio.maxDrawdown)}
+                </small>
+              </article>
+              <article>
+                <span>年化收益 / 波动</span>
+                <strong>
+                  {pct(portfolio.annualizedReturn)} /{" "}
+                  {pct(portfolio.annualizedVolatility)}
+                </strong>
+                <small>
+                  Sharpe{" "}
+                  {portfolio.sharpeRatio == null
+                    ? "—"
+                    : portfolio.sharpeRatio.toFixed(3)}{" "}
+                  · Calmar{" "}
+                  {portfolio.calmarRatio == null
+                    ? "—"
+                    : portfolio.calmarRatio.toFixed(3)}{" "}
+                  · 净值点 {portfolio.equityCurve?.length ?? 0}
+                </small>
+              </article>
+              <article>
+                <span>回测口径</span>
+                <strong>非重叠</strong>
+                <small>{portfolio.warnings.join("；")}</small>
+              </article>
+            </div>
+            <EquityCurveChart points={portfolio.equityCurve ?? []} />
+          </>
         ) : (
           <p className="muted">
             按每日 P3
