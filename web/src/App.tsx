@@ -205,6 +205,27 @@ export function App() {
     });
   };
 
+  async function inspectTask(task: GenericTask) {
+    try {
+      const detail = await api.taskStatus(task.id);
+      showTask(
+        taskKindNames[detail.jobType] ?? detail.jobType,
+        detail.id,
+        detail,
+      );
+      setMessage(`已载入任务 ${detail.id} 的完整记录`);
+      window.setTimeout(
+        () =>
+          document
+            .getElementById("task-progress")
+            ?.scrollIntoView?.({ behavior: "smooth" }),
+        0,
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "读取任务失败");
+    }
+  }
+
   const refreshResearchStatus = () =>
     Promise.all([
       api.labelStatus().then(setLabelStatus),
@@ -1181,6 +1202,7 @@ export function App() {
       </section>
       {taskView && (
         <section
+          id="task-progress"
           className="panel task-panel workflow-task"
           aria-label="任务进度"
         >
@@ -1240,6 +1262,7 @@ export function App() {
                 <th>进度</th>
                 <th>错误</th>
                 <th>任务 ID</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -1257,6 +1280,15 @@ export function App() {
                   </td>
                   <td>{task.errors?.length ?? 0}</td>
                   <td title={task.id}>{task.id}</td>
+                  <td>
+                    <button
+                      className="link-button"
+                      aria-label={`查看任务 ${task.id}`}
+                      onClick={() => inspectTask(task)}
+                    >
+                      查看
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -197,14 +197,24 @@ describe("App", () => {
                 errors: [],
               },
             ]
-          : path.includes("/quality")
-            ? { totalCached: 2 }
-            : {
-                status: "ok",
-                dataSource: "AkShare",
-                cachePath: "data",
-                versions: {},
-              };
+          : path === "/api/tasks/durable-1"
+            ? {
+                id: "durable-1",
+                jobType: "labels",
+                status: "completed_with_errors",
+                done: 3,
+                total: 3,
+                rows: 901,
+                errors: [{ security: "sh600000", message: "detail failure" }],
+              }
+            : path.includes("/quality")
+              ? { totalCached: 2 }
+              : {
+                  status: "ok",
+                  dataSource: "AkShare",
+                  cachePath: "data",
+                  versions: {},
+                };
         return { ok: true, json: async () => body };
       }),
     );
@@ -220,6 +230,14 @@ describe("App", () => {
       screen.getByRole("heading", { name: "最近任务历史" }),
     ).toBeInTheDocument();
     expect(screen.getByText("durable-1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看任务 durable-1" }));
+    expect(
+      await screen.findByText("已载入任务 durable-1 的完整记录"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("生成 901 行")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("查看全部 1 条错误"));
+    expect(screen.getByText("sh600000：detail failure")).toBeInTheDocument();
   });
 
   it("renders five P2 groups and explains unavailable history", async () => {
