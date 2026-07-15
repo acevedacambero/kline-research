@@ -110,6 +110,15 @@ const taskKindNames: Record<string, string> = {
   scores: "P3 评分",
   provider_probe: "数据源诊断",
 };
+const taskStatusNames: Record<string, string> = {
+  queued: "等待中",
+  running: "进行中",
+  completed: "已完成",
+  completed_with_errors: "完成（有错误）",
+  failed: "失败",
+  interrupted: "已中断（可恢复）",
+};
+const taskStatusName = (status: string) => taskStatusNames[status] ?? status;
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -1211,7 +1220,7 @@ export function App() {
               <span className="eyebrow">BACKGROUND TASK</span>
               <h2>{taskView.kind}</h2>
             </div>
-            <span className="message">{taskView.status}</span>
+            <span className="message">{taskStatusName(taskView.status)}</span>
           </div>
           <progress max={Math.max(1, taskView.total)} value={taskView.done} />
           <div className="task-facts">
@@ -1274,7 +1283,7 @@ export function App() {
                       : "—"}
                   </td>
                   <td>{taskKindNames[task.jobType] ?? task.jobType}</td>
-                  <td>{task.status}</td>
+                  <td>{taskStatusName(task.status)}</td>
                   <td>
                     {task.done ?? 0}/{task.total ?? 0}
                   </td>

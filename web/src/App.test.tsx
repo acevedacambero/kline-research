@@ -235,6 +235,7 @@ describe("App", () => {
     expect(
       await screen.findByText("已载入任务 durable-1 的完整记录"),
     ).toBeInTheDocument();
+    expect(screen.getAllByText("完成（有错误）")).toHaveLength(1);
     expect(screen.getByText("生成 901 行")).toBeInTheDocument();
     fireEvent.click(screen.getByText("查看全部 1 条错误"));
     expect(screen.getByText("sh600000：detail failure")).toBeInTheDocument();
