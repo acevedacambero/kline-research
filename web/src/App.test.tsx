@@ -47,7 +47,7 @@ describe('App', () => {
     render(<App />)
 
     expect(await screen.findByText('任务 ID durable-1')).toBeInTheDocument()
-    expect(screen.getByText('P1 标签')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'P1 标签' })).toBeInTheDocument()
     expect(screen.getByText('生成 900 行')).toBeInTheDocument()
   })
 
@@ -108,6 +108,9 @@ describe('App', () => {
     expect(Array.from(exchangeSelect.options).map(option => option.value)).toEqual(['sh', 'sz'])
     expect(container.querySelector('option[value="bj"]')).toBeNull()
     expect(screen.getByRole('button', { name: '重试下载错误' })).toBeInTheDocument()
+    const workflow = screen.getByRole('navigation', { name: '研究流程导航' })
+    expect(workflow.querySelector('a[href="#p1-auditor"]')).toHaveTextContent('P1 标签')
+    expect(workflow.querySelector('a[href="#p8-portfolio"]')).toHaveTextContent('P8 组合')
   })
 
   it('starts history backfill and renders its terminal summary', async () => {

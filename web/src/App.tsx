@@ -776,7 +776,18 @@ export function App() {
           {health?.status === "ok" ? "本地服务正常" : "正在连接"}
         </span>
       </header>
-      <section className="panel status-panel workflow-status">
+      <nav className="workflow-nav" aria-label="研究流程导航">
+        <a href="#data-status">数据</a>
+        <a href="#p1-auditor">P1 标签</a>
+        <a href="#p2-auditor">P2 特征</a>
+        <a href="#p3-score">P3 评分</a>
+        <a href="#p4-validation">P4 验证</a>
+        <a href="#p5-calibration">P5 校准</a>
+        <a href="#p6-scanner">P6 扫描</a>
+        <a href="#p7-models">P7 模型</a>
+        <a href="#p8-portfolio">P8 组合</a>
+      </nav>
+      <section id="data-status" className="panel status-panel workflow-status">
         <div className="status-summary">
           <h2>数据状态</h2>
           <p className="muted">
@@ -1190,7 +1201,7 @@ export function App() {
           </p>
         )}
       </section>
-      <section className="panel workflow-p8">
+      <section id="p8-portfolio" className="panel workflow-p8">
         <div className="section-title">
           <div>
             <span className="eyebrow">P8 VALIDATION</span>
@@ -1321,7 +1332,7 @@ export function App() {
           </p>
         )}
       </section>
-      <section className="panel workflow-p1">
+      <section id="p1-auditor" className="panel workflow-p1">
         <div className="section-title">
           <div>
             <span className="eyebrow">P1 AUDITOR</span>
@@ -1455,7 +1466,7 @@ export function App() {
           </div>
         )}
       </section>
-      <section className="panel workflow-p4">
+      <section id="p4-validation" className="panel workflow-p4">
         <div className="section-title">
           <div>
             <span className="eyebrow">P4 VALIDATION</span>
@@ -1527,7 +1538,7 @@ export function App() {
           </p>
         )}
       </section>
-      <section className="panel workflow-p6">
+      <section id="p6-scanner" className="panel workflow-p6">
         <div className="section-title">
           <div>
             <span className="eyebrow">P6 SCANNER</span>
@@ -1625,7 +1636,7 @@ export function App() {
           </p>
         )}
       </section>
-      <section className="panel workflow-p5">
+      <section id="p5-calibration" className="panel workflow-p5">
         <div className="section-title">
           <div>
             <span className="eyebrow">P5 CALIBRATION</span>
@@ -1815,7 +1826,7 @@ export function App() {
           </p>
         )}
       </section>
-      <section className="panel workflow-p3">
+      <section id="p3-score" className="panel workflow-p3">
         <div className="section-title">
           <div>
             <span className="eyebrow">P3 SCORE</span>
@@ -1861,7 +1872,7 @@ export function App() {
           </p>
         )}
       </section>
-      <section className="panel workflow-p7-gate">
+      <section id="p7-models" className="panel workflow-p7-gate">
         <div className="section-title">
           <div>
             <span className="eyebrow">P7 FEATURE GATE</span>
@@ -1902,7 +1913,7 @@ export function App() {
           </p>
         )}
       </section>
-      <section className="panel workflow-p2">
+      <section id="p2-auditor" className="panel workflow-p2">
         <div className="section-title">
           <div>
             <span className="eyebrow">P2 AUDITOR</span>
