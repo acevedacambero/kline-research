@@ -102,6 +102,23 @@ const ResultLabelOptions = () => (
     <option value="p60_delayed_executable_return">P60 可执行顺延卖出</option>
   </>
 );
+const resultLabelNames: Record<string, string> = {
+  p5_executable_return: "P5 计划收盘卖出",
+  p5_delayed_executable_return: "P5 可执行顺延卖出",
+  p10_executable_return: "P10 计划收盘卖出",
+  p10_delayed_executable_return: "P10 可执行顺延卖出",
+  p20_executable_return: "P20 计划收盘卖出",
+  p20_delayed_executable_return: "P20 可执行顺延卖出",
+  p60_executable_return: "P60 计划收盘卖出",
+  p60_delayed_executable_return: "P60 可执行顺延卖出",
+};
+const resultLabelName = (value?: string | null) =>
+  value ? (resultLabelNames[value] ?? value) : "—";
+const modelKindNames: Record<string, string> = {
+  baseline: "P3 单分数基线",
+  multifeature: "P2/P3 多特征基线",
+  walk_forward: "滚动窗口验证",
+};
 type TaskView = {
   kind: string;
   id: string;
@@ -1804,12 +1821,12 @@ export function App() {
             <tbody>
               {modelRegistry.artifacts.map((artifact) => (
                 <tr key={artifact.modelId}>
-                  <td>{artifact.kind}</td>
+                  <td>{modelKindNames[artifact.kind] ?? artifact.kind}</td>
                   <td>
                     {new Date(artifact.createdAt).toLocaleString("zh-CN")}
                   </td>
                   <td>{researchStatusName(artifact.status)}</td>
-                  <td>{artifact.labelColumn ?? "—"}</td>
+                  <td>{resultLabelName(artifact.labelColumn)}</td>
                   <td>{artifact.version ?? "—"}</td>
                   <td title={artifact.modelId}>{artifact.modelId}</td>
                 </tr>
@@ -1842,6 +1859,7 @@ export function App() {
               <small>
                 状态 {researchStatusName(multifeature.status)} · AUC{" "}
                 {multifeature.auc == null ? "—" : multifeature.auc.toFixed(3)}
+                {` · ${resultLabelName(multifeature.labelColumn)}`}
               </small>
             </article>
             <article>
@@ -1996,7 +2014,12 @@ export function App() {
               <article>
                 <span>回测口径</span>
                 <strong>非重叠</strong>
-                <small>{portfolio.warnings.join("；")}</small>
+                <small>
+                  {resultLabelName(portfolio.labelColumn)}
+                  {portfolio.warnings.length
+                    ? ` · ${portfolio.warnings.join("；")}`
+                    : ""}
+                </small>
               </article>
             </div>
             <EquityCurveChart
@@ -2195,7 +2218,8 @@ export function App() {
                 {validation.sampleCount} / {validation.independentPeriodCount}
               </strong>
               <small>
-                七个自然日两步聚类 · 秩相关{" "}
+                {resultLabelName(validation.labelColumn)} · 七个自然日两步聚类 ·
+                秩相关{" "}
                 {validation.rankCorrelation == null
                   ? "—"
                   : validation.rankCorrelation.toFixed(4)}{" "}
@@ -2378,7 +2402,9 @@ export function App() {
             <article>
               <span>成熟样本</span>
               <strong>{calibration.sampleCount}</strong>
-              <small>{calibration.labelColumn} · 按 P3 分数分桶</small>
+              <small>
+                {resultLabelName(calibration.labelColumn)} · 按 P3 分数分桶
+              </small>
               <small
                 className={
                   calibration.reliability.status === "usable"
@@ -2487,7 +2513,7 @@ export function App() {
                 {baseline.trainCount} / {baseline.testCount}
               </strong>
               <small>
-                时间切分，标签：{baseline.labelColumn}
+                时间切分，标签：{resultLabelName(baseline.labelColumn)}
                 {baseline.trainUntil ? ` · 截止 ${baseline.trainUntil}` : ""}
               </small>
             </article>

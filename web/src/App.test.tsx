@@ -320,8 +320,8 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("multifeature")).toBeInTheDocument();
-    expect(screen.getByText("p20_executable_return")).toBeInTheDocument();
+    expect(await screen.findByText("P2/P3 多特征基线")).toBeInTheDocument();
+    expect(screen.getAllByText("P20 计划收盘卖出").length).toBeGreaterThan(4);
     expect(screen.getByText("model-20260715-a")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "导出注册表 CSV" }),
