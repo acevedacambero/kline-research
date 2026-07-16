@@ -45,7 +45,6 @@ const coverageStatusNames: Record<string, string> = {
   unreadable: "文件不可读",
   short_history: "日线历史不足",
   stale: "行情过期",
-  calendar_gap: "行情有缺口",
   approximate_factor: "近似复权",
 };
 const researchKindNames: Record<string, string> = {
@@ -2022,7 +2021,7 @@ export function App() {
               </div>
               <div className="gate-table-wrap">
                 <table className="gate-table coverage-table">
-                  <thead><tr><th>证券</th><th>状态</th><th>起止日期</th><th>行数</th><th>缺口</th><th>说明</th></tr></thead>
+                  <thead><tr><th>证券</th><th>状态</th><th>起止日期</th><th>行数</th><th>长间隔（观察）</th><th>说明</th></tr></thead>
                   <tbody>
                     {coverage.items.map((item) => (
                       <tr key={item.security}>

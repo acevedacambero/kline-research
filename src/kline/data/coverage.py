@@ -12,9 +12,9 @@ import pyarrow.parquet as pq
 from ..storage import atomic_write_text
 
 
-COVERAGE_REPORT_VERSION = "market-coverage-v1"
+COVERAGE_REPORT_VERSION = "market-coverage-v2-suspension-aware"
 REPAIRABLE_STATUSES = frozenset(
-    {"missing", "unreadable", "short_history", "stale", "calendar_gap", "approximate_factor"}
+    {"missing", "unreadable", "short_history", "stale", "approximate_factor"}
 )
 
 
@@ -130,15 +130,16 @@ class MarketCoverageService:
                 row.update(status="short_history", reason=f"有效日线少于 {self.min_history_rows} 条")
             elif (latest_market_date - latest).days > self.freshness_days:
                 row.update(status="stale", reason=f"落后市场最新日期超过 {self.freshness_days} 天")
-            elif row["calendarGapCount"]:
-                row.update(
-                    status="calendar_gap",
-                    reason=f"相邻交易记录存在超过 {self.gap_days} 天的区间",
-                )
             elif row["security"] in approximate:
                 row.update(status="approximate_factor", reason="当前快照使用近似复权因子")
             else:
-                row.update(status="ready", reason="行情、历史长度与复权状态通过")
+                reason = "行情、历史长度与复权状态通过"
+                if row["calendarGapCount"]:
+                    reason += (
+                        f"；{row['calendarGapCount']} 个长间隔按停牌或节假日处理，"
+                        "不作为数据缺口"
+                    )
+                row.update(status="ready", reason=reason)
                 row["repairable"] = False
 
         status_counts = Counter(item["status"] for item in inspected)

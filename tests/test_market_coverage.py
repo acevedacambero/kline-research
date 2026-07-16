@@ -62,7 +62,7 @@ def test_coverage_report_classifies_ready_short_missing_and_approximate(tmp_path
     }
     assert report["readyCount"] == 1
     assert report["coverageRate"] == 0.25
-    assert service.load()["version"] == "market-coverage-v1"
+    assert service.load()["version"] == "market-coverage-v2-suspension-aware"
     assert {item["security"] for item in service.repair_queue()} == {
         "sz000001",
         "sh600001",
@@ -84,3 +84,29 @@ def test_incremental_import_merges_dates_and_replaces_overlap(tmp_path):
     assert len(frame) == 4
     assert frame.loc[pd.to_datetime(frame["date"]).dt.date == date(2024, 1, 3), "close"].item() == 99
     assert pipeline.latest_data_date("sh", "600000") == date(2024, 1, 4)
+
+
+def test_long_calendar_interval_is_advisory_not_repairable_gap(tmp_path):
+    pipeline = DatasetPipeline(tmp_path / "data")
+    pipeline.initialize_catalog()
+    bars = _bars(date(2024, 1, 1), 10)
+    bars.loc[9, "date"] = date(2024, 2, 20)
+    pipeline.import_security("sh", "600000", bars, _factors())
+    service = MarketCoverageService(
+        pipeline,
+        tmp_path / "coverage.json",
+        min_history_rows=10,
+        freshness_days=10,
+        gap_days=10,
+    )
+
+    report = service.build(
+        [{"exchange": "sh", "code": "600000", "name": "浦发银行"}]
+    )
+
+    item = report["securities"][0]
+    assert item["status"] == "ready"
+    assert item["calendarGapCount"] == 1
+    assert item["repairable"] is False
+    assert "停牌或节假日" in item["reason"]
+    assert service.repair_queue() == []
