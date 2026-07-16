@@ -2059,16 +2059,16 @@ export function App() {
               <small>{maintenance?.lastError || maintenance?.lastAttemptAt || "无记录"}</small>
             </article>
             <article>
-              <span>可用备份</span>
+              <span>VPS 临时备份</span>
               <strong>{backups?.items?.length ?? 0}</strong>
-              <small>{backups?.items?.[0]?.createdAt ? `最新 ${new Date(backups.items[0].createdAt).toLocaleString("zh-CN")}` : "尚无备份"}</small>
+              <small>{backups?.items?.[0]?.createdAt ? `待转移 · 最新 ${new Date(backups.items[0].createdAt).toLocaleString("zh-CN")}` : "远端已清空，长期归档保存在本机"}</small>
             </article>
           </div>
           <div className="status-actions">
             <button className="secondary" onClick={toggleMaintenanceSchedule}>
               {maintenance?.enabled ? "关闭自动更新" : "开启自动更新"}
             </button>
-            <button className="secondary" disabled={busy} onClick={createBackup}>立即备份并校验</button>
+            <button className="secondary" disabled={busy} onClick={createBackup}>生成临时备份并校验</button>
           </div>
           <p className="muted">恢复操作需先停止服务，并使用服务器恢复命令，避免运行中的数据库被替换。</p>
         </details>
