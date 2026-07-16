@@ -1068,6 +1068,22 @@ export function App() {
     }
   }
 
+  async function promoteModel(modelId: string) {
+    setBusy(true);
+    try {
+      const result = await api.promoteModel(modelId);
+      const registry = await api.modelRegistry();
+      setModelRegistry(registry);
+      setMessage(
+        `已将${modelKindNames[result.kind] ?? result.kind}设为当前模型`,
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "设置当前模型失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function runDriftMonitor() {
     setBusy(true);
     try {
@@ -1413,11 +1429,15 @@ export function App() {
   function exportModelRegistry() {
     if (!modelRegistry?.artifacts?.length) return;
     const csv = [
-      "model_id,kind,created_at,status,label_column,version",
+      "model_id,kind,active,promoted_at,created_at,status,label_column,version",
       ...modelRegistry.artifacts.map((artifact) =>
         [
           artifact.modelId,
           artifact.kind,
+          artifact.active,
+          modelRegistry.activeModels[artifact.kind]?.modelId === artifact.modelId
+            ? modelRegistry.activeModels[artifact.kind].promotedAt
+            : "",
           artifact.createdAt,
           artifact.status ?? "",
           artifact.labelColumn ?? "",
@@ -2320,11 +2340,13 @@ export function App() {
             <thead>
               <tr>
                 <th>模型类型</th>
+                <th>使用状态</th>
                 <th>创建时间</th>
                 <th>状态</th>
                 <th>标签口径</th>
                 <th>模型版本</th>
                 <th>模型 ID</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -2332,12 +2354,35 @@ export function App() {
                 <tr key={artifact.modelId}>
                   <td>{modelKindNames[artifact.kind] ?? artifact.kind}</td>
                   <td>
+                    {artifact.active ? (
+                      <span className="active-model-badge">当前模型</span>
+                    ) : (
+                      "候选"
+                    )}
+                  </td>
+                  <td>
                     {new Date(artifact.createdAt).toLocaleString("zh-CN")}
                   </td>
                   <td>{researchStatusName(artifact.status)}</td>
                   <td>{resultLabelName(artifact.labelColumn)}</td>
                   <td>{artifact.version ?? "—"}</td>
                   <td title={artifact.modelId}>{artifact.modelId}</td>
+                  <td>
+                    <button
+                      className="secondary compact-action"
+                      disabled={busy || artifact.active || artifact.status !== "trained"}
+                      onClick={() => promoteModel(artifact.modelId)}
+                      title={
+                        artifact.status !== "trained"
+                          ? "只有训练通过的模型可以启用"
+                          : artifact.active
+                            ? "该模型已在使用"
+                            : "将同类型的当前模型切换为此模型"
+                      }
+                    >
+                      {artifact.active ? "使用中" : "设为当前"}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

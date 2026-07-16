@@ -991,6 +991,49 @@ def test_p7_multifeature_endpoint_returns_version_when_data_missing(tmp_path):
     assert response.json()["version"] == "p7-multifeature-logistic-v1"
 
 
+def test_model_registry_endpoint_promotes_only_trained_current_model(tmp_path):
+    data_path = tmp_path / "data"
+    registry = api_module.ModelRegistry(data_path)
+    saved = registry.save(
+        "baseline",
+        {
+            "version": "p7-score-logistic-v1",
+            "status": "trained",
+            "labelColumn": "p20_executable_return",
+        },
+        dependencies={
+            "scoreDefinitionVersion": "p3-rule-score-v1",
+            "labelDefinitionVersion": "daily-v2-exit-delay",
+        },
+    )
+    client = TestClient(create_app(Settings(data_path=data_path), FakeSource()))
+
+    response = client.post(f"/api/model/p7/registry/{saved['modelId']}/promote")
+    status = client.get("/api/model/p7/registry").json()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "active"
+    assert status["activeModels"]["baseline"]["modelId"] == saved["modelId"]
+    assert status["artifacts"][0]["active"] is True
+
+
+def test_model_registry_endpoint_rejects_review_model(tmp_path):
+    data_path = tmp_path / "data"
+    registry = api_module.ModelRegistry(data_path)
+    saved = registry.save(
+        "baseline",
+        {"version": "p7-score-logistic-v1", "status": "review"},
+        dependencies={"scoreDefinitionVersion": "p3-rule-score-v1"},
+    )
+
+    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post(
+        f"/api/model/p7/registry/{saved['modelId']}/promote"
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "MODEL_NOT_PROMOTABLE"
+
+
 def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
     response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).post(
         "/api/validation/portfolio",

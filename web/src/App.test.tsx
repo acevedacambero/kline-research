@@ -410,6 +410,55 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
+  it("promotes a trained P7 model and marks it as current", async () => {
+    let promoted = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input);
+        let body: unknown = {
+          status: "ok",
+          dataSource: "AkShare",
+          cachePath: "data",
+          versions: {},
+        };
+        if (path === "/api/model/p7/registry/abc123/promote" && init?.method === "POST") {
+          promoted = true;
+          body = { status: "active", modelId: "abc123", kind: "baseline", promotedAt: "2026-07-16T12:00:00Z" };
+        } else if (path === "/api/model/p7/registry") {
+          body = {
+            version: "p7-model-registry-v1",
+            activationVersion: "p7-model-activation-v1",
+            activeModels: promoted ? { baseline: { modelId: "abc123", kind: "baseline", promotedAt: "2026-07-16T12:00:00Z" } } : {},
+            unreadableFiles: 0,
+            unreadableExamples: [],
+            artifacts: [{
+              modelId: "abc123",
+              kind: "baseline",
+              createdAt: "2026-07-16T11:00:00Z",
+              status: "trained",
+              labelColumn: "p20_executable_return",
+              version: "p7-score-logistic-v1",
+              artifactPath: "/models/abc123.json",
+              dependencies: {},
+              active: promoted,
+            }],
+          };
+        } else if (path.includes("/quality")) {
+          body = { totalCached: 0 };
+        }
+        return { ok: true, json: async () => body };
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "设为当前" }));
+
+    expect(await screen.findByText("已将P3 单分数基线设为当前模型")).toBeInTheDocument();
+    expect(screen.getByText("当前模型")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "使用中" })).toBeDisabled();
+  });
+
   it("does not reuse an old provider gate result when a new probe fails", async () => {
     vi.stubGlobal(
       "fetch",

@@ -515,9 +515,20 @@ export type ModelArtifact = {
   labelColumn?: string | null;
   artifactPath: string;
   dependencies: Record<string, unknown>;
+  active: boolean;
 };
 export type ModelRegistryStatus = {
   version: string;
+  activationVersion: string;
+  activeModels: Record<
+    string,
+    {
+      modelId: string;
+      kind: string;
+      promotedAt: string;
+      previousModelId?: string | null;
+    }
+  >;
   artifacts: ModelArtifact[];
   unreadableFiles: number;
   unreadableExamples: string[];
@@ -552,6 +563,16 @@ export const api = {
   readiness: () => request<ResearchReadiness>("/api/system/readiness"),
   scoreStatus: () => request<ScoreStatus>("/api/scores/status"),
   modelRegistry: () => request<ModelRegistryStatus>("/api/model/p7/registry"),
+  promoteModel: (modelId: string) =>
+    request<{
+      status: string;
+      modelId: string;
+      kind: string;
+      promotedAt: string;
+      previousModelId?: string | null;
+    }>(`/api/model/p7/registry/${encodeURIComponent(modelId)}/promote`, {
+      method: "POST",
+    }),
   probeProviders: (quick = false) =>
     request<{ taskId: string; quick: boolean }>(
       `/api/system/provider-gate/probe?quick=${quick}`,

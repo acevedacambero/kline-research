@@ -1172,6 +1172,43 @@
         }
       }
     },
+    "/api/model/p7/registry/{model_id}/promote": {
+      "post": {
+        "summary": "Promote P7 Model",
+        "operationId": "promote_p7_model_api_model_p7_registry__model_id__promote_post",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/research/runs": {
       "get": {
         "summary": "Research Runs",

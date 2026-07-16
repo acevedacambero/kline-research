@@ -53,6 +53,7 @@ from .p1.market_rules import is_no_limit_session, status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
 from .model import (
+    ModelPromotionError,
     ModelRegistry,
     train_multifeature_baseline,
     train_score_baseline,
@@ -2268,6 +2269,24 @@ def create_app(
     @app.get("/api/model/p7/registry")
     def p7_model_registry():
         return model_registry.list()
+
+    @app.post("/api/model/p7/registry/{model_id}/promote")
+    def promote_p7_model(model_id: str):
+        try:
+            active = model_registry.promote(
+                model_id,
+                expected_dependencies={
+                    "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
+                    "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
+                    "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
+                },
+            )
+        except ModelPromotionError as exc:
+            raise HTTPException(
+                404 if exc.code == "MODEL_NOT_FOUND" else 409,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+        return {"status": "active", **active}
 
     @app.get("/api/research/runs")
     def research_runs(kind: str | None = None, limit: int = 100):

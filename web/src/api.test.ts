@@ -58,4 +58,12 @@ describe('API errors', () => {
       body: '{"recent_days":40,"reference_days":180}',
     })
   })
+
+  it('promotes a registered model through the lifecycle endpoint', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.promoteModel('abc123')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/model/p7/registry/abc123/promote')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+  })
 })

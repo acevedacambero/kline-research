@@ -844,6 +844,21 @@ select {
   color: #55d6be;
   font-weight: 700;
 }
+.active-model-badge {
+  display: inline-flex;
+  padding: 4px 8px;
+  border: 1px solid #2e806f;
+  border-radius: 999px;
+  color: #55d6be;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.compact-action {
+  min-height: 32px;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
 .task-history-table {
   display: block;
   width: 100%;
