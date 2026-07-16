@@ -831,6 +831,11 @@ export interface components {
             label_column: "p5_executable_return" | "p5_delayed_executable_return" | "p10_executable_return" | "p10_delayed_executable_return" | "p20_executable_return" | "p20_delayed_executable_return" | "p60_executable_return" | "p60_delayed_executable_return";
             /** Train Until */
             train_until?: string | null;
+            /**
+             * Embargo Days
+             * @default 7
+             */
+            embargo_days: number;
         };
         /** CalibrationRequest */
         CalibrationRequest: {
@@ -989,6 +994,11 @@ export interface components {
              * @default 3
              */
             folds: number;
+            /**
+             * Embargo Days
+             * @default 7
+             */
+            embargo_days: number;
         };
     };
     responses: never;

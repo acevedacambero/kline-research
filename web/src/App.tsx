@@ -2327,6 +2327,7 @@ export function App() {
                 状态 {researchStatusName(multifeature.status)} · AUC{" "}
                 {multifeature.auc == null ? "—" : multifeature.auc.toFixed(3)}
                 {` · ${resultLabelName(multifeature.labelColumn)}`}
+                {multifeature.isolation ? ` · 隔离 ${multifeature.isolation.embargoDays} 天` : ""}
               </small>
             </article>
             <article>
@@ -2696,6 +2697,19 @@ export function App() {
                   : "—"}
               </small>
             </article>
+            {validation.stability && (
+              <article>
+                <span>跨时期稳定性</span>
+                <strong>{validation.stability.status === "stable" ? "方向稳定" : "需要复核"}</strong>
+                <small>三个时间段 · Benjamini-Hochberg 控制假发现率</small>
+              </article>
+            )}
+            {validation.stability?.periods?.length ? (
+              <table>
+                <thead><tr><th>时期</th><th>日期</th><th>样本</th><th>秩相关</th><th>p 值</th><th>校正 q 值</th></tr></thead>
+                <tbody>{validation.stability.periods.map((period) => <tr key={period.period}><td>{period.period}</td><td>{period.startDate}～{period.endDate}</td><td>{period.sampleCount}</td><td>{period.rankCorrelation?.toFixed(4) ?? "—"}</td><td>{period.pValue?.toFixed(4) ?? "—"}</td><td>{period.qValue?.toFixed(4) ?? "—"}</td></tr>)}</tbody>
+              </table>
+            ) : null}
             <table>
               <thead>
                 <tr>
@@ -2982,6 +2996,7 @@ export function App() {
               <small>
                 时间切分，标签：{resultLabelName(baseline.labelColumn)}
                 {baseline.trainUntil ? ` · 截止 ${baseline.trainUntil}` : ""}
+                {baseline.isolation ? ` · 隔离 ${baseline.isolation.embargoDays} 天` : ""}
               </small>
             </article>
             <article>

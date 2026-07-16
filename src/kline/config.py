@@ -39,7 +39,7 @@ VERSIONS = {
     "rightsVersion": "akshare-factor-v1",
     "featureDefinitionVersion": "daily-features-v1",
     "scoreDefinitionVersion": "p3-rule-score-v1",
-    "singleFactorValidationVersion": "p4-single-factor-v3-confidence",
+    "singleFactorValidationVersion": "p4-single-factor-v4-stability",
     "calibrationDefinitionVersion": "p5-score-calibration-v3-quality",
     "modelDefinitionVersion": "p7-score-logistic-v1",
     "multiFeatureModelDefinitionVersion": "p7-multifeature-logistic-v1",
@@ -56,4 +56,5 @@ VERSIONS = {
     "slippageModelVersion": "p8-flat-slippage-bps-v1",
     "researchReadinessVersion": "research-gate-v3-provider-expiry",
     "researchRunRegistryVersion": "research-run-registry-v1",
+    "isolationRuleVersion": "purged-embargo-v1",
 }

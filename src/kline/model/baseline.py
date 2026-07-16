@@ -6,6 +6,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from ..validation.isolation import purged_time_split
+
 
 BASELINE_MODEL_VERSION = "p7-score-logistic-v1"
 WALK_FORWARD_MODEL_VERSION = "p7-walk-forward-v2-nonoverlap"
@@ -30,6 +32,7 @@ def walk_forward_score_baseline(
     *,
     label_column: str = "p20_executable_return",
     folds: int = 3,
+    embargo_days: int = 0,
 ) -> dict[str, Any]:
     sf = pd.DataFrame(scores).copy()
     lf = pd.DataFrame(labels).copy()
@@ -77,6 +80,7 @@ def walk_forward_score_baseline(
             label_column=label_column,
             train_until=cutoff,
             test_until=test_until,
+            embargo_days=embargo_days,
         )
         rows.append(
             {
@@ -87,6 +91,7 @@ def walk_forward_score_baseline(
                 "testCount": result["testCount"],
                 "auc": result["auc"],
                 "accuracy": result["accuracy"],
+                "isolation": result.get("isolation"),
             }
         )
     aucs = [row["auc"] for row in rows if row["auc"] is not None]
@@ -97,6 +102,8 @@ def walk_forward_score_baseline(
         "averageAuc": float(np.mean(aucs)) if aucs else None,
         "averageAccuracy": float(np.mean(accuracies)) if accuracies else None,
         "warnings": [] if aucs else ["没有足够成熟样本完成 walk-forward"],
+        "isolationRuleVersion": "purged-embargo-v1",
+        "embargoDays": embargo_days,
     }
 
 
@@ -107,6 +114,7 @@ def train_score_baseline(
     label_column: str = "p20_executable_return",
     train_until: date | None = None,
     test_until: date | None = None,
+    embargo_days: int = 0,
 ) -> dict[str, Any]:
     base = {
         "version": BASELINE_MODEL_VERSION,
@@ -149,14 +157,13 @@ def train_score_baseline(
         base["warnings"] = ["没有可用成熟样本"]
         return base
     evaluation_end = test_until or available_as_of
-    train = merged.loc[merged["date"] <= train_until]
-    test = merged.loc[(merged["date"] > train_until) & (merged["date"] <= evaluation_end)]
-    if "label_maturity_date" in train:
-        maturity = pd.to_datetime(train["label_maturity_date"], errors="coerce").dt.date
-        train = train.loc[maturity <= train_until]
-    if "label_maturity_date" in test:
-        maturity = pd.to_datetime(test["label_maturity_date"], errors="coerce").dt.date
-        test = test.loc[maturity <= evaluation_end]
+    train, test, isolation = purged_time_split(
+        merged,
+        train_until=train_until,
+        evaluation_end=evaluation_end,
+        embargo_days=embargo_days,
+    )
+    base["isolation"] = isolation
     base["trainCount"], base["testCount"] = int(len(train)), int(len(test))
     if len(train) < 20 or len(test) < 5:
         base["warnings"] = ["训练集至少 20 条、测试集至少 5 条"]
@@ -191,5 +198,6 @@ def train_score_baseline(
         "coefficient": float(coefficient),
         "trainUntil": train_until,
         "testUntil": evaluation_end,
+        "isolation": isolation,
         "warnings": warnings,
     }

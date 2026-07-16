@@ -7,12 +7,13 @@ import numpy as np
 import pandas as pd
 
 from .baseline import binary_auc
+from ..validation.isolation import purged_time_split
 
 MULTI_FEATURE_MODEL_VERSION = "p7-multifeature-logistic-v1"
 DEFAULT_FEATURE_COLUMNS = ("score", "bullish_alignment", "return_20", "volume_ratio_5", "volatility_20")
 
 
-def train_multifeature_baseline(scores: pd.DataFrame | list[dict], labels: pd.DataFrame | list[dict], features: pd.DataFrame | list[dict], *, label_column: str = "p20_executable_return", train_until: date | None = None, feature_columns: Sequence[str] = DEFAULT_FEATURE_COLUMNS) -> dict[str, Any]:
+def train_multifeature_baseline(scores: pd.DataFrame | list[dict], labels: pd.DataFrame | list[dict], features: pd.DataFrame | list[dict], *, label_column: str = "p20_executable_return", train_until: date | None = None, feature_columns: Sequence[str] = DEFAULT_FEATURE_COLUMNS, embargo_days: int = 0) -> dict[str, Any]:
     sf = pd.DataFrame(scores).copy()
     ff = pd.DataFrame(features).copy()
     lf = pd.DataFrame(labels).copy()
@@ -43,15 +44,11 @@ def train_multifeature_baseline(scores: pd.DataFrame | list[dict], labels: pd.Da
     if train_until is None:
         base["warnings"] = ["没有可用成熟样本"]
         return base
-    train = merged.loc[merged["date"] <= train_until]
-    test = merged.loc[merged["date"] > train_until]
-    if "label_maturity_date" in train:
-        maturity = pd.to_datetime(train["label_maturity_date"], errors="coerce").dt.date
-        train = train.loc[maturity <= train_until]
-    if "label_maturity_date" in test:
-        evaluation_end = available_as_of
-        maturity = pd.to_datetime(test["label_maturity_date"], errors="coerce").dt.date
-        test = test.loc[maturity <= evaluation_end]
+    train, test, isolation = purged_time_split(
+        merged, train_until=train_until, evaluation_end=available_as_of,
+        embargo_days=embargo_days,
+    )
+    base["isolation"] = isolation
     base["trainCount"] = int(len(train))
     base["testCount"] = int(len(test))
     if len(train) < 30 or len(test) < 10:
@@ -77,4 +74,4 @@ def train_multifeature_baseline(scores: pd.DataFrame | list[dict], labels: pd.Da
     accuracy = float(((prediction >= 0.5) == yt).mean())
     auc = binary_auc(yt, prediction)
     warnings = ["样本外 AUC 低于 0.5，需要复核"] if auc is not None and auc < 0.5 else []
-    return {**base, "status": "trained" if not warnings else "review", "trainUntil": train_until, "accuracy": accuracy, "auc": auc, "weights": {column: float(weight) for column, weight in zip(feature_columns, weights)}, "warnings": warnings}
+    return {**base, "status": "trained" if not warnings else "review", "trainUntil": train_until, "accuracy": accuracy, "auc": auc, "weights": {column: float(weight) for column, weight in zip(feature_columns, weights)}, "warnings": warnings, "isolation": isolation}

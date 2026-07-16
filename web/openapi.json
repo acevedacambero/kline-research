@@ -1628,6 +1628,13 @@
               }
             ],
             "title": "Train Until"
+          },
+          "embargo_days": {
+            "type": "integer",
+            "maximum": 60.0,
+            "minimum": 0.0,
+            "title": "Embargo Days",
+            "default": 7
           }
         },
         "type": "object",
@@ -1967,6 +1974,13 @@
             "minimum": 2.0,
             "title": "Folds",
             "default": 3
+          },
+          "embargo_days": {
+            "type": "integer",
+            "maximum": 60.0,
+            "minimum": 0.0,
+            "title": "Embargo Days",
+            "default": 7
           }
         },
         "type": "object",

@@ -75,6 +75,9 @@ def test_single_factor_validation_buckets_scores_against_mature_labels():
     assert result["rankCorrelationInterval"]["lower"] > 0.8
     assert result["buckets"][0]["avgLabelInterval"]["lower"] <= result["buckets"][0]["avgLabel"]
     assert result["buckets"][-1]["winRateInterval"]["upper"] == 1.0
+    assert result["stability"]["status"] == "stable"
+    assert len(result["stability"]["periods"]) == 3
+    assert result["multipleTesting"]["method"] == "benjamini-hochberg"
 
 
 def test_single_factor_validation_filters_unusable_and_immature_samples():
@@ -171,6 +174,16 @@ def test_score_baseline_excludes_labels_immature_at_training_cutoff():
     result = train_score_baseline(score_rows(40), label_rows(40), train_until=date(2024, 1, 28))
     assert result["trainCount"] == 0
     assert result["status"] == "insufficient_data"
+
+
+def test_score_baseline_purges_embargo_window_and_reports_leakage_audit():
+    labels = mature_label_rows(50)
+    result = train_score_baseline(
+        score_rows(50), labels, train_until=date(2024, 1, 30), embargo_days=7
+    )
+    assert result["isolation"]["version"] == "purged-embargo-v1"
+    assert result["isolation"]["embargoedSamples"] == 7
+    assert result["testCount"] == 13
 
 
 def test_walk_forward_returns_multiple_time_folds():

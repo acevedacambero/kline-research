@@ -158,11 +158,13 @@ class ScanRequest(BaseModel):
 class BaselineModelRequest(BaseModel):
     label_column: LabelColumn = "p20_executable_return"
     train_until: date | None = None
+    embargo_days: int = Field(default=7, ge=0, le=60)
 
 
 class WalkForwardRequest(BaseModel):
     label_column: LabelColumn = "p20_executable_return"
     folds: int = Field(3, ge=2, le=5)
+    embargo_days: int = Field(default=7, ge=0, le=60)
 
 
 class PortfolioValidationRequest(BaseModel):
@@ -2052,6 +2054,7 @@ def create_app(
             labels,
             label_column=request.label_column,
             train_until=request.train_until,
+            embargo_days=request.embargo_days,
         )
         if result.get("status") in {"trained", "review"}:
             result.update(
@@ -2062,6 +2065,7 @@ def create_app(
                         "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
                         "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
                         "trainUntil": request.train_until,
+                        "embargoDays": request.embargo_days,
                     },
                 )
             )
@@ -2237,6 +2241,7 @@ def create_app(
             features,
             label_column=request.label_column,
             train_until=request.train_until,
+            embargo_days=request.embargo_days,
         )
         if result.get("status") in {"trained", "review"}:
             result.update(
@@ -2248,6 +2253,7 @@ def create_app(
                         "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
                         "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
                         "trainUntil": request.train_until,
+                        "embargoDays": request.embargo_days,
                     },
                 )
             )
@@ -2299,7 +2305,8 @@ def create_app(
             tail_rows_per_file=WALK_FORWARD_ROWS_PER_SECURITY,
         )
         result = walk_forward_score_baseline(
-            scores, labels, label_column=request.label_column, folds=request.folds
+            scores, labels, label_column=request.label_column, folds=request.folds,
+            embargo_days=request.embargo_days,
         )
         evaluated = [fold for fold in result.get("folds", []) if fold.get("testCount", 0) > 0]
         if evaluated:
@@ -2318,6 +2325,7 @@ def create_app(
                         "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
                         "labelColumn": request.label_column,
                         "folds": request.folds,
+                        "embargoDays": request.embargo_days,
                     },
                 )
             )

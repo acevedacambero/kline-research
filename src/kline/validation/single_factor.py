@@ -6,10 +6,15 @@ from typing import Any
 import pandas as pd
 
 from ..p1.core import cluster_independent_periods
-from .statistics import bootstrap_interval, bootstrap_rank_correlation_interval
+from .statistics import (
+    benjamini_hochberg,
+    bootstrap_interval,
+    bootstrap_rank_correlation_interval,
+    permutation_rank_p_value,
+)
 
 
-VALIDATION_DEFINITION_VERSION = "p4-single-factor-v3-confidence"
+VALIDATION_DEFINITION_VERSION = "p4-single-factor-v4-stability"
 
 
 def _empty_result(
@@ -30,6 +35,8 @@ def _empty_result(
         "independenceGapDays": 7,
         "rankCorrelation": None,
         "rankCorrelationInterval": None,
+        "stability": {"status": "insufficient_data", "periods": []},
+        "multipleTesting": {"method": "benjamini-hochberg", "tests": []},
         "buckets": [],
         "missingColumns": missing_columns or [],
         "dropped": dropped or {"unusable": 0, "immature": 0, "missing": 0},
@@ -150,6 +157,25 @@ def validate_single_factor(
         }
         for row in merged.itertuples(index=False)
     ])
+    period_rows = []
+    period_count = min(3, len(merged))
+    for period, group in merged.assign(
+        period=pd.qcut(merged["date"].rank(method="first"), q=period_count, labels=False)
+    ).groupby("period", sort=True):
+        period_correlation = group[factor_column].rank().corr(group[label_column].rank())
+        period_rows.append({
+            "period": int(period) + 1,
+            "startDate": group["date"].min(),
+            "endDate": group["date"].max(),
+            "sampleCount": int(len(group)),
+            "rankCorrelation": None if pd.isna(period_correlation) else float(period_correlation),
+            "pValue": permutation_rank_p_value(group[factor_column], group[label_column]),
+        })
+    q_values = benjamini_hochberg([item["pValue"] for item in period_rows])
+    for item, q_value in zip(period_rows, q_values):
+        item["qValue"] = q_value
+    signs = {item["rankCorrelation"] > 0 for item in period_rows if item["rankCorrelation"] is not None}
+    stability_status = "stable" if len(period_rows) >= 2 and len(signs) == 1 else "review"
     return {
         "version": VALIDATION_DEFINITION_VERSION,
         "factorColumn": factor_column,
@@ -162,6 +188,16 @@ def validate_single_factor(
         "rankCorrelationInterval": bootstrap_rank_correlation_interval(
             merged[factor_column], merged[label_column]
         ),
+        "stability": {"status": stability_status, "periods": period_rows},
+        "multipleTesting": {
+            "method": "benjamini-hochberg",
+            "falseDiscoveryRate": 0.05,
+            "tests": [
+                {"period": item["period"], "pValue": item["pValue"], "qValue": item["qValue"],
+                 "significant": item["qValue"] is not None and item["qValue"] <= 0.05}
+                for item in period_rows
+            ],
+        },
         "buckets": bucket_rows,
         "missingColumns": [],
         "dropped": dropped,

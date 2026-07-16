@@ -158,7 +158,13 @@ export type SingleFactorValidation = {
   buckets: ValidationBucket[];
   missingColumns: string[];
   dropped: Record<string, number>;
+  stability?: {
+    status: string;
+    periods: Array<{ period: number; startDate: string; endDate: string; sampleCount: number; rankCorrelation?: number | null; pValue?: number | null; qValue?: number | null }>;
+  };
+  multipleTesting?: { method: string; falseDiscoveryRate?: number; tests: Array<{ period: number; pValue?: number | null; qValue?: number | null; significant: boolean }> };
 };
+export type IsolationAudit = { version: string; trainUntil: string; testAfter: string; evaluationEnd: string; embargoDays: number; purgedImmatureTrain: number; embargoedSamples: number; immatureTest: number };
 export type CalibrationBucket = {
   bucket: number;
   count: number;
@@ -215,6 +221,7 @@ export type BaselineModel = {
   coefficient?: number | null;
   trainUntil?: string | null;
   warnings: string[];
+  isolation?: IsolationAudit;
   modelId?: string;
   artifactPath?: string;
 };
@@ -229,6 +236,7 @@ export type MultiFeatureModel = {
   auc?: number | null;
   weights: Record<string, number>;
   warnings: string[];
+  isolation?: IsolationAudit;
   modelId?: string;
   artifactPath?: string;
 };
