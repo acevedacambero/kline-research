@@ -29,6 +29,7 @@ import {
   type ResearchRunList,
   type ResearchRunComparison,
   type DriftReport,
+  type ResearchAcceptance,
 } from "./api";
 import { KlineChart } from "./KlineChart";
 import { EquityCurveChart } from "./EquityCurveChart";
@@ -294,6 +295,7 @@ const readinessCheckNames: Record<string, string> = {
   providerGateFresh: "数据源 Gate 未过期",
   hasMarketData: "存在本地行情",
   marketDataReadable: "行情文件可读",
+  securityIdentityConsistent: "交易所与证券代码一致",
   marketDataFresh: "行情覆盖新鲜",
   labelsAvailable: "已有 P1 标签",
   labelsReadable: "P1 标签可读",
@@ -372,6 +374,8 @@ export function App() {
     null,
   );
   const [readiness, setReadiness] = useState<ResearchReadiness | null>(null);
+  const [researchAcceptance, setResearchAcceptance] =
+    useState<ResearchAcceptance | null>(null);
   const [scoreStatus, setScoreStatus] = useState<ScoreStatus | null>(null);
   const [modelRegistry, setModelRegistry] =
     useState<ModelRegistryStatus | null>(null);
@@ -1396,6 +1400,32 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
+  async function loadResearchAcceptance() {
+    setBusy(true);
+    try {
+      const report = await api.researchAcceptance();
+      setResearchAcceptance(report);
+      setMessage(report.ready ? "研究验收已通过" : `研究验收：${report.blockers.length} 项待完成`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "生成研究验收报告失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function exportResearchAcceptance() {
+    if (!researchAcceptance) return;
+    const payload = JSON.stringify(researchAcceptance, null, 2);
+    const url = URL.createObjectURL(
+      new Blob([payload], { type: "application/json;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `research-acceptance-${researchAcceptance.generatedAt.slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   function exportCurrentAuditReport() {
     if (!audit || !featureAudit || !scoreAudit) return;
     const payload = JSON.stringify(
@@ -1774,6 +1804,69 @@ export function App() {
             >
               导出研究 Gate 报告 JSON
             </button>
+            <button
+              className="secondary gate-export"
+              disabled={busy}
+              onClick={loadResearchAcceptance}
+            >
+              生成完整研究验收报告
+            </button>
+          </details>
+        )}
+        {researchAcceptance && (
+          <details className="gate-details acceptance-details" open>
+            <summary>
+              <span>研究验收报告</span>
+              <strong>{researchAcceptance.ready ? "通过" : "待完善"}</strong>
+            </summary>
+            <div className="readiness-summary">
+              <article>
+                <span>正式实验</span>
+                <strong>
+                  {researchAcceptance.experiments.requiredKinds.length -
+                    researchAcceptance.experiments.missingKinds.length}
+                  /{researchAcceptance.experiments.requiredKinds.length}
+                </strong>
+                <small>
+                  永久记录 {researchAcceptance.experiments.totalPermanentRuns} 次
+                </small>
+              </article>
+              <article>
+                <span>注册 / 训练模型</span>
+                <strong>
+                  {researchAcceptance.models.registered} / {researchAcceptance.models.trained}
+                </strong>
+                <small>
+                  当前模型 {Object.keys(researchAcceptance.models.activeModels).length} 个
+                </small>
+              </article>
+              <article>
+                <span>行情覆盖</span>
+                <strong>{pct(researchAcceptance.data.freshnessCoverage)}</strong>
+                <small>
+                  过期 {researchAcceptance.data.staleSecurities} · 身份错配{" "}
+                  {researchAcceptance.data.identityMismatchSecurities}
+                </small>
+              </article>
+            </div>
+            {researchAcceptance.experiments.missingKinds.length > 0 && (
+              <p className="muted">
+                缺少实验：
+                {researchAcceptance.experiments.missingKinds
+                  .map((kind) => researchKindNames[kind] ?? kind)
+                  .join("、")}
+              </p>
+            )}
+            {researchAcceptance.blockers.length > 0 && (
+              <ul className="gate-messages readiness-blockers">
+                {researchAcceptance.blockers.map((blocker) => (
+                  <li className="failed" key={blocker}>阻断：{blocker}</li>
+                ))}
+              </ul>
+            )}
+            <button className="secondary gate-export" onClick={exportResearchAcceptance}>
+              导出研究验收报告 JSON
+            </button>
           </details>
         )}
         <details className="quality-details">
@@ -1784,6 +1877,7 @@ export function App() {
                 ? (datasetQuality.staleSecurities ?? 0) +
                   (datasetQuality.unreadableSecurities ?? 0) +
                   (datasetQuality.approximateFactorSecurities ?? 0) +
+                  (datasetQuality.identityMismatchSecurities ?? 0) +
                   (datasetQuality.historyBackfillFailed ?? 0)
                 : "—"}
             </strong>
@@ -1829,6 +1923,15 @@ export function App() {
                   </strong>
                   <small>
                     上市历史不足 {datasetQuality.listingHistoryShort ?? 0}
+                  </small>
+                </article>
+                <article>
+                  <span>交易所/代码错配</span>
+                  <strong>{datasetQuality.identityMismatchSecurities ?? 0}</strong>
+                  <small>
+                    {datasetQuality.identityMismatchExamples
+                      ?.slice(0, 5)
+                      .join("、") || "无"}
                   </small>
                 </article>
                 <article className="quality-events-card">

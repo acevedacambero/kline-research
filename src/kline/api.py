@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from .config import Settings, VERSIONS
 from .access import AccessDenied, CloudflareAccessVerifier
-from .data.akshare_source import AkShareSource, infer_exchange
+from .data.akshare_source import AkShareSource
 from .data.history_backfill import (
     BackfillCandidate,
     BackfillCoverageError,
@@ -36,6 +36,13 @@ from .data.provider_policy import (
 )
 from .data.pipeline import DatasetPipeline
 from .data.tencent_source import TencentHttpSource
+from .data.security_identity import (
+    SecurityIdentityError,
+    infer_exchange,
+    is_security_identity_valid,
+    normalize_security_code,
+    validate_security_identity,
+)
 from .features import FEATURE_DEFINITION_VERSION, compute_daily_features
 from .features.batch import BatchFeatureBuilder, FeatureDatasetStore
 from .jobs import CoordinatorShutdownError, HeavyTaskCoordinator, Job, JobStatus, JobStore
@@ -690,6 +697,10 @@ def build_research_readiness(
         ),
         "hasMarketData": int(quality.get("totalCached", 0)) > 0,
         "marketDataReadable": int(quality.get("unreadableSecurities", 0)) == 0,
+        "securityIdentityConsistent": int(
+            quality.get("identityMismatchSecurities", 0)
+        )
+        == 0,
         "marketDataFresh": (
             int(quality.get("totalCached", 0)) > 0 and freshness_coverage >= minimum_coverage
         ),
@@ -716,6 +727,7 @@ def build_research_readiness(
         "providerGateFresh": "数据源上线 Gate 已过期，请重新执行",
         "hasMarketData": "本地没有行情缓存",
         "marketDataReadable": "存在不可读行情文件",
+        "securityIdentityConsistent": "存在交易所与证券代码错配缓存",
         "marketDataFresh": "存在过期行情缓存",
         "labelsAvailable": "尚未生成 P1 标签",
         "labelsReadable": "存在不可读 P1 标签文件",
@@ -733,13 +745,20 @@ def build_research_readiness(
     return {
         "readyForRefresh": checks["providerGate"] and checks["providerGateFresh"],
         "readyForAudit": all(
-            checks[key] for key in ("hasMarketData", "marketDataReadable", "marketDataFresh")
+            checks[key]
+            for key in (
+                "hasMarketData",
+                "marketDataReadable",
+                "securityIdentityConsistent",
+                "marketDataFresh",
+            )
         ),
         "readyForModel": all(
             checks[key]
             for key in (
                 "hasMarketData",
                 "marketDataReadable",
+                "securityIdentityConsistent",
                 "marketDataFresh",
                 "labelsAvailable",
                 "labelsReadable",
@@ -894,9 +913,12 @@ def create_app(
             pipeline.save_security_master(security_cache)
         corrected: list[dict[str, str]] = []
         for item in security_cache:
-            code = str(item.get("code", "")).zfill(6)
-            exchange = infer_exchange(code)
-            if exchange in SUPPORTED_EXCHANGES and code.isdigit():
+            try:
+                code = normalize_security_code(str(item.get("code", "")))
+                exchange = infer_exchange(code)
+            except SecurityIdentityError:
+                continue
+            if exchange in SUPPORTED_EXCHANGES:
                 corrected.append({**item, "code": code, "exchange": exchange})
         security_cache = corrected
         return security_cache
@@ -913,11 +935,22 @@ def create_app(
             )
         return normalized
 
+    def require_security_identity(exchange: str, code: str) -> tuple[str, str]:
+        normalized_exchange = require_supported_market(exchange)
+        try:
+            return validate_security_identity(normalized_exchange, code)
+        except SecurityIdentityError as exc:
+            raise HTTPException(
+                422,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+
     def current_cached_keys() -> set[tuple[str, str]]:
         return {
             (item["exchange"], item["code"])
             for item in pipeline.cached_securities()
             if item["exchange"] in SUPPORTED_EXCHANGES
+            and is_security_identity_valid(item["exchange"], item["code"])
         }
 
     def current_approximate_securities() -> set[str]:
@@ -1388,10 +1421,22 @@ def create_app(
     @app.get("/api/datasets/quality")
     def quality():
         nonlocal history_backfill_candidate_count
+        all_cached_items = pipeline.cached_securities()
+        identity_mismatches = [
+            item
+            for item in all_cached_items
+            if item["exchange"] in SUPPORTED_EXCHANGES
+            and not is_security_identity_valid(item["exchange"], item["code"])
+        ]
+        valid_cached_items = [
+            item
+            for item in all_cached_items
+            if item["exchange"] in SUPPORTED_EXCHANGES
+            and is_security_identity_valid(item["exchange"], item["code"])
+        ]
         cached = {
-            market: count
-            for market, count in pipeline.cached_market_counts().items()
-            if market in SUPPORTED_EXCHANGES
+            market: sum(item["exchange"] == market for item in valid_cached_items)
+            for market in sorted(SUPPORTED_EXCHANGES)
         }
         events = pipeline.quality_events(limit=100_000)
         current_hashes = {
@@ -1446,11 +1491,7 @@ def create_app(
             if time.monotonic() >= float(freshness_quality_cache["expires"]):
                 coverage: list[dict[str, object]] = []
                 unreadable: list[str] = []
-                cached_items = [
-                    item
-                    for item in pipeline.cached_securities()
-                    if item["exchange"] in SUPPORTED_EXCHANGES
-                ]
+                cached_items = valid_cached_items
                 for item in cached_items:
                     path = Path(item["derived_path"])
                     security = f"{item['exchange']}{item['code']}"
@@ -1513,6 +1554,10 @@ def create_app(
             "historyBackfillFailed": sum(
                 event["event_type"] == "history-backfill-failed" for event in events
             ),
+            "identityMismatchSecurities": len(identity_mismatches),
+            "identityMismatchExamples": [
+                f"{item['exchange']}{item['code']}" for item in identity_mismatches[:20]
+            ],
             "approximateFactorSecurities": len(approximate_factor_securities),
             "approximateFactorExamples": approximate_factor_securities[:20],
             **approximate_quality,
@@ -2209,6 +2254,66 @@ def create_app(
             score_dataset_status(),
         )
 
+    @app.get("/api/system/research-acceptance")
+    def research_acceptance():
+        readiness_result = research_readiness()
+        quality_result = quality()
+        research_runs_result = research_registry.list(limit=500)
+        model_registry_result = model_registry.list()
+        required_run_kinds = (
+            "p4-single-factor",
+            "p5-calibration",
+            "p6-scan",
+            "p7-baseline",
+            "p7-multifeature",
+            "p7-walk-forward",
+            "p8-portfolio",
+        )
+        runs_by_kind: dict[str, list[dict]] = {kind: [] for kind in required_run_kinds}
+        for run in research_runs_result["runs"]:
+            if run.get("kind") in runs_by_kind:
+                runs_by_kind[run["kind"]].append(run)
+        missing_runs = [kind for kind, runs in runs_by_kind.items() if not runs]
+        active_models = model_registry_result.get("activeModels", {})
+        blockers = list(readiness_result.get("blockers", []))
+        if quality_result.get("staleSecurities", 0):
+            blockers.append(f"存在 {quality_result['staleSecurities']} 只行情过期证券")
+        if missing_runs:
+            blockers.append(f"缺少 {len(missing_runs)} 类正式研究实验记录")
+        if not active_models:
+            blockers.append("尚未选择当前模型")
+        return {
+            "version": "research-acceptance-v1",
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            "ready": not blockers,
+            "blockers": blockers,
+            "data": {
+                "totalCached": quality_result.get("totalCached", 0),
+                "latestDataDate": quality_result.get("latestDataDate"),
+                "freshnessCoverage": quality_result.get("freshnessCoverage", 0),
+                "staleSecurities": quality_result.get("staleSecurities", 0),
+                "unreadableSecurities": quality_result.get("unreadableSecurities", 0),
+                "identityMismatchSecurities": quality_result.get(
+                    "identityMismatchSecurities", 0
+                ),
+            },
+            "experiments": {
+                "requiredKinds": list(required_run_kinds),
+                "missingKinds": missing_runs,
+                "counts": {kind: len(runs) for kind, runs in runs_by_kind.items()},
+                "totalPermanentRuns": research_runs_result["total"],
+            },
+            "models": {
+                "registered": len(model_registry_result["artifacts"]),
+                "trained": sum(
+                    item.get("status") == "trained"
+                    for item in model_registry_result["artifacts"]
+                ),
+                "activeModels": active_models,
+            },
+            "readiness": readiness_result,
+        }
+
     @app.post("/api/model/p7/multifeature")
     def p7_multifeature(request: BaselineModelRequest):
         require_readable_artifacts(
@@ -2425,7 +2530,7 @@ def create_app(
         return rows[:50]
 
     def load_bars(exchange: str, code: str) -> pd.DataFrame:
-        exchange = require_supported_market(exchange)
+        exchange, code = require_security_identity(exchange, code)
         normalized = pipeline.latest_derived_path(exchange, code)
         if normalized is None or not normalized.exists():
             if threading.current_thread().name.startswith("kline-heavy-job"):
@@ -2532,7 +2637,8 @@ def create_app(
 
     @app.post("/api/p1/audit")
     def audit(request: AuditRequest):
-        frame = load_bars(request.exchange, request.code)
+        exchange, code = require_security_identity(request.exchange, request.code)
+        frame = load_bars(exchange, code)
         records = frame.to_dict("records")
         indices = {row["date"]: index for index, row in enumerate(records)}
         if request.signal_date not in indices:
@@ -2546,7 +2652,7 @@ def create_app(
                 (
                     item["name"]
                     for item in securities_list()
-                    if item["exchange"] == request.exchange and item["code"] == request.code
+                    if item["exchange"] == exchange and item["code"] == code
                 ),
                 "",
             )
@@ -2558,8 +2664,8 @@ def create_app(
             index
             for index, bar in enumerate(records[:5])
             if is_no_limit_session(
-                request.exchange,
-                request.code,
+                exchange,
+                code,
                 listing_date,
                 index,
                 bar["date"],
@@ -2569,8 +2675,8 @@ def create_app(
         entry = resolve_executable_entry(
             records,
             signal_index,
-            code=request.code,
-            exchange=request.exchange,
+            code=code,
+            exchange=exchange,
             st_status=security_status.is_st,
             no_limit_indices=no_limit_indices,
         )
@@ -2582,12 +2688,12 @@ def create_app(
             "path": None,
             "drawdown": None,
             "dataSource": "AkShare",
-            "dataSnapshotVersion": pipeline.latest_snapshot_version(request.exchange, request.code),
+            "dataSnapshotVersion": pipeline.latest_snapshot_version(exchange, code),
             "factorVersion": records[0].get("factor_version"),
             "securityStatus": asdict(security_status),
         }
         if entry.executable and entry.entry_index is not None:
-            benchmark = benchmark_bars(request.exchange, records[-1]["date"])
+            benchmark = benchmark_bars(exchange, records[-1]["date"])
             labels = compute_forward_labels(records, benchmark, signal_index, entry.entry_index)
             entry_price = float(
                 records[entry.entry_index].get(
@@ -2598,8 +2704,8 @@ def create_app(
                 horizon: resolve_executable_exit(
                     records,
                     entry.entry_index + horizon,
-                    code=request.code,
-                    exchange=request.exchange,
+                    code=code,
+                    exchange=exchange,
                     st_status=security_status.is_st,
                 )
                 for horizon in labels
@@ -2635,13 +2741,14 @@ def create_app(
 
     @app.post("/api/p2/audit")
     def feature_audit(request: AuditRequest):
-        frame = load_bars(request.exchange, request.code)
+        exchange, code = require_security_identity(request.exchange, request.code)
+        frame = load_bars(exchange, code)
         try:
             name = next(
                 (
                     item["name"]
                     for item in securities_list()
-                    if item["exchange"] == request.exchange and item["code"] == request.code
+                    if item["exchange"] == exchange and item["code"] == code
                 ),
                 "",
             )
@@ -2649,8 +2756,8 @@ def create_app(
             name = ""
         features = compute_daily_features(
             frame,
-            exchange=request.exchange,
-            code=request.code,
+            exchange=exchange,
+            code=code,
             st_status=status_from_name(name).is_st,
         )
         selected = features.loc[features["date"] == request.signal_date]
@@ -2712,15 +2819,15 @@ def create_app(
             },
         }
         return {
-            "exchange": request.exchange,
-            "code": request.code,
+            "exchange": exchange,
+            "code": code,
             "date": request.signal_date,
             "availableHistory": row["available_history"],
             "groups": groups,
             "reasons": row["reasons"],
             "priceBasis": row["price_basis"],
             "versions": {
-                "snapshotVersion": pipeline.latest_snapshot_version(request.exchange, request.code),
+                "snapshotVersion": pipeline.latest_snapshot_version(exchange, code),
                 "factorVersion": row.get("factor_version"),
                 "limitRuleVersion": VERSIONS["limitRuleVersion"],
                 "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
@@ -2729,13 +2836,14 @@ def create_app(
 
     @app.post("/api/p3/audit")
     def score_audit(request: AuditRequest):
-        frame = load_bars(request.exchange, request.code)
+        exchange, code = require_security_identity(request.exchange, request.code)
+        frame = load_bars(exchange, code)
         try:
             name = next(
                 (
                     item["name"]
                     for item in securities_list()
-                    if item["exchange"] == request.exchange and item["code"] == request.code
+                    if item["exchange"] == exchange and item["code"] == code
                 ),
                 "",
             )
@@ -2743,8 +2851,8 @@ def create_app(
             name = ""
         features = compute_daily_features(
             frame,
-            exchange=request.exchange,
-            code=request.code,
+            exchange=exchange,
+            code=code,
             st_status=status_from_name(name).is_st,
         )
         selected = features.loc[features["date"] == request.signal_date]
@@ -2758,15 +2866,15 @@ def create_app(
             )
         row = dataframe_records(selected)[0]
         return {
-            "exchange": request.exchange,
-            "code": request.code,
+            "exchange": exchange,
+            "code": code,
             "date": request.signal_date,
             "availableHistory": row["available_history"],
             "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
             "priceBasis": row["price_basis"],
             "score": compute_rule_score(row),
             "versions": {
-                "snapshotVersion": pipeline.latest_snapshot_version(request.exchange, request.code),
+                "snapshotVersion": pipeline.latest_snapshot_version(exchange, code),
                 "factorVersion": row.get("factor_version"),
                 "limitRuleVersion": VERSIONS["limitRuleVersion"],
                 "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,

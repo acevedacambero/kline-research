@@ -7,14 +7,7 @@ from typing import Any
 import pandas as pd
 
 from .adjustment import merge_raw_segments
-
-
-def infer_exchange(code: str) -> str:
-    if code.startswith(("4", "8", "9")):
-        return "bj"
-    if code.startswith(("5", "6", "68")):
-        return "sh"
-    return "sz"
+from .security_identity import infer_exchange
 
 
 class AkShareSource:

@@ -144,6 +144,26 @@ def test_research_readiness_blocks_model_for_stale_labels_and_features():
     assert "P2 特征覆盖尚未达到训练门槛" in result["blockers"]
 
 
+def test_research_readiness_blocks_audit_and_model_for_identity_mismatch():
+    result = build_research_readiness(
+        {"report": {"passed": False}},
+        {
+            "totalCached": 100,
+            "unreadableSecurities": 0,
+            "identityMismatchSecurities": 2,
+            "freshnessCoverage": 1,
+            "freshnessMinCoverage": 0.95,
+        },
+        {"files": 100, "staleFiles": 0},
+        {"ready": True},
+    )
+
+    assert result["readyForAudit"] is False
+    assert result["readyForModel"] is False
+    assert result["checks"]["securityIdentityConsistent"] is False
+    assert "存在交易所与证券代码错配缓存" in result["blockers"]
+
+
 def test_research_readiness_allows_small_stale_tail_at_coverage_threshold():
     now = datetime(2026, 7, 12, 12, tzinfo=timezone.utc)
     result = build_research_readiness(
@@ -162,7 +182,7 @@ def test_research_readiness_allows_small_stale_tail_at_coverage_threshold():
 
     assert result["checks"]["marketDataFresh"] is True
     assert result["readyForModel"] is True
-    assert result["version"] == "research-gate-v3-provider-expiry"
+    assert result["version"] == "research-gate-v4-security-identity"
 
 
 def test_research_readiness_expires_old_provider_gate():
@@ -1034,6 +1054,21 @@ def test_model_registry_endpoint_rejects_review_model(tmp_path):
     assert response.json()["detail"]["code"] == "MODEL_NOT_PROMOTABLE"
 
 
+def test_research_acceptance_reports_missing_evidence_and_active_model(tmp_path):
+    response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get(
+        "/api/system/research-acceptance"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"] == "research-acceptance-v1"
+    assert body["ready"] is False
+    assert len(body["experiments"]["requiredKinds"]) == 7
+    assert body["experiments"]["missingKinds"] == body["experiments"]["requiredKinds"]
+    assert body["models"]["registered"] == 0
+    assert "尚未选择当前模型" in body["blockers"]
+
+
 def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
     response = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).post(
         "/api/validation/portfolio",
@@ -1164,6 +1199,33 @@ def test_beijing_market_requests_are_rejected_before_data_access(tmp_path):
     assert all(
         response.json()["detail"]["code"] == "MARKET_NOT_SUPPORTED" for response in responses
     )
+
+
+@pytest.mark.parametrize(
+    ("exchange", "code", "expected_market"),
+    [("sh", "301377", "深圳"), ("sz", "601100", "上海")],
+)
+def test_audit_endpoints_reject_exchange_code_mismatch(
+    tmp_path, exchange, code, expected_market
+):
+    client = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource()))
+    responses = [
+        client.get(f"/api/securities/{exchange}/{code}/bars"),
+        *[
+            client.post(
+                path,
+                json={"exchange": exchange, "code": code, "signal_date": "2024-01-02"},
+            )
+            for path in ("/api/p1/audit", "/api/p2/audit", "/api/p3/audit")
+        ],
+    ]
+
+    assert all(response.status_code == 422 for response in responses)
+    assert all(
+        response.json()["detail"]["code"] == "SECURITY_IDENTITY_MISMATCH"
+        for response in responses
+    )
+    assert all(expected_market in response.json()["detail"]["message"] for response in responses)
 
 
 def test_history_backfill_api_starts_and_is_pollable(tmp_path):
@@ -1351,6 +1413,31 @@ def test_quality_excludes_legacy_beijing_cache_from_counts_and_freshness(tmp_pat
     assert body["freshSecurities"] == 1
     assert body["freshnessCoverage"] == 1
     assert all("bj" not in item["security"] for item in body["staleExamples"])
+
+
+def test_quality_excludes_and_reports_exchange_code_mismatches(tmp_path, monkeypatch):
+    valid_path = tmp_path / "valid.parquet"
+    pd.DataFrame({"date": pd.to_datetime(["2026-07-10"]), "close": [10.0]}).to_parquet(
+        valid_path
+    )
+    monkeypatch.setattr(
+        api_module.DatasetPipeline,
+        "cached_securities",
+        lambda _self: [
+            {"exchange": "sh", "code": "600000", "derived_path": str(valid_path)},
+            {"exchange": "sh", "code": "301377", "derived_path": str(tmp_path / "bad1")},
+            {"exchange": "sz", "code": "601100", "derived_path": str(tmp_path / "bad2")},
+        ],
+    )
+
+    body = TestClient(create_app(Settings(data_path=tmp_path / "data"), FakeSource())).get(
+        "/api/datasets/quality"
+    ).json()
+
+    assert body["totalCached"] == 1
+    assert body["identityMismatchSecurities"] == 2
+    assert body["identityMismatchExamples"] == ["sh301377", "sz601100"]
+    assert body["unreadableSecurities"] == 0
 
 
 def test_quality_caches_expensive_short_history_scan(tmp_path, monkeypatch):

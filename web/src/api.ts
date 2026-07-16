@@ -394,6 +394,8 @@ export type DatasetQuality = {
   shortHistoryCached: number;
   listingHistoryShort: number;
   historyBackfillFailed: number;
+  identityMismatchSecurities: number;
+  identityMismatchExamples: string[];
   featureRows: number;
   approximateRuleRows: number;
   approximateRuleRatio?: number | null;
@@ -494,6 +496,32 @@ export type ResearchReadiness = {
   checks: Record<string, boolean>;
   blockers: string[];
 };
+export type ResearchAcceptance = {
+  version: string;
+  generatedAt: string;
+  ready: boolean;
+  blockers: string[];
+  data: {
+    totalCached: number;
+    latestDataDate?: string | null;
+    freshnessCoverage: number;
+    staleSecurities: number;
+    unreadableSecurities: number;
+    identityMismatchSecurities: number;
+  };
+  experiments: {
+    requiredKinds: string[];
+    missingKinds: string[];
+    counts: Record<string, number>;
+    totalPermanentRuns: number;
+  };
+  models: {
+    registered: number;
+    trained: number;
+    activeModels: Record<string, unknown>;
+  };
+  readiness: ResearchReadiness;
+};
 export type ScoreStatus = {
   currentVersion: string;
   files: number;
@@ -561,6 +589,8 @@ export const api = {
   health: () => request<Health>("/api/system/health"),
   providerGate: () => request<ProviderGateStatus>("/api/system/provider-gate"),
   readiness: () => request<ResearchReadiness>("/api/system/readiness"),
+  researchAcceptance: () =>
+    request<ResearchAcceptance>("/api/system/research-acceptance"),
   scoreStatus: () => request<ScoreStatus>("/api/scores/status"),
   modelRegistry: () => request<ModelRegistryStatus>("/api/model/p7/registry"),
   promoteModel: (modelId: string) =>

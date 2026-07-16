@@ -66,4 +66,11 @@ describe('API errors', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/model/p7/registry/abc123/promote')
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
   })
+
+  it('loads the consolidated research acceptance report', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.researchAcceptance()
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/system/research-acceptance')
+  })
 })

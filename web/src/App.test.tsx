@@ -220,6 +220,8 @@ describe("App", () => {
                 unreadableSecurities: 1,
                 approximateFactorSecurities: 1,
                 historyBackfillFailed: 1,
+                identityMismatchSecurities: 2,
+                identityMismatchExamples: ["sh301377", "sz601100"],
                 shortHistoryCached: 2,
                 listingHistoryShort: 1,
                 staleExamples: [
@@ -252,6 +254,8 @@ describe("App", () => {
     expect(screen.getByText(/sh600000\(2026-07-01\)/)).toBeInTheDocument();
     expect(screen.getByText(/sz000001: broken parquet/)).toBeInTheDocument();
     expect(screen.getAllByText(/stock:sh:689009/).length).toBeGreaterThan(0);
+    expect(screen.getByText("交易所/代码错配")).toBeInTheDocument();
+    expect(screen.getByText(/sh301377、sz601100/)).toBeInTheDocument();
     expect(
       screen.getByText("新浪复权因子不可用，已使用单位因子"),
     ).toBeInTheDocument();
@@ -364,6 +368,40 @@ describe("App", () => {
     expect(
       screen.getByRole("button", { name: "导出研究 Gate 报告 JSON" }),
     ).toBeInTheDocument();
+  });
+
+  it("generates a consolidated research acceptance report", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        const body = path === "/api/system/research-acceptance"
+          ? {
+              version: "research-acceptance-v1",
+              generatedAt: "2026-07-16T12:00:00Z",
+              ready: false,
+              blockers: ["缺少 2 类正式研究实验记录", "尚未选择当前模型"],
+              data: { totalCached: 5207, latestDataDate: "2026-07-16", freshnessCoverage: 0.999, staleSecurities: 6, unreadableSecurities: 0, identityMismatchSecurities: 0 },
+              experiments: { requiredKinds: ["p4-single-factor", "p8-portfolio"], missingKinds: ["p4-single-factor", "p8-portfolio"], counts: {}, totalPermanentRuns: 1 },
+              models: { registered: 4, trained: 1, activeModels: {} },
+              readiness: { version: "gate-v1", readyForRefresh: true, readyForAudit: true, readyForModel: true, freshnessCoverage: 0.999, freshnessMinCoverage: 0.95, providerGateMaxAgeHours: 24, checks: {}, blockers: [] },
+            }
+          : path === "/api/system/readiness"
+            ? { version: "gate-v1", readyForRefresh: true, readyForAudit: true, readyForModel: true, freshnessCoverage: 0.999, freshnessMinCoverage: 0.95, providerGateMaxAgeHours: 24, checks: {}, blockers: [] }
+            : path.includes("/quality")
+              ? { totalCached: 0 }
+              : { status: "ok", dataSource: "AkShare", cachePath: "data", versions: {} };
+        return { ok: true, json: async () => body };
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "生成完整研究验收报告" }));
+
+    expect(await screen.findByText("研究验收：2 项待完成")).toBeInTheDocument();
+    expect(screen.getByText("研究验收报告")).toBeInTheDocument();
+    expect(screen.getByText(/缺少实验：P4 单因子验证、P8 组合验证/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "导出研究验收报告 JSON" })).toBeInTheDocument();
   });
 
   it("renders persisted P7 model registry artifacts", async () => {

@@ -1120,6 +1120,22 @@
         }
       }
     },
+    "/api/system/research-acceptance": {
+      "get": {
+        "summary": "Research Acceptance",
+        "operationId": "research_acceptance_api_system_research_acceptance_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/model/p7/multifeature": {
       "post": {
         "summary": "P7 Multifeature",

@@ -601,6 +601,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system/research-acceptance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Research Acceptance */
+        get: operations["research_acceptance_api_system_research_acceptance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/model/p7/multifeature": {
         parameters: {
             query?: never;
@@ -2049,6 +2066,26 @@ export interface operations {
         };
     };
     research_readiness_api_system_readiness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    research_acceptance_api_system_research_acceptance_get: {
         parameters: {
             query?: never;
             header?: never;

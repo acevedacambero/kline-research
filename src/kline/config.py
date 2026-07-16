@@ -55,8 +55,9 @@ VERSIONS = {
     "marketRegimeDefinitionVersion": "not-applicable",
     "transactionCostVersion": "p8-flat-bps-v1",
     "slippageModelVersion": "p8-flat-slippage-bps-v1",
-    "researchReadinessVersion": "research-gate-v3-provider-expiry",
+    "researchReadinessVersion": "research-gate-v4-security-identity",
     "researchRunRegistryVersion": "research-run-registry-v1",
+    "researchAcceptanceVersion": "research-acceptance-v1",
     "isolationRuleVersion": "purged-embargo-v1",
     "driftDefinitionVersion": "feature-drift-v1",
 }
