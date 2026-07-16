@@ -416,6 +416,30 @@ export type BackupList = {
   path: string;
   items: Array<{ name: string; size: number; createdAt: string }>;
 };
+export type ResearchRun = {
+  runId: string;
+  kind: string;
+  createdAt: string;
+  codeVersion: string;
+  parameters: Record<string, unknown>;
+  dependencies: Record<string, unknown>;
+  dataSnapshot: { manifestHash?: string; securityCount?: number };
+  summary: Record<string, unknown>;
+};
+export type ResearchRunList = {
+  version: string;
+  runs: ResearchRun[];
+  total: number;
+  unreadableFiles: number;
+};
+export type ResearchRunDetail = ResearchRun & { result: Record<string, unknown> };
+export type ResearchRunComparison = {
+  kind: string;
+  left: { runId: string; createdAt: string };
+  right: { runId: string; createdAt: string };
+  parameterChanges: Array<{ parameter: string; left: unknown; right: unknown }>;
+  metrics: Array<{ metric: string; left: unknown; right: unknown; delta?: number | null }>;
+};
 export type ResearchReadiness = {
   version: string;
   readyForRefresh: boolean;
@@ -565,6 +589,16 @@ export const api = {
   backups: () => request<BackupList>("/api/system/backups"),
   createBackup: () =>
     request<{ taskId: string }>("/api/system/backups", { method: "POST" }),
+  researchRuns: (kind = "", limit = 100) =>
+    request<ResearchRunList>(
+      `/api/research/runs?limit=${limit}${kind ? `&kind=${encodeURIComponent(kind)}` : ""}`,
+    ),
+  researchRun: (runId: string) =>
+    request<ResearchRunDetail>(`/api/research/runs/${encodeURIComponent(runId)}`),
+  compareResearchRuns: (left: string, right: string) =>
+    request<ResearchRunComparison>(
+      `/api/research/runs/compare?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`,
+    ),
   buildLabels: (scope: "representative" | "failed" | "all") =>
     request<{ taskId: string; total: number }>("/api/labels/build", {
       method: "POST",

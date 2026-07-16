@@ -6,6 +6,7 @@ from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
+import hashlib
 import json
 import queue
 import threading
@@ -60,6 +61,7 @@ from .model import (
 from .ops.provider_probe import ProviderProbeRunner
 from .ops.maintenance import DailyMaintenanceScheduler
 from .ops.backup import DataBackupManager
+from .research import ResearchRunRegistry
 from .storage import atomic_write_text
 from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
 
@@ -830,6 +832,7 @@ def create_app(
     )
     pipeline.initialize_catalog()
     model_registry = ModelRegistry(settings.data_path)
+    research_registry = ResearchRunRegistry(settings.data_path)
     if source_injected:
         adapter = _InjectedProviderAdapter(source)
         download_source = HybridDownloadSource(adapter, adapter)
@@ -1873,6 +1876,48 @@ def create_app(
                 },
             )
 
+    def runtime_code_version() -> str:
+        path = Path(__file__).resolve()
+        parts = path.parts
+        if "releases" in parts:
+            index = parts.index("releases")
+            if index + 1 < len(parts):
+                return parts[index + 1]
+        return "development"
+
+    def research_data_snapshot() -> dict:
+        rows = pipeline.dataset_manifest_rows()
+        identity = [
+            {
+                "datasetKey": row["dataset_key"],
+                "contentHash": row["content_hash"],
+                "snapshotVersion": row["snapshot_version"],
+            }
+            for row in rows
+        ]
+        encoded = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return {
+            "manifestHash": hashlib.sha256(encoded).hexdigest(),
+            "securityCount": len(identity),
+            "coverageReportVersion": (coverage_service.load() or {}).get("version"),
+            "coverageGeneratedAt": (coverage_service.load() or {}).get("generatedAt"),
+        }
+
+    def register_research_run(kind: str, result: dict, request, **dependencies) -> dict:
+        artifact = research_registry.save(
+            kind,
+            result,
+            parameters=request.model_dump(mode="json"),
+            dependencies={
+                "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
+                "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
+                "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
+                **dependencies,
+            },
+            data_snapshot=research_data_snapshot(),
+            code_version=runtime_code_version(),
+        )
+        return {**result, "researchRunId": artifact["runId"]}
     @app.post("/api/validation/single-factor")
     def single_factor_validation(request: SingleFactorValidationRequest):
         require_readable_artifacts(labels=label_dataset_status(), scores=score_dataset_status())
@@ -1896,7 +1941,7 @@ def create_app(
             ],
             tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
-        return validate_single_factor(
+        result = validate_single_factor(
             scores,
             labels,
             factor_column=request.factor_column,
@@ -1904,6 +1949,7 @@ def create_app(
             buckets=request.buckets,
             as_of_date=request.as_of_date,
         )
+        return register_research_run("p4-single-factor", result, request)
 
     @app.post("/api/validation/calibration")
     def score_calibration(request: CalibrationRequest):
@@ -1920,13 +1966,14 @@ def create_app(
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
             tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
-        return calibrate_score(
+        result = calibrate_score(
             scores,
             labels,
             label_column=request.label_column,
             buckets=request.buckets,
             as_of_date=request.as_of_date,
         )
+        return register_research_run("p5-calibration", result, request)
 
     @app.post("/api/scan/p3")
     def scan_p3(request: ScanRequest):
@@ -1938,7 +1985,7 @@ def create_app(
             tail_rows_per_file=SCAN_ROWS_PER_SECURITY,
         )
         if scores.empty:
-            return {
+            result = {
                 "version": SCORE_DEFINITION_VERSION,
                 "asOfDate": request.as_of_date,
                 "minScore": request.min_score,
@@ -1946,6 +1993,7 @@ def create_app(
                 "truncated": False,
                 "rows": [],
             }
+            return register_research_run("p6-scan", result, request)
         scores["date"] = pd.to_datetime(scores["date"]).dt.date
         if request.as_of_date is not None:
             scores = scores.loc[scores["date"] <= request.as_of_date]
@@ -1973,7 +2021,7 @@ def create_app(
             }
             for row in scores.itertuples(index=False)
         ]
-        return {
+        result = {
             "version": SCORE_DEFINITION_VERSION,
             "asOfDate": request.as_of_date,
             "exchange": request.exchange,
@@ -1982,6 +2030,7 @@ def create_app(
             "truncated": candidate_count > request.limit,
             "rows": rows,
         }
+        return register_research_run("p6-scan", result, request)
 
     @app.post("/api/model/p7/baseline")
     def p7_baseline(request: BaselineModelRequest):
@@ -2016,7 +2065,7 @@ def create_app(
                     },
                 )
             )
-        return result
+        return register_research_run("p7-baseline", result, request)
 
     @app.get("/api/model/p7/features")
     def p7_feature_catalog():
@@ -2202,11 +2251,37 @@ def create_app(
                     },
                 )
             )
-        return result
+        return register_research_run("p7-multifeature", result, request)
 
     @app.get("/api/model/p7/registry")
     def p7_model_registry():
         return model_registry.list()
+
+    @app.get("/api/research/runs")
+    def research_runs(kind: str | None = None, limit: int = 100):
+        return research_registry.list(kind=kind, limit=limit)
+
+    @app.get("/api/research/runs/compare")
+    def compare_research_runs(left: str, right: str):
+        comparison = research_registry.compare(left, right)
+        if comparison is None:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "RESEARCH_RUNS_NOT_COMPARABLE",
+                    "message": "实验不存在，或两个实验类型不同",
+                },
+            )
+        return comparison
+
+    @app.get("/api/research/runs/{run_id}")
+    def research_run_detail(run_id: str):
+        run = research_registry.get(run_id)
+        if run is None:
+            raise HTTPException(
+                404, detail={"code": "RESEARCH_RUN_NOT_FOUND", "message": "实验不存在"}
+            )
+        return run
 
     @app.post("/api/model/p7/walk-forward")
     def p7_walk_forward(request: WalkForwardRequest):
@@ -2246,7 +2321,7 @@ def create_app(
                     },
                 )
             )
-        return result
+        return register_research_run("p7-walk-forward", result, request)
 
     @app.post("/api/validation/portfolio")
     def portfolio_validation(request: PortfolioValidationRequest):
@@ -2263,7 +2338,7 @@ def create_app(
             ["exchange", "code", "signal_date", request.label_column, "label_maturity_date"],
             tail_rows_per_file=RESEARCH_SAMPLE_ROWS_PER_SECURITY,
         )
-        return validate_top_score_portfolio(
+        result = validate_top_score_portfolio(
             scores,
             labels,
             label_column=request.label_column,
@@ -2273,6 +2348,7 @@ def create_app(
             transaction_cost_bps=request.transaction_cost_bps,
             slippage_bps=request.slippage_bps,
         )
+        return register_research_run("p8-portfolio", result, request)
 
     @app.get("/api/securities")
     def securities(query: str = ""):

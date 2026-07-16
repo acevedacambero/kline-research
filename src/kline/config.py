@@ -55,4 +55,5 @@ VERSIONS = {
     "transactionCostVersion": "p8-flat-bps-v1",
     "slippageModelVersion": "p8-flat-slippage-bps-v1",
     "researchReadinessVersion": "research-gate-v3-provider-expiry",
+    "researchRunRegistryVersion": "research-run-registry-v1",
 }

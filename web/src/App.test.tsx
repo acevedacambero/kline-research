@@ -13,6 +13,44 @@ describe("App", () => {
     cleanup();
     window.history.replaceState(null, "", "/");
   });
+  it("lists and reloads reproducible research runs", async () => {
+    const run = {
+      runId: "a".repeat(32),
+      kind: "p6-scan",
+      createdAt: "2026-07-16T12:00:00Z",
+      codeVersion: "release-1",
+      parameters: { min_score: 70 },
+      dependencies: { scoreDefinitionVersion: "score-v1" },
+      dataSnapshot: { manifestHash: "abcdef123456", securityCount: 5200 },
+      summary: { scannedCount: 12 },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        const body = path === "/api/system/health"
+          ? { status: "ok", dataSource: "AkShare", cachePath: "data", versions: {} }
+          : path === `/api/research/runs/${run.runId}`
+          ? { ...run, result: { version: "score-v1", scannedCount: 12, truncated: false, rows: [] } }
+          : path.startsWith("/api/research/runs?")
+            ? { version: "research-run-registry-v1", runs: [run], total: 1, unreadableFiles: 0 }
+            : path.startsWith("/api/tasks/recent")
+              ? []
+              : path.includes("/quality")
+                ? { totalCached: 0 }
+                : {};
+        return { ok: true, json: async () => body };
+      }),
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("研究实验历史")).toBeInTheDocument();
+    expect(await screen.findByText("P6 高分扫描", { selector: "td" })).toBeInTheDocument();
+    expect(screen.getByText(/5200 只/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "重新载入" }));
+    expect(await screen.findByText("已重新载入实验 aaaaaaaa")).toBeInTheDocument();
+  });
   it("shows data status and P1 audit workspace", async () => {
     vi.stubGlobal(
       "fetch",

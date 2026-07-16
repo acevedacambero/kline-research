@@ -576,7 +576,8 @@ def test_single_factor_validation_api_reads_local_score_and_label_files(tmp_path
     ).to_parquet(label_dir / "600000.parquet", index=False)
     app = create_app(Settings(data_path=data_path), FakeSource())
 
-    response = TestClient(app).post(
+    client = TestClient(app)
+    response = client.post(
         "/api/validation/single-factor",
         json={
             "factor_column": "score",
@@ -591,6 +592,13 @@ def test_single_factor_validation_api_reads_local_score_and_label_files(tmp_path
     assert body["version"] == VALIDATION_DEFINITION_VERSION
     assert body["sampleCount"] == 20
     assert len(body["buckets"]) == 4
+    assert len(body["researchRunId"]) == 32
+    history = client.get("/api/research/runs?kind=p4-single-factor").json()
+    assert history["total"] == 1
+    assert history["runs"][0]["dataSnapshot"]["manifestHash"]
+    detail = client.get(f"/api/research/runs/{body['researchRunId']}").json()
+    assert detail["parameters"]["buckets"] == 4
+    assert detail["result"]["sampleCount"] == 20
 
 
 def test_single_factor_validation_api_returns_empty_when_files_are_missing(tmp_path):

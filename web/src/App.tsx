@@ -26,6 +26,8 @@ import {
   type CoverageResponse,
   type MaintenanceSchedule,
   type BackupList,
+  type ResearchRunList,
+  type ResearchRunComparison,
 } from "./api";
 import { KlineChart } from "./KlineChart";
 import { EquityCurveChart } from "./EquityCurveChart";
@@ -43,6 +45,15 @@ const coverageStatusNames: Record<string, string> = {
   stale: "行情过期",
   calendar_gap: "行情有缺口",
   approximate_factor: "近似复权",
+};
+const researchKindNames: Record<string, string> = {
+  "p4-single-factor": "P4 单因子验证",
+  "p5-calibration": "P5 概率校准",
+  "p6-scan": "P6 高分扫描",
+  "p7-baseline": "P7 基线模型",
+  "p7-multifeature": "P7 多特征模型",
+  "p7-walk-forward": "P7 滚动验证",
+  "p8-portfolio": "P8 组合验证",
 };
 const groupNames = {
   trend: "趋势",
@@ -366,6 +377,11 @@ export function App() {
   const [coverageStatus, setCoverageStatus] = useState("");
   const [maintenance, setMaintenance] = useState<MaintenanceSchedule | null>(null);
   const [backups, setBackups] = useState<BackupList | null>(null);
+  const [researchRuns, setResearchRuns] = useState<ResearchRunList | null>(null);
+  const [researchKindFilter, setResearchKindFilter] = useState("");
+  const [comparison, setComparison] = useState<ResearchRunComparison | null>(null);
+  const [compareLeft, setCompareLeft] = useState("");
+  const [compareRight, setCompareRight] = useState("");
 
   const showTask = (
     kind: string,
@@ -510,6 +526,7 @@ export function App() {
     api.coverage().then(setCoverage).catch(() => undefined);
     api.maintenanceSchedule().then(setMaintenance).catch(() => undefined);
     api.backups().then(setBackups).catch(() => undefined);
+    api.researchRuns().then(setResearchRuns).catch(() => undefined);
     const restoreTask = (task: GenericTask) => {
       showTask(taskKindNames[task.jobType] ?? task.jobType, task.id, task);
       if (task.status === "queued" || task.status === "running") {
@@ -933,6 +950,7 @@ export function App() {
     try {
       const result = await api.validateSingleFactor(validationLabel);
       setValidation(result);
+      void refreshResearchRunHistory();
       setMessage(`P4 单因子验证：${result.sampleCount} 个成熟样本`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "验证失败");
@@ -949,6 +967,7 @@ export function App() {
         calibrationBuckets,
       );
       setCalibration(result);
+      void refreshResearchRunHistory();
       setMessage(`P5 校准：${result.sampleCount} 个成熟样本`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "校准失败");
@@ -966,6 +985,7 @@ export function App() {
         scanAsOfDate,
       );
       setScan(result);
+      void refreshResearchRunHistory();
       setMessage(
         `P6 扫描：${result.rows.length} 个高分样本${result.truncated ? "（已达返回上限）" : ""}`,
       );
@@ -981,6 +1001,7 @@ export function App() {
     try {
       const result = await api.trainBaseline(baselineTrainUntil, baselineLabel);
       setBaseline(result);
+      void refreshResearchRunHistory();
       setMessage(`P7 基线模型：${researchStatusName(result.status)}`);
       void api
         .modelRegistry()
@@ -1014,6 +1035,7 @@ export function App() {
         baselineLabel,
       );
       setMultifeature(result);
+      void refreshResearchRunHistory();
       setMessage(`P7 多特征模型：${researchStatusName(result.status)}`);
       void api
         .modelRegistry()
@@ -1031,6 +1053,7 @@ export function App() {
     try {
       const result = await api.walkForward(baselineLabel, 3);
       setWalkForward(result);
+      void refreshResearchRunHistory();
       setMessage(`P7 walk-forward：${result.folds.length} 折`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "walk-forward 失败");
@@ -1108,6 +1131,7 @@ export function App() {
         slippageBps,
       );
       setPortfolio(result);
+      void refreshResearchRunHistory();
       setMessage(`P8 组合验证：${result.selectedCount} 个入选样本`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "组合验证失败");
@@ -1217,6 +1241,58 @@ export function App() {
     link.download = `task-history-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function refreshResearchRunHistory(kind = researchKindFilter) {
+    try {
+      const runs = await api.researchRuns(kind);
+      setResearchRuns(runs);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "刷新实验历史失败");
+    }
+  }
+
+  async function reloadResearchRun(runId: string) {
+    try {
+      const detail = await api.researchRun(runId);
+      const result = detail.result;
+      switch (detail.kind) {
+        case "p4-single-factor":
+          setValidation(result as unknown as SingleFactorValidation);
+          break;
+        case "p5-calibration":
+          setCalibration(result as unknown as ScoreCalibration);
+          break;
+        case "p6-scan":
+          setScan(result as unknown as ScanResult);
+          break;
+        case "p7-baseline":
+          setBaseline(result as unknown as BaselineModel);
+          break;
+        case "p7-multifeature":
+          setMultifeature(result as unknown as MultiFeatureModel);
+          break;
+        case "p7-walk-forward":
+          setWalkForward(result as unknown as WalkForwardResult);
+          break;
+        case "p8-portfolio":
+          setPortfolio(result as unknown as PortfolioValidation);
+          break;
+      }
+      setMessage(`已重新载入实验 ${runId.slice(0, 8)}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "载入实验失败");
+    }
+  }
+
+  async function compareSelectedResearchRuns() {
+    if (!compareLeft || !compareRight) return;
+    try {
+      setComparison(await api.compareResearchRuns(compareLeft, compareRight));
+      setMessage("实验对比已生成");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "实验对比失败");
+    }
   }
 
   function exportDatasetQuality() {
@@ -1357,6 +1433,7 @@ export function App() {
         <a href="#p6-scanner">P6 扫描</a>
         <a href="#p7-models">P7 模型</a>
         <a href="#p8-portfolio">P8 组合</a>
+        <a href="#research-history">实验历史</a>
       </nav>
       <section id="data-status" className="panel status-panel workflow-status">
         <div className="status-summary">
@@ -3034,6 +3111,68 @@ export function App() {
           <p className="muted">
             检查 P2 特征文件覆盖后，再进入多特征模型训练。
           </p>
+        )}
+      </section>
+      <section id="research-history" className="panel research-history-panel">
+        <div className="section-title">
+          <div>
+            <span className="eyebrow">REPRODUCIBLE RESEARCH</span>
+            <h2>研究实验历史</h2>
+          </div>
+          <span className="message">{researchRuns?.total ?? 0} 次永久记录</span>
+        </div>
+        <div className="research-history-controls">
+          <label>
+            实验类型
+            <select
+              value={researchKindFilter}
+              onChange={(event) => {
+                const kind = event.target.value;
+                setResearchKindFilter(kind);
+                void refreshResearchRunHistory(kind);
+              }}
+            >
+              <option value="">全部类型</option>
+              {Object.entries(researchKindNames).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <button className="secondary" onClick={() => void refreshResearchRunHistory()}>
+            刷新实验历史
+          </button>
+        </div>
+        {researchRuns?.runs?.length ? (
+          <div className="gate-table-wrap">
+            <table className="gate-table research-run-table">
+              <thead><tr><th>运行时间</th><th>类型</th><th>主要结果</th><th>数据快照</th><th>代码版本</th><th>操作</th></tr></thead>
+              <tbody>
+                {researchRuns.runs.map((run) => (
+                  <tr key={run.runId}>
+                    <td>{new Date(run.createdAt).toLocaleString("zh-CN")}</td>
+                    <td>{researchKindNames[run.kind] ?? run.kind}</td>
+                    <td><code>{JSON.stringify(run.summary)}</code></td>
+                    <td title={run.dataSnapshot?.manifestHash}>{run.dataSnapshot?.securityCount ?? 0} 只 · {run.dataSnapshot?.manifestHash?.slice(0, 8) ?? "—"}</td>
+                    <td>{run.codeVersion}</td>
+                    <td><button className="link-button" onClick={() => void reloadResearchRun(run.runId)}>重新载入</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="muted">运行任意 P4–P8 研究后，系统会在这里永久保存输入参数、数据快照、版本依赖和完整结果。</p>
+        )}
+        {(researchRuns?.runs?.length ?? 0) >= 2 && (
+          <details className="quality-details research-compare">
+            <summary><span>对比两个同类实验</span><strong>{comparison ? researchKindNames[comparison.kind] ?? comparison.kind : "未选择"}</strong></summary>
+            <div className="research-history-controls">
+              <label>左侧实验<select value={compareLeft} onChange={(event) => { setCompareLeft(event.target.value); setCompareRight(""); setComparison(null); }}><option value="">请选择</option>{researchRuns?.runs.map((run) => <option key={run.runId} value={run.runId}>{researchKindNames[run.kind] ?? run.kind} · {new Date(run.createdAt).toLocaleString("zh-CN")}</option>)}</select></label>
+              <label>右侧实验<select value={compareRight} onChange={(event) => setCompareRight(event.target.value)}><option value="">请选择</option>{researchRuns?.runs.filter((run) => run.runId !== compareLeft && (!compareLeft || run.kind === researchRuns.runs.find((item) => item.runId === compareLeft)?.kind)).map((run) => <option key={run.runId} value={run.runId}>{new Date(run.createdAt).toLocaleString("zh-CN")}</option>)}</select></label>
+              <button className="secondary" disabled={!compareLeft || !compareRight} onClick={() => void compareSelectedResearchRuns()}>生成对比</button>
+            </div>
+            {comparison && <div className="gate-table-wrap"><table className="gate-table"><thead><tr><th>指标</th><th>左侧</th><th>右侧</th><th>变化</th></tr></thead><tbody>{comparison.metrics.map((metric) => <tr key={metric.metric}><td>{metric.metric}</td><td>{String(metric.left ?? "—")}</td><td>{String(metric.right ?? "—")}</td><td>{metric.delta == null ? "—" : metric.delta.toFixed(6)}</td></tr>)}</tbody></table></div>}
+          </details>
         )}
       </section>
       <section id="p2-auditor" className="panel workflow-p2">

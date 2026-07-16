@@ -287,6 +287,32 @@ article span {
 .maintenance-details .quality-grid article strong {
   font-size: 1.05rem;
 }
+
+.research-history-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+  margin: 1rem 0;
+}
+
+.research-history-controls label {
+  min-width: 220px;
+  flex: 1 1 260px;
+}
+
+.research-run-table code {
+  display: block;
+  max-width: 360px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+
+.research-run-table td:first-child,
+.research-run-table td:nth-child(2) {
+  white-space: nowrap;
+}
 .gate-details {
   margin-top: 12px;
   border: 1px solid #1c2a39;
@@ -1055,6 +1081,9 @@ select {
 }
 .workflow-p8 {
   order: 100;
+}
+.research-history-panel {
+  order: 110;
 }
 main > section[id] {
   scroll-margin-top: 72px;
