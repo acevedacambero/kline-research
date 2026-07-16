@@ -31,6 +31,24 @@ def _summary(result: dict[str, Any]) -> dict[str, Any]:
         for key in ("annualizedReturn", "sharpe", "calmar", "maxDrawdown"):
             if key in metrics:
                 summary[key] = metrics[key]
+    elif isinstance(metrics, list):
+        psi_values = [
+            item.get("populationStabilityIndex")
+            for item in metrics
+            if isinstance(item, dict) and item.get("populationStabilityIndex") is not None
+        ]
+        shift_values = [
+            item.get("standardizedMeanShift")
+            for item in metrics
+            if isinstance(item, dict) and item.get("standardizedMeanShift") is not None
+        ]
+        if psi_values:
+            summary["maxPopulationStabilityIndex"] = max(psi_values)
+        if shift_values:
+            summary["maxStandardizedMeanShift"] = max(shift_values)
+        summary["driftedMetrics"] = sum(
+            1 for item in metrics if isinstance(item, dict) and item.get("status") == "drift"
+        )
     return summary
 
 

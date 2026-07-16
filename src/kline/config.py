@@ -57,4 +57,5 @@ VERSIONS = {
     "researchReadinessVersion": "research-gate-v3-provider-expiry",
     "researchRunRegistryVersion": "research-run-registry-v1",
     "isolationRuleVersion": "purged-embargo-v1",
+    "driftDefinitionVersion": "feature-drift-v1",
 }

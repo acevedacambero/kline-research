@@ -62,6 +62,7 @@ from .ops.provider_probe import ProviderProbeRunner
 from .ops.maintenance import DailyMaintenanceScheduler
 from .ops.backup import DataBackupManager
 from .research import ResearchRunRegistry
+from .monitoring import compute_feature_drift
 from .storage import atomic_write_text
 from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
 
@@ -115,6 +116,11 @@ class MaintenanceScheduleRequest(BaseModel):
     enabled: bool
     hour: int = Field(ge=0, le=23)
     minute: int = Field(ge=0, le=59)
+
+
+class DriftRequest(BaseModel):
+    recent_days: int = Field(default=60, ge=10, le=250)
+    reference_days: int = Field(default=250, ge=30, le=1000)
 
 
 class AuditRequest(BaseModel):
@@ -2288,6 +2294,30 @@ def create_app(
                 404, detail={"code": "RESEARCH_RUN_NOT_FOUND", "message": "实验不存在"}
             )
         return run
+
+    @app.post("/api/monitoring/drift")
+    def feature_drift_monitor(request: DriftRequest):
+        require_readable_artifacts(features=p7_feature_catalog(), scores=score_dataset_status())
+        tail = request.recent_days + request.reference_days + 20
+        scores = read_dataset_glob(
+            "data-foundation-v1/scores/*/*/*/*.parquet",
+            ["exchange", "code", "date"],
+            ["exchange", "code", "date", "score", "usable"],
+            tail_rows_per_file=tail,
+        )
+        features = read_dataset_glob(
+            "data-foundation-v1/features/*/*/*/*.parquet",
+            ["exchange", "code", "date"],
+            ["exchange", "code", "date", "bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"],
+            tail_rows_per_file=tail,
+        )
+        rows = scores.merge(features, on=["exchange", "code", "date"], how="inner")
+        if "usable" in rows:
+            rows = rows.loc[rows["usable"].fillna(False).astype(bool)]
+        result = compute_feature_drift(
+            rows, recent_days=request.recent_days, reference_days=request.reference_days
+        )
+        return register_research_run("drift-monitor", result, request)
 
     @app.post("/api/model/p7/walk-forward")
     def p7_walk_forward(request: WalkForwardRequest):

@@ -1309,6 +1309,42 @@
         }
       }
     },
+    "/api/monitoring/drift": {
+      "post": {
+        "summary": "Feature Drift Monitor",
+        "operationId": "feature_drift_monitor_api_monitoring_drift_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DriftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/model/p7/walk-forward": {
       "post": {
         "summary": "P7 Walk Forward",
@@ -1688,6 +1724,26 @@
         },
         "type": "object",
         "title": "CoverageRebuildRequest"
+      },
+      "DriftRequest": {
+        "properties": {
+          "recent_days": {
+            "type": "integer",
+            "maximum": 250.0,
+            "minimum": 10.0,
+            "title": "Recent Days",
+            "default": 60
+          },
+          "reference_days": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 30.0,
+            "title": "Reference Days",
+            "default": 250
+          }
+        },
+        "type": "object",
+        "title": "DriftRequest"
       },
       "HTTPValidationError": {
         "properties": {

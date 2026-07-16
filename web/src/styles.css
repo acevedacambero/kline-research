@@ -1079,6 +1079,35 @@ select {
 .workflow-p7-registry {
   order: 94;
 }
+.workflow-drift {
+  order: 95;
+}
+.drift-badge {
+  padding: 7px 11px;
+  border: 1px solid #526071;
+  border-radius: 999px;
+  color: #b9c5d2;
+  font-size: 12px;
+  font-weight: 800;
+}
+.drift-badge.stable {
+  border-color: #2e806f;
+  color: #55d6be;
+}
+.drift-badge.watch {
+  border-color: #8d732f;
+  color: #f2c85b;
+}
+.drift-badge.drift {
+  border-color: #9a4b58;
+  color: #ff8798;
+}
+.drift-results {
+  margin-top: 18px;
+}
+.table-scroll {
+  overflow-x: auto;
+}
 .workflow-p8 {
   order: 100;
 }

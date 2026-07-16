@@ -13,6 +13,50 @@ describe("App", () => {
     cleanup();
     window.history.replaceState(null, "", "/");
   });
+  it("runs and explains the feature drift monitor", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        const body = path === "/api/monitoring/drift"
+          ? {
+              version: "feature-drift-v1",
+              status: "drift",
+              referenceWindow: { startDate: "2025-01-01", endDate: "2025-12-31", tradingDays: 250, rows: 500 },
+              recentWindow: { startDate: "2026-01-01", endDate: "2026-03-31", tradingDays: 60, rows: 120 },
+              metrics: [{
+                column: "score",
+                status: "drift",
+                referenceCount: 500,
+                recentCount: 120,
+                populationStabilityIndex: 0.31,
+                standardizedMeanShift: 0.62,
+                missingRateDelta: 0,
+              }],
+              segments: [{ exchange: "sh", status: "drift", metrics: [] }],
+              warnings: [],
+            }
+          : path === "/api/system/health"
+            ? { status: "ok", dataSource: "AkShare", cachePath: "data", versions: {} }
+            : path.startsWith("/api/tasks/recent")
+              ? []
+              : path.startsWith("/api/research/runs?")
+                ? { version: "research-run-registry-v1", runs: [], total: 0, unreadableFiles: 0 }
+                : path.includes("/quality")
+                  ? { totalCached: 0 }
+                  : {};
+        return { ok: true, json: async () => body };
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "开始检查" }));
+
+    expect(await screen.findByText("特征漂移监控：发现漂移")).toBeInTheDocument();
+    expect(screen.getByText("P3 结构评分", { selector: "td" })).toBeInTheDocument();
+    expect(screen.getByText("0.310")).toBeInTheDocument();
+    expect(screen.getByText(/分市场：上海 漂移/)).toBeInTheDocument();
+  });
   it("lists and reloads reproducible research runs", async () => {
     const run = {
       runId: "a".repeat(32),

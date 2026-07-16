@@ -28,6 +28,7 @@ import {
   type BackupList,
   type ResearchRunList,
   type ResearchRunComparison,
+  type DriftReport,
 } from "./api";
 import { KlineChart } from "./KlineChart";
 import { EquityCurveChart } from "./EquityCurveChart";
@@ -53,6 +54,7 @@ const researchKindNames: Record<string, string> = {
   "p7-baseline": "P7 基线模型",
   "p7-multifeature": "P7 多特征模型",
   "p7-walk-forward": "P7 滚动验证",
+  "drift-monitor": "特征与评分漂移监控",
   "p8-portfolio": "P8 组合验证",
 };
 const groupNames = {
@@ -63,6 +65,7 @@ const groupNames = {
   tradingBehavior: "交易行为",
 };
 const featureNames: Record<string, string> = {
+  score: "P3 结构评分",
   ma5: "MA5",
   ma10: "MA10",
   ma20: "MA20",
@@ -350,6 +353,9 @@ export function App() {
   const [walkForward, setWalkForward] = useState<WalkForwardResult | null>(
     null,
   );
+  const [driftReport, setDriftReport] = useState<DriftReport | null>(null);
+  const [driftRecentDays, setDriftRecentDays] = useState(60);
+  const [driftReferenceDays, setDriftReferenceDays] = useState(250);
   const [portfolio, setPortfolio] = useState<PortfolioValidation | null>(null);
   const [portfolioFraction, setPortfolioFraction] = useState(10);
   const [portfolioLabel, setPortfolioLabel] = useState("p20_executable_return");
@@ -1062,6 +1068,31 @@ export function App() {
     }
   }
 
+  async function runDriftMonitor() {
+    setBusy(true);
+    try {
+      const result = await api.runDriftMonitor(
+        driftRecentDays,
+        driftReferenceDays,
+      );
+      setDriftReport(result);
+      void refreshResearchRunHistory();
+      const status =
+        result.status === "stable"
+          ? "稳定"
+          : result.status === "watch"
+            ? "需要观察"
+            : result.status === "drift"
+              ? "发现漂移"
+              : "数据不足";
+      setMessage(`特征漂移监控：${status}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "漂移监控失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function exportMultifeature() {
     if (!multifeature) return;
     const csv = [
@@ -1275,6 +1306,9 @@ export function App() {
         case "p7-walk-forward":
           setWalkForward(result as unknown as WalkForwardResult);
           break;
+        case "drift-monitor":
+          setDriftReport(result as unknown as DriftReport);
+          break;
         case "p8-portfolio":
           setPortfolio(result as unknown as PortfolioValidation);
           break;
@@ -1432,6 +1466,7 @@ export function App() {
         <a href="#p5-calibration">P5 校准</a>
         <a href="#p6-scanner">P6 扫描</a>
         <a href="#p7-models">P7 模型</a>
+        <a href="#drift-monitor">漂移监控</a>
         <a href="#p8-portfolio">P8 组合</a>
         <a href="#research-history">实验历史</a>
       </nav>
@@ -2017,6 +2052,13 @@ export function App() {
           </button>
           <button
             className="secondary"
+            disabled={busy}
+            onClick={runDriftMonitor}
+          >
+            检查特征漂移
+          </button>
+          <button
+            className="secondary"
             disabled={busy || readiness?.readyForModel === false}
             onClick={runPortfolio}
           >
@@ -2360,6 +2402,122 @@ export function App() {
         ) : (
           <p className="muted">
             通过 P7 特征 ready gate 后，训练 P2/P3 多特征基线模型。
+          </p>
+        )}
+      </section>
+      <section id="drift-monitor" className="panel workflow-drift">
+        <div className="section-title">
+          <div>
+            <span className="eyebrow">DRIFT MONITOR</span>
+            <h2>特征与评分漂移监控</h2>
+          </div>
+          {driftReport && (
+            <span className={`drift-badge ${driftReport.status}`}>
+              {driftReport.status === "stable"
+                ? "稳定"
+                : driftReport.status === "watch"
+                  ? "需要观察"
+                  : driftReport.status === "drift"
+                    ? "发现漂移"
+                    : "数据不足"}
+            </span>
+          )}
+        </div>
+        <div className="calibration-controls">
+          <label>
+            近期窗口
+            <input
+              type="number"
+              min="10"
+              max="250"
+              value={driftRecentDays}
+              onChange={(event) =>
+                setDriftRecentDays(Number(event.target.value) || 60)
+              }
+            />
+            个交易日
+          </label>
+          <label>
+            基准窗口
+            <input
+              type="number"
+              min="30"
+              max="1000"
+              value={driftReferenceDays}
+              onChange={(event) =>
+                setDriftReferenceDays(Number(event.target.value) || 250)
+              }
+            />
+            个交易日
+          </label>
+          <button disabled={busy} onClick={runDriftMonitor}>
+            开始检查
+          </button>
+        </div>
+        {driftReport?.metrics.length ? (
+          <div className="drift-results">
+            <p className="muted">
+              基准 {driftReport.referenceWindow?.startDate} 至{" "}
+              {driftReport.referenceWindow?.endDate}（
+              {driftReport.referenceWindow?.rows} 行）· 近期{" "}
+              {driftReport.recentWindow?.startDate} 至{" "}
+              {driftReport.recentWindow?.endDate}（
+              {driftReport.recentWindow?.rows} 行）
+            </p>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>监控项目</th>
+                    <th>状态</th>
+                    <th>PSI</th>
+                    <th>标准化均值偏移</th>
+                    <th>缺失率变化</th>
+                    <th>基准 / 近期样本</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {driftReport.metrics.map((metric) => (
+                    <tr key={metric.column}>
+                      <td>{featureNames[metric.column] ?? metric.column}</td>
+                      <td>{
+                        metric.status === "stable"
+                          ? "稳定"
+                          : metric.status === "watch"
+                            ? "观察"
+                            : "漂移"
+                      }</td>
+                      <td>
+                        {metric.populationStabilityIndex == null
+                          ? "—"
+                          : metric.populationStabilityIndex.toFixed(3)}
+                      </td>
+                      <td>
+                        {metric.standardizedMeanShift == null
+                          ? "—"
+                          : metric.standardizedMeanShift.toFixed(3)}
+                      </td>
+                      <td>{pct(metric.missingRateDelta)}</td>
+                      <td>
+                        {metric.referenceCount} / {metric.recentCount}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="muted">
+              分市场：{driftReport.segments
+                .map(
+                  (segment) =>
+                    `${segment.exchange === "sh" ? "上海" : "深圳"} ${segment.status === "stable" ? "稳定" : segment.status === "watch" ? "观察" : "漂移"}`,
+                )
+                .join(" · ") || "暂无分市场样本"}
+            </p>
+          </div>
+        ) : (
+          <p className="muted">
+            对比近期窗口与历史基准窗口，检查 P3 评分和核心 P2 特征的分布、均值与缺失率变化。每次结果都会写入实验历史。
           </p>
         )}
       </section>

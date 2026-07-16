@@ -47,4 +47,15 @@ describe('API errors', () => {
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST', body: '{"scope":"history_backfill"}' })
     expect(fetchMock.mock.calls[1][0]).toBe('/api/datasets/backfill-history/task-1')
   })
+
+  it('posts configurable windows to the drift monitor endpoint', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.runDriftMonitor(40, 180)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/monitoring/drift')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: 'POST',
+      body: '{"recent_days":40,"reference_days":180}',
+    })
+  })
 })

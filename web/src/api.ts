@@ -255,6 +255,40 @@ export type WalkForwardResult = {
   }>;
   warnings: string[];
 };
+export type DriftMetric = {
+  column: string;
+  status: "stable" | "watch" | "drift";
+  referenceCount: number;
+  recentCount: number;
+  referenceMean?: number | null;
+  recentMean?: number | null;
+  standardizedMeanShift?: number | null;
+  populationStabilityIndex?: number | null;
+  missingRateDelta: number;
+};
+export type DriftReport = {
+  version: string;
+  status: "stable" | "watch" | "drift" | "insufficient_data";
+  referenceWindow?: {
+    startDate: string;
+    endDate: string;
+    tradingDays: number;
+    rows: number;
+  };
+  recentWindow?: {
+    startDate: string;
+    endDate: string;
+    tradingDays: number;
+    rows: number;
+  };
+  metrics: DriftMetric[];
+  segments: Array<{
+    exchange: string;
+    status: "stable" | "watch" | "drift";
+    metrics: DriftMetric[];
+  }>;
+  warnings: string[];
+};
 export type FeatureCatalog = {
   version: string;
   featureColumns: string[];
@@ -705,6 +739,14 @@ export const api = {
     request<WalkForwardResult>("/api/model/p7/walk-forward", {
       method: "POST",
       body: JSON.stringify({ label_column: labelColumn, folds }),
+    }),
+  runDriftMonitor: (recentDays = 60, referenceDays = 250) =>
+    request<DriftReport>("/api/monitoring/drift", {
+      method: "POST",
+      body: JSON.stringify({
+        recent_days: recentDays,
+        reference_days: referenceDays,
+      }),
     }),
   featureCatalog: () => request<FeatureCatalog>("/api/model/p7/features"),
   validatePortfolio: (

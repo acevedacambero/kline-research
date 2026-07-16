@@ -901,6 +901,7 @@ def test_research_endpoint_rejects_explicit_old_score_version(tmp_path):
         ("/api/model/p7/baseline", {}),
         ("/api/model/p7/multifeature", {}),
         ("/api/model/p7/walk-forward", {}),
+        ("/api/monitoring/drift", {}),
         ("/api/validation/portfolio", {}),
     ],
 )

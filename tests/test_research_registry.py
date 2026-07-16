@@ -51,3 +51,37 @@ def test_same_kind_runs_can_be_compared_but_different_kinds_cannot(tmp_path):
     assert annualized["delta"] == 0.04000000000000001
     assert comparison["parameterChanges"][0]["parameter"] == "top_fraction"
     assert registry.compare(first["runId"], other["runId"]) is None
+
+
+def test_drift_run_summary_keeps_comparable_risk_metrics(tmp_path):
+    registry = ResearchRunRegistry(tmp_path)
+    saved = registry.save(
+        "drift-monitor",
+        {
+            "version": "feature-drift-v1",
+            "status": "drift",
+            "metrics": [
+                {
+                    "column": "score",
+                    "status": "drift",
+                    "populationStabilityIndex": 0.31,
+                    "standardizedMeanShift": 0.7,
+                },
+                {
+                    "column": "return_20",
+                    "status": "stable",
+                    "populationStabilityIndex": 0.04,
+                    "standardizedMeanShift": 0.1,
+                },
+            ],
+        },
+        parameters={"recent_days": 60},
+        dependencies={},
+        data_snapshot={},
+        code_version="release-1",
+    )
+
+    summary = registry.get(saved["runId"])["summary"]
+    assert summary["maxPopulationStabilityIndex"] == 0.31
+    assert summary["maxStandardizedMeanShift"] == 0.7
+    assert summary["driftedMetrics"] == 1
