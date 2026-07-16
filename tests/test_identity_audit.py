@@ -1,3 +1,5 @@
+import pytest
+
 from kline.data.identity_audit import IDENTITY_AUDIT_VERSION, SecurityIdentityAudit
 from kline.data.pipeline import DatasetPipeline
 
@@ -32,9 +34,58 @@ def test_identity_audit_refuses_event_cleanup_when_invalid_manifest_exists(tmp_p
     plan = audit.scan()
 
     assert plan.invalid_manifest_keys == ("stock:sz:601100",)
+    assert plan.invalid_manifest_hashes == ("hash",)
     try:
         audit.purge_invalid_events(plan)
     except ValueError as exc:
         assert "manual migration" in str(exc)
     else:
         raise AssertionError("cleanup should be blocked")
+
+
+def test_identity_audit_quarantines_unshared_invalid_snapshot(tmp_path):
+    pipeline = DatasetPipeline(tmp_path)
+    pipeline.initialize_catalog()
+    content_hash = "a" * 64
+    snapshot = tmp_path / "data-foundation-v1" / "snapshots" / f"snapshot-{content_hash[:16]}"
+    snapshot.mkdir(parents=True)
+    (snapshot / "marker.txt").write_text("invalid", encoding="utf-8")
+    with pipeline.connection() as connection:
+        connection.execute(
+            """insert into dataset_manifest(
+                dataset_key, content_hash, dataset_version, derived_path
+            ) values ('stock:sh:301377', ?, 'v1', ?)""",
+            [content_hash, str(snapshot / "derived" / "sh" / "301377.parquet")],
+        )
+    pipeline.record_quality_event("stock:sh:301377", "download-failed", "error", "bad")
+    audit = SecurityIdentityAudit(pipeline)
+    plan = audit.scan()
+
+    result = audit.quarantine_invalid_cache(plan)
+
+    assert result["deletedManifests"] == 1
+    assert result["deletedEvents"] == 1
+    assert not snapshot.exists()
+    quarantine = tmp_path / "quarantine" / "security-identity" / plan.plan_id / snapshot.name
+    assert (quarantine / "marker.txt").read_text(encoding="utf-8") == "invalid"
+    assert audit.scan().invalid_manifest_keys == ()
+
+
+def test_identity_audit_refuses_quarantine_for_shared_snapshot(tmp_path):
+    pipeline = DatasetPipeline(tmp_path)
+    pipeline.initialize_catalog()
+    content_hash = "b" * 64
+    with pipeline.connection() as connection:
+        connection.executemany(
+            """insert into dataset_manifest(
+                dataset_key, content_hash, dataset_version, derived_path
+            ) values (?, ?, 'v1', 'missing.parquet')""",
+            [
+                ["stock:sh:301377", content_hash],
+                ["stock:sz:000001", content_hash],
+            ],
+        )
+    audit = SecurityIdentityAudit(pipeline)
+
+    with pytest.raises(ValueError, match="valid manifests"):
+        audit.quarantine_invalid_cache(audit.scan())

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import os
+from pathlib import Path
 from typing import Any
 
 from .pipeline import DatasetPipeline
@@ -31,6 +33,7 @@ class IdentityAuditPlan:
     invalid_event_ids: tuple[str, ...]
     invalid_event_keys: tuple[str, ...]
     invalid_manifest_keys: tuple[str, ...]
+    invalid_manifest_hashes: tuple[str, ...]
     invalid_master_securities: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -45,6 +48,7 @@ class IdentityAuditPlan:
             invalid_event_ids=tuple(value["invalid_event_ids"]),
             invalid_event_keys=tuple(value["invalid_event_keys"]),
             invalid_manifest_keys=tuple(value["invalid_manifest_keys"]),
+            invalid_manifest_hashes=tuple(value["invalid_manifest_hashes"]),
             invalid_master_securities=tuple(value["invalid_master_securities"]),
         )
 
@@ -64,12 +68,16 @@ class SecurityIdentityAudit:
                 "select event_id, dataset_key from data_quality_events order by event_id"
             ).fetchall()
             manifests = connection.execute(
-                "select dataset_key from dataset_manifest order by dataset_key"
+                "select dataset_key, content_hash from dataset_manifest order by dataset_key"
             ).fetchall()
         invalid_events = [(str(event_id), str(key)) for event_id, key in events if _invalid_stock_key(key)]
-        invalid_manifest_keys = tuple(
-            str(row[0]) for row in manifests if _invalid_stock_key(str(row[0]))
-        )
+        invalid_manifests = [
+            (str(row[0]), str(row[1]))
+            for row in manifests
+            if _invalid_stock_key(str(row[0]))
+        ]
+        invalid_manifest_keys = tuple(item[0] for item in invalid_manifests)
+        invalid_manifest_hashes = tuple(item[1] for item in invalid_manifests)
         invalid_master = []
         for item in self.pipeline.load_security_master():
             exchange, code = str(item.get("exchange", "")), str(item.get("code", ""))
@@ -83,6 +91,7 @@ class SecurityIdentityAudit:
             "invalid_event_ids": [item[0] for item in invalid_events],
             "invalid_event_keys": [item[1] for item in invalid_events],
             "invalid_manifest_keys": list(invalid_manifest_keys),
+            "invalid_manifest_hashes": list(invalid_manifest_hashes),
             "invalid_master_securities": sorted(invalid_master),
         }
         return IdentityAuditPlan(
@@ -90,6 +99,7 @@ class SecurityIdentityAudit:
             invalid_event_ids=tuple(payload["invalid_event_ids"]),
             invalid_event_keys=tuple(payload["invalid_event_keys"]),
             invalid_manifest_keys=invalid_manifest_keys,
+            invalid_manifest_hashes=invalid_manifest_hashes,
             invalid_master_securities=tuple(payload["invalid_master_securities"]),
             version=IDENTITY_AUDIT_VERSION,
             data_root=payload["data_root"],
@@ -119,4 +129,79 @@ class SecurityIdentityAudit:
             "planId": plan.plan_id,
             "status": "completed",
             "deletedEvents": len(plan.invalid_event_ids),
+        }
+
+    def quarantine_invalid_cache(self, plan: IdentityAuditPlan) -> dict[str, Any]:
+        current = self.scan()
+        if plan != current:
+            raise ValueError("stale or tampered identity audit plan")
+        if plan.invalid_master_securities:
+            raise ValueError("invalid security master identities require manual migration")
+        if not plan.invalid_manifest_keys:
+            return self.purge_invalid_events(plan)
+
+        invalid_hashes = set(plan.invalid_manifest_hashes)
+        with self.pipeline.connection() as connection:
+            shared = connection.execute(
+                "select content_hash, dataset_key from dataset_manifest "
+                "where content_hash in ("
+                + ",".join("?" for _ in invalid_hashes)
+                + ") order by content_hash, dataset_key",
+                sorted(invalid_hashes),
+            ).fetchall()
+        invalid_keys = set(plan.invalid_manifest_keys)
+        shared_valid = [str(key) for _hash, key in shared if str(key) not in invalid_keys]
+        if shared_valid:
+            raise ValueError("invalid snapshots are still referenced by valid manifests")
+
+        snapshots_root = self.pipeline.output_root / "data-foundation-v1" / "snapshots"
+        quarantine_root = (
+            self.pipeline.output_root
+            / "quarantine"
+            / "security-identity"
+            / plan.plan_id
+        )
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for content_hash in sorted(invalid_hashes):
+                source = snapshots_root / f"snapshot-{content_hash[:16]}"
+                if not source.exists():
+                    continue
+                destination = quarantine_root / source.name
+                if destination.exists():
+                    raise ValueError(f"quarantine destination already exists: {destination}")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(source, destination)
+                moved.append((source, destination))
+            with self.pipeline.connection() as connection:
+                connection.execute("begin transaction")
+                try:
+                    manifest_placeholders = ",".join("?" for _ in plan.invalid_manifest_keys)
+                    connection.execute(
+                        f"delete from dataset_manifest where dataset_key in ({manifest_placeholders})",
+                        list(plan.invalid_manifest_keys),
+                    )
+                    if plan.invalid_event_ids:
+                        event_placeholders = ",".join("?" for _ in plan.invalid_event_ids)
+                        connection.execute(
+                            f"delete from data_quality_events where event_id in ({event_placeholders})",
+                            list(plan.invalid_event_ids),
+                        )
+                    connection.execute("commit")
+                except Exception:
+                    connection.execute("rollback")
+                    raise
+        except Exception:
+            for source, destination in reversed(moved):
+                if destination.exists() and not source.exists():
+                    os.replace(destination, source)
+            raise
+        return {
+            "version": IDENTITY_AUDIT_VERSION,
+            "planId": plan.plan_id,
+            "status": "completed",
+            "deletedManifests": len(plan.invalid_manifest_keys),
+            "deletedEvents": len(plan.invalid_event_ids),
+            "quarantinePath": str(quarantine_root),
+            "quarantinedSnapshots": [destination.name for _source, destination in moved],
         }

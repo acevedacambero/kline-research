@@ -16,16 +16,21 @@ def main() -> int:
         "--output", type=Path, default=Path("artifacts/security-identity-audit.json")
     )
     parser.add_argument("--execute-event-cleanup", action="store_true")
+    parser.add_argument("--execute-quarantine", action="store_true")
     parser.add_argument("--plan", type=Path)
     args = parser.parse_args()
     root = args.data_root or Settings().data_path
     audit = SecurityIdentityAudit(DatasetPipeline(root))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    if args.execute_event_cleanup:
+    if args.execute_event_cleanup or args.execute_quarantine:
         if args.plan is None:
-            parser.error("event cleanup requires --plan <audit-plan.json>")
+            parser.error("cleanup requires --plan <audit-plan.json>")
         plan = IdentityAuditPlan.from_dict(json.loads(args.plan.read_text(encoding="utf-8")))
-        result = audit.purge_invalid_events(plan)
+        result = (
+            audit.quarantine_invalid_cache(plan)
+            if args.execute_quarantine
+            else audit.purge_invalid_events(plan)
+        )
     else:
         result = audit.scan().to_dict()
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

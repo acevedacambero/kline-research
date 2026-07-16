@@ -101,7 +101,19 @@ python scripts/audit_security_identities.py \
   --output artifacts/security-identity-cleanup-receipt.json
 ```
 
-如果发现错误行情清单或主数据，清理会主动阻断，必须先迁移对应不可变快照。
+如果计划发现错误行情清单但证券主数据正常，应先停止应用，再按同一份计划把无有效引用的错误快照移入隔离区，并精确删除目录指针和对应质量事件：
+
+```bash
+systemctl --user stop kline.service
+python scripts/audit_security_identities.py \
+  --data-root /home/guagua/apps/kline/shared/data \
+  --execute-quarantine \
+  --plan artifacts/security-identity-audit.json \
+  --output artifacts/security-identity-quarantine-receipt.json
+systemctl --user start kline.service
+```
+
+执行器会拒绝隔离仍被正常证券引用的共享快照，事务失败时会把已经移动的目录放回原位。隔离目录位于数据根目录的 `quarantine/security-identity/<plan-id>`，确认业务数据正常前不做物理删除。证券主数据本身错配时仍会主动阻断，必须先人工修复主数据。
 
 ## 生产部署 Gate
 
