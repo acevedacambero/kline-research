@@ -23,6 +23,9 @@ import {
   type ScoreStatus,
   type ModelRegistryStatus,
   type GenericTask,
+  type CoverageResponse,
+  type MaintenanceSchedule,
+  type BackupList,
 } from "./api";
 import { KlineChart } from "./KlineChart";
 import { EquityCurveChart } from "./EquityCurveChart";
@@ -32,6 +35,15 @@ const pct = (value?: number | null) =>
   value == null ? "—" : `${(value * 100).toFixed(2)}%`;
 const intervalPct = (value?: { lower: number; upper: number } | null) =>
   value ? `${pct(value.lower)}～${pct(value.upper)}` : "—";
+const coverageStatusNames: Record<string, string> = {
+  ready: "可研究",
+  missing: "缺少缓存",
+  unreadable: "文件不可读",
+  short_history: "日线历史不足",
+  stale: "行情过期",
+  calendar_gap: "行情有缺口",
+  approximate_factor: "近似复权",
+};
 const groupNames = {
   trend: "趋势",
   position: "位置",
@@ -148,6 +160,10 @@ const taskErrorText = (error: unknown) =>
       : String(error);
 const taskKindNames: Record<string, string> = {
   import: "行情导入",
+  incremental: "日线增量更新",
+  repair: "异常证券修复",
+  coverage: "市场覆盖检查",
+  backup: "数据备份",
   history_backfill: "历史补全",
   labels: "P1 标签",
   features: "P2 特征",
@@ -346,6 +362,10 @@ export function App() {
   const [taskHistory, setTaskHistory] = useState<GenericTask[]>([]);
   const [taskTypeFilter, setTaskTypeFilter] = useState("");
   const [taskStatusFilter, setTaskStatusFilter] = useState("");
+  const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
+  const [coverageStatus, setCoverageStatus] = useState("");
+  const [maintenance, setMaintenance] = useState<MaintenanceSchedule | null>(null);
+  const [backups, setBackups] = useState<BackupList | null>(null);
 
   const showTask = (
     kind: string,
@@ -427,6 +447,12 @@ export function App() {
       case "import":
         void startImport("all");
         break;
+      case "incremental":
+        void runIncrementalUpdate();
+        break;
+      case "repair":
+        void runRepairQueue();
+        break;
       case "history_backfill":
         void startHistoryBackfill();
         break;
@@ -481,6 +507,9 @@ export function App() {
       .labelStatus()
       .then(setLabelStatus)
       .catch(() => undefined);
+    api.coverage().then(setCoverage).catch(() => undefined);
+    api.maintenanceSchedule().then(setMaintenance).catch(() => undefined);
+    api.backups().then(setBackups).catch(() => undefined);
     const restoreTask = (task: GenericTask) => {
       showTask(taskKindNames[task.jobType] ?? task.jobType, task.id, task);
       if (task.status === "queued" || task.status === "running") {
@@ -651,6 +680,89 @@ export function App() {
       setBusy(false);
     } finally {
       /* polling releases busy when the task reaches a terminal state */
+    }
+  }
+
+  async function pollOperationsTask(taskId: string, kind: string) {
+    const poll = async (): Promise<void> => {
+      const task = await api.taskStatus(taskId);
+      showTask(kind, taskId, task);
+      setMessage(`${kind}：${task.done}/${task.total}，错误 ${task.errors.length}`);
+      if (task.status === "queued" || task.status === "running") {
+        window.setTimeout(() => void poll(), 1000);
+      } else {
+        setBusy(false);
+        await Promise.all([
+          api.coverage(coverageStatus).then(setCoverage),
+          api.quality().then(setDatasetQuality),
+          api.backups().then(setBackups),
+          refreshTaskHistory(false),
+        ]).catch(() => undefined);
+      }
+    };
+    await poll();
+  }
+
+  async function rebuildCoverage() {
+    setBusy(true);
+    setMessage("正在生成全市场覆盖台账…");
+    try {
+      const result = await api.rebuildCoverage();
+      await pollOperationsTask(result.taskId, "市场覆盖检查");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "覆盖检查启动失败");
+      setBusy(false);
+    }
+  }
+
+  async function runRepairQueue() {
+    setBusy(true);
+    setMessage("正在提交异常证券修复队列…");
+    try {
+      const result = await api.runRepairQueue();
+      await pollOperationsTask(result.taskId, "异常证券修复");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "修复队列启动失败");
+      setBusy(false);
+    }
+  }
+
+  async function runIncrementalUpdate() {
+    setBusy(true);
+    setMessage("正在提交日线增量更新…");
+    try {
+      const result = await api.incrementalUpdate();
+      await pollOperationsTask(result.taskId, "日线增量更新");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "增量更新启动失败");
+      setBusy(false);
+    }
+  }
+
+  async function toggleMaintenanceSchedule() {
+    try {
+      const current = maintenance ?? { enabled: false, hour: 18, minute: 30 };
+      const next = await api.configureMaintenanceSchedule(
+        !current.enabled,
+        current.hour,
+        current.minute,
+      );
+      setMaintenance(next);
+      setMessage(next.enabled ? "工作日自动增量更新已开启" : "自动增量更新已关闭");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "更新维护计划失败");
+    }
+  }
+
+  async function createBackup() {
+    setBusy(true);
+    setMessage("正在创建并校验数据备份…");
+    try {
+      const result = await api.createBackup();
+      await pollOperationsTask(result.taskId, "数据备份");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "备份启动失败");
+      setBusy(false);
     }
   }
 
@@ -1628,6 +1740,103 @@ export function App() {
           ) : (
             <p className="muted">正在读取质量报告…</p>
           )}
+        </details>
+        <details className="quality-details coverage-details">
+          <summary>
+            <span>全市场覆盖台账</span>
+            <strong>
+              {coverage?.report
+                ? `${pct(coverage.report.coverageRate)} · ${coverage.report.readyCount}/${coverage.report.universeSize}`
+                : "未生成"}
+            </strong>
+          </summary>
+          <div className="coverage-toolbar">
+            <label>
+              查看状态
+              <select
+                value={coverageStatus}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setCoverageStatus(value);
+                  void api.coverage(value).then(setCoverage);
+                }}
+              >
+                <option value="">全部状态</option>
+                {Object.entries(coverageStatusNames).map(([value, label]) => (
+                  <option value={value} key={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <button className="secondary" disabled={busy} onClick={rebuildCoverage}>
+              重新检查覆盖
+            </button>
+            <button className="secondary" disabled={busy} onClick={runRepairQueue}>
+              修复异常证券
+            </button>
+            <button className="secondary" disabled={busy} onClick={runIncrementalUpdate}>
+              更新今日行情
+            </button>
+          </div>
+          {coverage?.report ? (
+            <>
+              <div className="quality-grid coverage-summary">
+                <article><span>证券总数</span><strong>{coverage.report.universeSize}</strong></article>
+                <article><span>已有缓存</span><strong>{coverage.report.cachedCount}</strong></article>
+                <article><span>可研究</span><strong>{coverage.report.readyCount}</strong></article>
+                <article><span>待修复</span><strong>{coverage.report.repairableCount}</strong></article>
+              </div>
+              <div className="gate-table-wrap">
+                <table className="gate-table coverage-table">
+                  <thead><tr><th>证券</th><th>状态</th><th>起止日期</th><th>行数</th><th>缺口</th><th>说明</th></tr></thead>
+                  <tbody>
+                    {coverage.items.map((item) => (
+                      <tr key={item.security}>
+                        <td>{item.security} {item.name}</td>
+                        <td>{coverageStatusNames[item.status] ?? item.status}</td>
+                        <td>{item.firstDate ?? "—"} ～ {item.latestDate ?? "—"}</td>
+                        <td>{item.rows}</td>
+                        <td>{item.calendarGapCount}</td>
+                        <td>{item.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <small className="muted">当前筛选共 {coverage.total} 只，表格最多显示前 100 只。</small>
+            </>
+          ) : (
+            <p className="muted">首次使用请点击“重新检查覆盖”，系统会生成可追溯台账。</p>
+          )}
+        </details>
+        <details className="quality-details maintenance-details">
+          <summary>
+            <span>自动维护与备份</span>
+            <strong>{maintenance?.enabled ? "自动更新已开启" : "自动更新未开启"}</strong>
+          </summary>
+          <div className="quality-grid">
+            <article>
+              <span>下次自动更新</span>
+              <strong>{maintenance?.nextRunAt ? new Date(maintenance.nextRunAt).toLocaleString("zh-CN") : "—"}</strong>
+              <small>工作日 {String(maintenance?.hour ?? 18).padStart(2, "0")}:{String(maintenance?.minute ?? 30).padStart(2, "0")}</small>
+            </article>
+            <article>
+              <span>最近自动任务</span>
+              <strong>{maintenance?.lastOutcome === "submitted" ? "已提交" : maintenance?.lastOutcome === "skipped" ? "已跳过" : "尚未执行"}</strong>
+              <small>{maintenance?.lastError || maintenance?.lastAttemptAt || "无记录"}</small>
+            </article>
+            <article>
+              <span>可用备份</span>
+              <strong>{backups?.items?.length ?? 0}</strong>
+              <small>{backups?.items?.[0]?.createdAt ? `最新 ${new Date(backups.items[0].createdAt).toLocaleString("zh-CN")}` : "尚无备份"}</small>
+            </article>
+          </div>
+          <div className="status-actions">
+            <button className="secondary" onClick={toggleMaintenanceSchedule}>
+              {maintenance?.enabled ? "关闭自动更新" : "开启自动更新"}
+            </button>
+            <button className="secondary" disabled={busy} onClick={createBackup}>立即备份并校验</button>
+          </div>
+          <p className="muted">恢复操作需先停止服务，并使用服务器恢复命令，避免运行中的数据库被替换。</p>
         </details>
         <div className="status-actions">
           <button

@@ -263,6 +263,30 @@ article span {
 .quality-export {
   margin: 0 12px 12px;
 }
+
+.coverage-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+  margin: 1rem 0;
+}
+
+.coverage-toolbar label {
+  min-width: 150px;
+}
+
+.coverage-table td:first-child {
+  white-space: nowrap;
+}
+
+.coverage-table td:last-child {
+  min-width: 220px;
+}
+
+.maintenance-details .quality-grid article strong {
+  font-size: 1.05rem;
+}
 .gate-details {
   margin-top: 12px;
   border: 1px solid #1c2a39;

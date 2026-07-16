@@ -228,6 +228,49 @@ class DatasetPipeline:
             ).fetchone()
         return row[0] if row and row[0] else None
 
+    def latest_bundle_paths(self, exchange: str, code: str) -> tuple[Path, Path] | None:
+        with self.connection() as connection:
+            row = connection.execute(
+                "select raw_path, factor_path from dataset_manifest where dataset_key = ?",
+                [f"stock:{exchange}:{code}"],
+            ).fetchone()
+        if not row or not all(row):
+            return None
+        return self._resolve_manifest_path(row[0]), self._resolve_manifest_path(row[1])
+
+    def latest_data_date(self, exchange: str, code: str):
+        path = self.latest_derived_path(exchange, code)
+        if path is None or not path.exists():
+            return None
+        frame = pd.read_parquet(path, columns=["date"])
+        return pd.to_datetime(frame["date"]).max().date() if not frame.empty else None
+
+    def import_incremental_security(
+        self,
+        exchange: str,
+        code: str,
+        raw: pd.DataFrame,
+        factors: pd.DataFrame,
+        dataset_version: str = "raw-factor-v1",
+    ) -> ImportReport:
+        paths = self.latest_bundle_paths(exchange, code)
+        if paths:
+            old_raw = pd.read_parquet(paths[0])
+            old_factors = pd.read_parquet(paths[1])
+            raw = (
+                pd.concat([old_raw, raw], ignore_index=True)
+                .sort_values("date")
+                .drop_duplicates("date", keep="last")
+                .reset_index(drop=True)
+            )
+            factors = (
+                pd.concat([old_factors, factors], ignore_index=True)
+                .sort_values("date")
+                .drop_duplicates("date", keep="last")
+                .reset_index(drop=True)
+            )
+        return self.import_security(exchange, code, raw, factors, dataset_version)
+
     def cached_market_counts(self) -> dict[str, int]:
         with self.connection() as connection:
             rows = connection.execute(

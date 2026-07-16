@@ -52,6 +52,54 @@ def test_health_exposes_all_version_keys(tmp_path):
     assert body["recoverableTasks"] == 0
 
 
+def test_coverage_schedule_and_backup_operations_are_auditable(tmp_path):
+    data_path = tmp_path / "data"
+    app = create_app(Settings(data_path=data_path), FakeSource())
+    with TestClient(app) as client:
+        missing = client.get("/api/datasets/coverage").json()
+        assert missing["available"] is False
+
+        submitted = client.post(
+            "/api/datasets/coverage/rebuild",
+            json={"refresh_security_master": False},
+        )
+        assert submitted.status_code == 202
+        task_id = submitted.json()["taskId"]
+        for _ in range(100):
+            task = client.get(f"/api/tasks/{task_id}").json()
+            if task["status"] not in {"queued", "running"}:
+                break
+            time.sleep(0.01)
+        coverage = client.get("/api/datasets/coverage?status=missing").json()
+        assert coverage["available"] is True
+        assert coverage["report"]["universeSize"] == 1
+        assert coverage["items"][0]["security"] == "sh600000"
+
+        schedule = client.put(
+            "/api/system/maintenance-schedule",
+            json={"enabled": True, "hour": 19, "minute": 5},
+        )
+        assert schedule.status_code == 200
+        assert schedule.json()["enabled"] is True
+        assert schedule.json()["nextRunAt"]
+
+        backup = client.post("/api/system/backups")
+        assert backup.status_code == 202
+        backup_task_id = backup.json()["taskId"]
+        for _ in range(100):
+            task = client.get(f"/api/tasks/{backup_task_id}").json()
+            if task["status"] not in {"queued", "running"}:
+                break
+            time.sleep(0.01)
+        listed = client.get("/api/system/backups").json()
+        assert len(listed["items"]) == 1
+        verified = client.get(
+            f"/api/system/backups/{listed['items'][0]['name']}/verify"
+        )
+        assert verified.status_code == 200
+        assert verified.json()["valid"] is True
+
+
 def test_research_readiness_separates_refresh_audit_and_model_gates():
     result = build_research_readiness(
         {"report": {"passed": False}},

@@ -126,3 +126,20 @@ python -m pytest tests/test_job_store.py tests/test_job_coordinator.py \
 - P7/P8 结果支持 CSV 导出，并保留可靠性警告字段。
 - 线上研究接口默认抽取每只证券最近 100 条成熟样本；模型输入保留 250 条日线以覆盖长周期标签的成熟窗口，Walk-forward 保留 500 条，避免在小内存 VPS 上触发代理超时或内存重启；结果中的样本数即实际研究口径。
 - 实时行情和交易执行不在当前范围；P8 仅为日线研究组合验证，尚不包含逐笔撮合、税费模型、冲击成本或真实交易级回测。
+## 全市场覆盖、自动维护与备份
+
+数据状态页提供全市场覆盖台账，按证券记录缓存状态、首末日期、日线行数、长区间缺口、复权近似状态和可修复原因。覆盖检查通过后台任务生成，不阻塞网页请求；异常证券可以进入修复队列重新下载。
+
+日常维护支持手动“更新今日行情”和工作日定时增量更新。增量任务只请求最近行情窗口，再与不可变历史事实合并生成新快照。
+
+服务器可从网页创建并校验备份。离线恢复必须先停止应用服务：
+
+```bash
+python scripts/backup_data.py --data /home/guagua/apps/kline/shared/data --output /home/guagua/backups
+systemctl --user stop kline.service
+python scripts/restore_data.py /home/guagua/backups/kline-data-YYYYMMDDTHHMMSSZ.tar.gz --data /home/guagua/apps/kline/shared/data --confirm
+systemctl --user start kline.service
+```
+
+恢复时旧数据会保留为同目录下的 `data.before-restore-*`，确认成功后再人工清理。
+运行中的 `jobs.duckdb` 属于瞬时任务历史，网页备份会排除该锁定文件；行情目录、目录清单、特征、标签、评分、模型和 Gate 报告均纳入备份。

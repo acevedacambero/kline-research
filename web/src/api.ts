@@ -374,6 +374,48 @@ export type DatasetQuality = {
     created_at: string;
   }>;
 };
+export type CoverageItem = {
+  security: string;
+  exchange: string;
+  code: string;
+  name: string;
+  status: string;
+  rows: number;
+  firstDate?: string | null;
+  latestDate?: string | null;
+  calendarGapCount: number;
+  reason: string;
+};
+export type CoverageResponse = {
+  available: boolean;
+  total: number;
+  report: null | {
+    version: string;
+    generatedAt: string;
+    universeSize: number;
+    cachedCount: number;
+    readyCount: number;
+    repairableCount: number;
+    coverageRate: number;
+    statusCounts: Record<string, number>;
+  };
+  items: CoverageItem[];
+};
+export type MaintenanceSchedule = {
+  enabled: boolean;
+  hour: number;
+  minute: number;
+  timezone: string;
+  nextRunAt?: string | null;
+  lastAttemptAt?: string | null;
+  lastTaskId?: string | null;
+  lastOutcome?: string | null;
+  lastError?: string | null;
+};
+export type BackupList = {
+  path: string;
+  items: Array<{ name: string; size: number; createdAt: string }>;
+};
 export type ResearchReadiness = {
   version: string;
   readyForRefresh: boolean;
@@ -495,6 +537,34 @@ export const api = {
   historyBackfillTask: (taskId: string) =>
     request<HistoryBackfillTask>(`/api/datasets/backfill-history/${taskId}`),
   quality: () => request<DatasetQuality>("/api/datasets/quality"),
+  coverage: (status = "") =>
+    request<CoverageResponse>(
+      `/api/datasets/coverage?limit=100${status ? `&status=${encodeURIComponent(status)}` : ""}`,
+    ),
+  rebuildCoverage: () =>
+    request<{ taskId: string }>("/api/datasets/coverage/rebuild", {
+      method: "POST",
+      body: JSON.stringify({ refresh_security_master: false }),
+    }),
+  runRepairQueue: (limit = 500) =>
+    request<{ taskId: string; total: number }>(
+      "/api/datasets/repair-queue/run",
+      { method: "POST", body: JSON.stringify({ limit }) },
+    ),
+  incrementalUpdate: () =>
+    request<{ taskId: string; total: number }>("/api/datasets/incremental", {
+      method: "POST",
+    }),
+  maintenanceSchedule: () =>
+    request<MaintenanceSchedule>("/api/system/maintenance-schedule"),
+  configureMaintenanceSchedule: (enabled: boolean, hour: number, minute: number) =>
+    request<MaintenanceSchedule>("/api/system/maintenance-schedule", {
+      method: "PUT",
+      body: JSON.stringify({ enabled, hour, minute }),
+    }),
+  backups: () => request<BackupList>("/api/system/backups"),
+  createBackup: () =>
+    request<{ taskId: string }>("/api/system/backups", { method: "POST" }),
   buildLabels: (scope: "representative" | "failed" | "all") =>
     request<{ taskId: string; total: number }>("/api/labels/build", {
       method: "POST",

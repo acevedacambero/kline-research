@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, wait
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 import json
@@ -27,6 +27,7 @@ from .data.history_backfill import (
     BackfillCoverageError,
     HistoryBackfillService,
 )
+from .data.coverage import MarketCoverageService, REPAIRABLE_STATUSES
 from .data.provider_policy import (
     ProductionProviderPolicy as HybridDownloadSource,
     REPRESENTATIVE_SECURITIES,
@@ -57,6 +58,8 @@ from .model import (
     walk_forward_score_baseline,
 )
 from .ops.provider_probe import ProviderProbeRunner
+from .ops.maintenance import DailyMaintenanceScheduler
+from .ops.backup import DataBackupManager
 from .storage import atomic_write_text
 from .validation import calibrate_score, validate_single_factor, validate_top_score_portfolio
 
@@ -95,6 +98,21 @@ class _InjectedProviderAdapter:
 class ImportRequest(BaseModel):
     scope: str = "representative"
     refresh: bool = False
+
+
+class RepairQueueRequest(BaseModel):
+    statuses: list[str] = Field(default_factory=lambda: sorted(REPAIRABLE_STATUSES))
+    limit: int = Field(default=500, ge=1, le=6000)
+
+
+class CoverageRebuildRequest(BaseModel):
+    refresh_security_master: bool = False
+
+
+class MaintenanceScheduleRequest(BaseModel):
+    enabled: bool
+    hour: int = Field(ge=0, le=23)
+    minute: int = Field(ge=0, le=59)
 
 
 class AuditRequest(BaseModel):
@@ -164,7 +182,7 @@ def _task_response(job: Job) -> dict:
     else:
         total = 0
     defaults = {"total": total, "done": 0, "rows": 0, "errors": [], "currentSecurity": None}
-    if job.job_type == "import":
+    if job.job_type in {"import", "incremental", "repair"}:
         defaults.update(
             {
                 "stage": "queued",
@@ -283,10 +301,21 @@ class _TaskFacade:
 
 class TaskStore(_TaskFacade):
     def __init__(self, coordinator, store, lock, workers: int):
-        super().__init__(coordinator, store, lock, {"import"})
+        super().__init__(coordinator, store, lock, {"import", "incremental", "repair"})
         self.workers = max(1, min(workers, 3))
 
-    def submit(self, pipeline, source, securities, start_date, end_date, timeout_seconds) -> str:
+    def submit(
+        self,
+        pipeline,
+        source,
+        securities,
+        start_date,
+        end_date,
+        timeout_seconds,
+        *,
+        incremental: bool = False,
+        job_type: str = "import",
+    ) -> str:
         initial = {
             "total": len(securities),
             "done": 0,
@@ -298,7 +327,11 @@ class TaskStore(_TaskFacade):
             "directAvailable": source.direct_available,
         }
 
-        payload = {"securities": securities, "directAvailable": source.direct_available}
+        payload = {
+            "securities": securities,
+            "directAvailable": source.direct_available,
+            "incremental": incremental,
+        }
 
         def operation(payload, progress):
             state = dict(initial)
@@ -307,8 +340,13 @@ class TaskStore(_TaskFacade):
             started = time.monotonic()
 
             def fetch(security):
+                security_start = start_date
+                if payload.get("incremental"):
+                    latest = pipeline.latest_data_date(security["exchange"], security["code"])
+                    if latest is not None:
+                        security_start = max(start_date, latest - timedelta(days=14))
                 return source.fetch_bundle(
-                    security["exchange"], security["code"], start_date, end_date
+                    security["exchange"], security["code"], security_start, end_date
                 )
 
             def record_finished():
@@ -336,9 +374,12 @@ class TaskStore(_TaskFacade):
                         state["stage"] = "writing-snapshot"
                         try:
                             raw, factors = future.result()
-                            pipeline.import_security(
-                                security["exchange"], security["code"], raw, factors
+                            importer = (
+                                pipeline.import_incremental_security
+                                if payload.get("incremental")
+                                else pipeline.import_security
                             )
+                            importer(security["exchange"], security["code"], raw, factors)
                         except Exception as exc:
                             state["errors"].append({"security": key, "message": str(exc)})
                         finally:
@@ -360,7 +401,7 @@ class TaskStore(_TaskFacade):
             state["stage"] = "finished"
             return state
 
-        return self._submit("import", payload, operation)
+        return self._submit(job_type, payload, operation)
 
 
 class LabelTaskStore(_TaskFacade):
@@ -725,10 +766,15 @@ def create_app(
         jobs_db_path, memory_limit=settings.duckdb_memory_limit, threads=settings.duckdb_threads
     )
     coordinator = HeavyTaskCoordinator(job_store)
+    maintenance_scheduler: DailyMaintenanceScheduler | None = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        if maintenance_scheduler is not None:
+            maintenance_scheduler.start()
         yield
+        if maintenance_scheduler is not None:
+            maintenance_scheduler.stop()
         try:
             coordinator.shutdown()
         except CoordinatorShutdownError:
@@ -808,6 +854,17 @@ def create_app(
         freshness_days=settings.history_backfill_freshness_days,
     )
     history_backfill_tasks = HistoryBackfillTaskStore(coordinator, job_store, submission_lock)
+    coverage_service = MarketCoverageService(
+        pipeline,
+        settings.data_path / "market-coverage-latest.json",
+        min_history_rows=settings.history_backfill_min_days,
+        freshness_days=settings.history_backfill_freshness_days,
+    )
+    backup_manager = DataBackupManager(
+        settings.data_path,
+        settings.backup_path or settings.data_path.parent / "backups",
+        exclude_paths=(jobs_db_path, jobs_db_path.with_name(jobs_db_path.name + ".wal")),
+    )
     history_backfill_scan_lock = threading.Lock()
     history_backfill_candidate_count: int | None = None
     approximate_quality_lock = threading.Lock()
@@ -849,6 +906,19 @@ def create_app(
             (item["exchange"], item["code"])
             for item in pipeline.cached_securities()
             if item["exchange"] in SUPPORTED_EXCHANGES
+        }
+
+    def current_approximate_securities() -> set[str]:
+        events = pipeline.quality_events(limit=100_000)
+        current_hashes = {
+            item["dataset_key"]: item["content_hash"]
+            for item in pipeline.dataset_manifest_rows()
+        }
+        return {
+            str(event["dataset_key"]).replace("stock:", "").replace(":", "")
+            for event in events
+            if event["event_type"] == "factor-approximation"
+            and event.get("content_hash") == current_hashes.get(event["dataset_key"])
         }
 
     @app.get("/api/system/health")
@@ -1195,6 +1265,108 @@ def create_app(
             "skipped": skipped,
         }
 
+    @app.post("/api/datasets/incremental", status_code=202)
+    def start_incremental_update():
+        tasks.active()
+        cached = current_cached_keys()
+        securities = [
+            item for item in securities_list()
+            if (item["exchange"], item["code"]) in cached
+        ]
+        start = date.fromisoformat(
+            f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-"
+            f"{settings.history_start_date[6:]}"
+        )
+        task_id = tasks.submit(
+            pipeline,
+            download_source,
+            securities,
+            start,
+            date.today(),
+            settings.security_fetch_timeout_seconds,
+            incremental=True,
+            job_type="incremental",
+        )
+        return {"taskId": task_id, "total": len(securities), "mode": "incremental"}
+
+    maintenance_scheduler = DailyMaintenanceScheduler(
+        settings.data_path / "maintenance-schedule.json",
+        lambda: start_incremental_update()["taskId"],
+        timezone=settings.market_timezone,
+        enabled=settings.maintenance_auto_enabled,
+        hour=settings.maintenance_hour,
+        minute=settings.maintenance_minute,
+    )
+    app.state.maintenance_scheduler = maintenance_scheduler
+
+    @app.get("/api/system/maintenance-schedule")
+    def maintenance_schedule_status():
+        return maintenance_scheduler.status()
+
+    @app.put("/api/system/maintenance-schedule")
+    def configure_maintenance_schedule(request: MaintenanceScheduleRequest):
+        return maintenance_scheduler.configure(
+            enabled=request.enabled, hour=request.hour, minute=request.minute
+        )
+
+    @app.post("/api/system/maintenance-schedule/run", status_code=202)
+    def run_scheduled_maintenance_now():
+        return start_incremental_update()
+
+    @app.get("/api/system/backups")
+    def list_data_backups():
+        backup_manager.backup_path.mkdir(parents=True, exist_ok=True)
+        items = []
+        for path in sorted(backup_manager.backup_path.glob("kline-data-*.tar.gz"), reverse=True):
+            items.append(
+                {
+                    "name": path.name,
+                    "size": path.stat().st_size,
+                    "createdAt": datetime.fromtimestamp(
+                        path.stat().st_mtime, tz=timezone.utc
+                    ).isoformat(),
+                }
+            )
+        return {"path": str(backup_manager.backup_path), "items": items}
+
+    @app.post("/api/system/backups", status_code=202)
+    def create_data_backup():
+        with submission_lock:
+            active = coordinator.active()
+            if active:
+                raise HTTPException(
+                    409,
+                    detail={
+                        "code": "HEAVY_JOB_ALREADY_RUNNING",
+                        "message": f"已有后台任务运行中：{active[0].id}",
+                        "taskId": active[0].id,
+                    },
+                )
+
+            def operation(_payload, progress):
+                progress({"done": 0, "total": 1, "stage": "archiving"})
+                result = backup_manager.create()
+                verification = backup_manager.verify(Path(result["archive"]))
+                progress({"done": 1, "total": 1, "stage": "verified"})
+                return {"done": 1, "total": 1, "errors": [], **verification}
+
+            submitted = coordinator.submit("backup", {}, operation, resumable=False)
+        return {"taskId": submitted.job_id}
+
+    @app.get("/api/system/backups/{name}/verify")
+    def verify_data_backup(name: str):
+        if Path(name).name != name or not name.endswith(".tar.gz"):
+            raise HTTPException(422, detail={"code": "INVALID_BACKUP_NAME"})
+        path = backup_manager.backup_path / name
+        if not path.exists():
+            raise HTTPException(404, detail={"code": "BACKUP_NOT_FOUND"})
+        try:
+            return backup_manager.verify(path)
+        except ValueError as exc:
+            raise HTTPException(
+                409, detail={"code": "BACKUP_INVALID", "message": str(exc)}
+            ) from exc
+
     @app.get("/api/datasets/tasks/{task_id}")
     def task_status(task_id: str):
         if task_id not in tasks.items:
@@ -1214,6 +1386,7 @@ def create_app(
             item["dataset_key"]: item["content_hash"]
             for item in pipeline.dataset_manifest_rows()
         }
+
         approximate_factor_securities = sorted(
             {
                 event["dataset_key"]
@@ -1334,6 +1507,123 @@ def create_app(
             **freshness_quality,
             "qualityEvents": events[:100],
         }
+
+    @app.get("/api/datasets/coverage")
+    def market_coverage(
+        status: str | None = None,
+        exchange: str | None = None,
+        query: str = "",
+        offset: int = 0,
+        limit: int = 100,
+    ):
+        report = coverage_service.load()
+        if report is None:
+            return {"available": False, "report": None, "items": [], "total": 0}
+        items = report.get("securities", [])
+        normalized_query = query.strip().lower()
+        if status:
+            items = [item for item in items if item.get("status") == status]
+        if exchange:
+            normalized_exchange = require_supported_market(exchange)
+            items = [item for item in items if item.get("exchange") == normalized_exchange]
+        if normalized_query:
+            items = [
+                item
+                for item in items
+                if normalized_query in str(item.get("security", "")).lower()
+                or normalized_query in str(item.get("name", "")).lower()
+            ]
+        bounded_offset = max(0, offset)
+        bounded_limit = max(1, min(500, limit))
+        summary = {key: value for key, value in report.items() if key != "securities"}
+        return {
+            "available": True,
+            "report": summary,
+            "items": items[bounded_offset : bounded_offset + bounded_limit],
+            "total": len(items),
+        }
+
+    @app.post("/api/datasets/coverage/rebuild", status_code=202)
+    def rebuild_market_coverage(request: CoverageRebuildRequest):
+        with submission_lock:
+            active = coordinator.active()
+            if active:
+                raise HTTPException(
+                    409,
+                    detail={
+                        "code": "HEAVY_JOB_ALREADY_RUNNING",
+                        "message": f"已有后台任务运行中：{active[0].id}",
+                        "taskId": active[0].id,
+                    },
+                )
+
+            def operation(payload, progress):
+                universe = securities_list(refresh=bool(payload["refreshSecurityMaster"]))
+                report = coverage_service.build(
+                    universe,
+                    approximate_securities=current_approximate_securities(),
+                    progress=progress,
+                )
+                return {
+                    "done": report["universeSize"],
+                    "total": report["universeSize"],
+                    "ready": report["readyCount"],
+                    "repairable": report["repairableCount"],
+                    "coverageRate": report["coverageRate"],
+                    "errors": [],
+                }
+
+            submitted = coordinator.submit(
+                "coverage",
+                {"refreshSecurityMaster": request.refresh_security_master},
+                operation,
+                resumable=False,
+            )
+        return {"taskId": submitted.job_id}
+
+    @app.get("/api/datasets/repair-queue")
+    def repair_queue(status: list[str] | None = None, limit: int = 500):
+        items = coverage_service.repair_queue(status)
+        bounded = max(1, min(6000, limit))
+        return {"total": len(items), "items": items[:bounded]}
+
+    @app.post("/api/datasets/repair-queue/run", status_code=202)
+    def run_repair_queue(request: RepairQueueRequest):
+        tasks.active()
+        invalid = sorted(set(request.statuses) - REPAIRABLE_STATUSES)
+        if invalid:
+            raise HTTPException(
+                422,
+                detail={"code": "INVALID_REPAIR_STATUS", "message": ", ".join(invalid)},
+            )
+        queue_items = coverage_service.repair_queue(request.statuses)[: request.limit]
+        if not queue_items:
+            raise HTTPException(
+                409,
+                detail={"code": "REPAIR_QUEUE_EMPTY", "message": "当前没有可修复证券"},
+            )
+        securities = [
+            {
+                "exchange": item["exchange"],
+                "code": item["code"],
+                "name": item.get("name", ""),
+            }
+            for item in queue_items
+        ]
+        start = date.fromisoformat(
+            f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-"
+            f"{settings.history_start_date[6:]}"
+        )
+        task_id = tasks.submit(
+            pipeline,
+            download_source,
+            securities,
+            start,
+            date.today(),
+            settings.security_fetch_timeout_seconds,
+            job_type="repair",
+        )
+        return {"taskId": task_id, "total": len(securities), "statuses": request.statuses}
 
     @app.post("/api/history-backfill", status_code=202)
     @app.post("/api/datasets/backfill-history", status_code=202)
