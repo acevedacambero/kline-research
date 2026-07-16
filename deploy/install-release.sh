@@ -54,4 +54,10 @@ if ! bash "${release}/deploy/healthcheck.sh"; then
 fi
 trap - ERR
 "${release}/deploy/prune-releases.sh"
+uploads="$(readlink -f "${HOME}/uploads")"
+for archive in "${source_tar}" "${web_tar}"; do
+  case "${archive}" in
+    "${uploads}/"*) rm -f -- "${archive}" ;;
+  esac
+done
 echo "${release}"

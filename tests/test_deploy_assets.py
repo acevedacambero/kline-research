@@ -62,3 +62,5 @@ def test_release_install_uses_shared_runtime_healthcheck_and_rollback():
     assert "old_previous" in script
     assert "activeTasks" in script
     assert "KLINE_ALLOW_ACTIVE_DEPLOY" in script
+    assert '"${uploads}/"*' in script
+    assert 'rm -f -- "${archive}"' in script

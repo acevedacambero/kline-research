@@ -185,14 +185,33 @@ P7 模型注册表支持显式选择“当前模型”。只有状态为 `traine
 
 日常维护支持手动“更新今日行情”和工作日定时增量更新。增量任务只请求最近行情窗口，再与不可变历史事实合并生成新快照。
 
-服务器可从网页创建并校验备份。离线恢复必须先停止应用服务：
+VPS 只作为备份生成时的临时中转，不长期保存归档。网页备份显示完成后，应立即在项目目录的 Windows PowerShell 中执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\pull_server_backups.ps1
+```
+
+脚本把全部待转移归档保存到 `D:\kline-backups`，逐文件核对服务器 SHA-256；只有本机副本完全一致后，才删除 VPS 上对应归档并写入本地回执。传输或校验失败时远端副本保持不动。
+
+离线恢复时先把选定归档上传到服务器并停止应用服务：
+
+```powershell
+scp D:\kline-backups\kline-data-YYYYMMDDTHHMMSSZ.tar.gz openclaw-server:/home/guagua/uploads/
+```
 
 ```bash
-python scripts/backup_data.py --data /home/guagua/apps/kline/shared/data --output /home/guagua/backups
 systemctl --user stop kline.service
-python scripts/restore_data.py /home/guagua/backups/kline-data-YYYYMMDDTHHMMSSZ.tar.gz --data /home/guagua/apps/kline/shared/data --confirm
+python scripts/restore_data.py /home/guagua/uploads/kline-data-YYYYMMDDTHHMMSSZ.tar.gz --data /home/guagua/apps/kline/shared/data --confirm
 systemctl --user start kline.service
 ```
 
 恢复时旧数据会保留为同目录下的 `data.before-restore-*`，确认成功后再人工清理。
 运行中的 `jobs.duckdb` 属于瞬时任务历史，网页备份会排除该锁定文件；行情目录、目录清单、特征、标签、评分、模型和 Gate 报告均纳入备份。
+
+### 存储位置原则
+
+- VPS 只保留线上运行必需内容：当前与上一个发布版本、运行环境、实时数据目录、任务数据库和必要日志。
+- GitHub 保存源代码与可复现配置。
+- 本机保存数据备份、部署归档、导出报告和长期审计材料，默认目录分别为 `D:\kline-backups` 与项目 `artifacts`。
+- 上传到 VPS `~/uploads` 的部署压缩包安装成功后由安装器自动删除；失败时保留，便于诊断和重试。
+- VPS 上生成的大型备份只作临时中转，本机哈希校验通过后立即删除。
