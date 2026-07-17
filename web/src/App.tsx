@@ -160,6 +160,8 @@ type TaskView = {
   createdAt?: string;
   updatedAt?: string;
   resumable?: boolean;
+  stage?: string;
+  stages?: GenericTask["stages"];
 };
 const taskErrorText = (error: unknown) =>
   typeof error === "string"
@@ -182,6 +184,7 @@ const taskKindNames: Record<string, string> = {
   labels: "P1 标签",
   features: "P2 特征",
   scores: "P3 评分",
+  research_pipeline: "P1–P3 研究流水线",
   provider_probe: "数据源诊断",
 };
 const taskStatusNames: Record<string, string> = {
@@ -407,6 +410,8 @@ export function App() {
       createdAt?: string;
       updatedAt?: string;
       resumable?: boolean;
+      stage?: string;
+      stages?: GenericTask["stages"];
     },
   ) => {
     setTaskView({
@@ -424,6 +429,8 @@ export function App() {
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
       resumable: task.resumable,
+      stage: task.stage,
+      stages: task.stages,
     });
   };
 
@@ -950,6 +957,46 @@ export function App() {
       await poll();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "评分任务启动失败");
+      setBusy(false);
+    }
+  }
+
+  async function startResearchPipeline() {
+    setBusy(true);
+    try {
+      const result = await api.buildResearchPipeline("stale");
+      setMessage(
+        `P1–P3 流水线 ${result.taskId.slice(0, 8)} 已启动，共 ${result.total} 只证券`,
+      );
+      const poll = async (): Promise<void> => {
+        const task = await api.taskStatus(result.taskId);
+        showTask("P1–P3 研究流水线", result.taskId, task);
+        const stageName =
+          task.stage === "labels"
+            ? "P1 标签"
+            : task.stage === "features"
+              ? "P2 特征"
+              : task.stage === "scores"
+                ? "P3 评分"
+                : task.stage === "finished"
+                  ? "全部完成"
+                  : "准备中";
+        setMessage(
+          `研究流水线 · ${stageName} · ${task.done}/${task.total} · 错误 ${task.errors.length}`,
+        );
+        if (task.status === "queued" || task.status === "running") {
+          window.setTimeout(() => void poll(), 1000);
+        } else {
+          setBusy(false);
+          await Promise.all([
+            refreshResearchStatus(),
+            refreshTaskHistory(false),
+          ]).catch(() => undefined);
+        }
+      };
+      await poll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "研究流水线启动失败");
       setBusy(false);
     }
   }
@@ -1543,8 +1590,10 @@ export function App() {
             <small>
               {labelStatus?.unreadableFiles
                 ? `${labelStatus.unreadableFiles} 个文件不可读`
-                : labelStatus?.staleFiles
-                  ? `${labelStatus.staleFiles} 个文件待重建`
+                : labelStatus?.staleSnapshotFiles
+                  ? `${labelStatus.staleSnapshotFiles} 只证券绑定旧行情快照`
+                  : labelStatus?.staleFiles
+                    ? `${labelStatus.staleFiles} 个文件待重建`
                   : labelStatus?.delayedExitReady
                     ? "顺延卖出口径就绪"
                     : "暂无标签数据"}
@@ -1588,8 +1637,10 @@ export function App() {
             <small>
               {scoreStatus?.unreadableFiles
                 ? `${scoreStatus.unreadableFiles} 个文件不可读`
-                : scoreStatus?.staleFiles
-                  ? `${scoreStatus.staleFiles} 个旧版本文件`
+                : scoreStatus?.staleSnapshotFiles
+                  ? `${scoreStatus.staleSnapshotFiles} 只证券绑定旧行情快照`
+                  : scoreStatus?.staleFiles
+                    ? `${scoreStatus.staleFiles} 个旧版本文件`
                   : scoreStatus?.ready
                     ? `${scoreStatus.rows} 行就绪`
                     : "暂无评分数据"}
@@ -2111,6 +2162,9 @@ export function App() {
           >
             补全短历史
           </button>
+          <button disabled={busy} onClick={startResearchPipeline}>
+            一键补齐 P1–P3
+          </button>
           <button
             className="secondary"
             disabled={busy}
@@ -2233,6 +2287,23 @@ export function App() {
             ) : null}
             <span>错误 {taskView.errors}</span>
           </div>
+          {taskView.stages && (
+            <div className="task-facts" aria-label="流水线阶段">
+              {Object.entries(taskView.stages).map(([stage, detail]) => (
+                <span key={stage}>
+                  {stage === "labels"
+                    ? "P1 标签"
+                    : stage === "features"
+                      ? "P2 特征"
+                      : stage === "scores"
+                        ? "P3 评分"
+                        : stage}
+                  ：{detail.done}/{detail.total} · {taskStatusName(detail.status)} ·
+                  错误 {detail.errors}
+                </span>
+              ))}
+            </div>
+          )}
           {taskView.errorItems.length > 0 && (
             <details className="task-error-details">
               <summary>查看全部 {taskView.errorItems.length} 条错误</summary>
@@ -3411,6 +3482,12 @@ export function App() {
               <small>
                 {featureCatalog.rowCount ?? 0} 行特征数据 · 不可读{" "}
                 {featureCatalog.unreadableFiles ?? 0}
+                {featureCatalog.staleSnapshotFiles
+                  ? ` · 旧快照 ${featureCatalog.staleSnapshotFiles}`
+                  : ""}
+                {featureCatalog.missingCurrentFiles
+                  ? ` · 缺失 ${featureCatalog.missingCurrentFiles}`
+                  : ""}
               </small>
             </article>
             <article>

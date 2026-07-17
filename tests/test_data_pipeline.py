@@ -103,3 +103,37 @@ def test_approximate_factor_source_is_recorded_as_quality_event(tmp_path):
     assert events[0]["event_type"] == "factor-approximation"
     assert events[0]["content_hash"] == pipeline.dataset_manifest_rows()[0]["content_hash"]
     assert report.status == "imported"
+
+
+def test_full_import_cannot_replace_complete_history_with_short_window(tmp_path):
+    def bars(days: list[int], close_offset: float = 0.0) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "date": date(2024, 1, day),
+                    "open": 10.0 + close_offset,
+                    "high": 11.0 + close_offset,
+                    "low": 9.0 + close_offset,
+                    "close": 10.5 + close_offset,
+                    "volume": 100,
+                    "amount": 1000.0,
+                }
+                for day in days
+            ]
+        )
+
+    factors = pd.DataFrame(
+        [{"date": date(1900, 1, 1), "qfq_factor": 1.0, "hfq_factor": 1.0}]
+    )
+    pipeline = DatasetPipeline(tmp_path / "output")
+    pipeline.initialize_catalog()
+    pipeline.import_security("sh", "600000", bars([1, 2, 3, 4, 5]), factors)
+
+    pipeline.import_security("sh", "600000", bars([4, 5], close_offset=1.0), factors)
+
+    latest = pd.read_parquet(pipeline.latest_derived_path("sh", "600000"))
+    assert list(pd.to_datetime(latest["date"]).dt.day) == [1, 2, 3, 4, 5]
+    assert latest.loc[pd.to_datetime(latest["date"]).dt.day == 5, "close"].iloc[0] == 11.5
+    event = pipeline.quality_events()[0]
+    assert event["event_type"] == "history-shrink-prevented"
+    assert "5 to 2" in event["message"]

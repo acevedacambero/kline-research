@@ -122,6 +122,53 @@ describe("App", () => {
     ).toHaveLength(4);
   });
 
+  it("runs the P1-P3 pipeline and renders stage progress", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        const body = path === "/api/pipeline/research/build"
+          ? { taskId: "pipeline-task", total: 1, stages: 3 }
+          : path === "/api/tasks/pipeline-task"
+            ? {
+                id: "pipeline-task",
+                jobType: "research_pipeline",
+                status: "completed",
+                resumable: true,
+                createdAt: "2026-07-18T00:00:00Z",
+                updatedAt: "2026-07-18T00:01:00Z",
+                done: 3,
+                total: 3,
+                rows: 520,
+                errors: [],
+                stage: "finished",
+                stages: {
+                  labels: { status: "completed", done: 1, total: 1, rows: 10, errors: 0 },
+                  features: { status: "completed", done: 1, total: 1, rows: 255, errors: 0 },
+                  scores: { status: "completed", done: 1, total: 1, rows: 255, errors: 0 },
+                },
+              }
+            : path === "/api/system/health"
+              ? { status: "ok", dataSource: "AkShare", cachePath: "data", versions: {} }
+              : path.startsWith("/api/tasks/recent")
+                ? []
+                : path.startsWith("/api/research/runs?")
+                  ? { version: "v1", runs: [], total: 0, unreadableFiles: 0 }
+                  : path.includes("/quality")
+                    ? { totalCached: 0 }
+                    : {};
+        return { ok: true, json: async () => body };
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "一键补齐 P1–P3" }));
+
+    expect(await screen.findByRole("heading", { name: "P1–P3 研究流水线" })).toBeInTheDocument();
+    expect(screen.getByLabelText("流水线阶段")).toHaveTextContent("P1 标签：1/1");
+    expect(screen.getByLabelText("流水线阶段")).toHaveTextContent("P3 评分：1/1");
+  });
+
   it("restores audit inputs from a bookmarked URL", async () => {
     window.history.replaceState(
       null,

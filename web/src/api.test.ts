@@ -73,4 +73,15 @@ describe('API errors', () => {
     await api.researchAcceptance()
     expect(fetchMock.mock.calls[0][0]).toBe('/api/system/research-acceptance')
   })
+
+  it('starts the snapshot-aware P1-P3 research pipeline', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.buildResearchPipeline('stale')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/pipeline/research/build')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: 'POST',
+      body: '{"scope":"stale"}',
+    })
+  })
 })

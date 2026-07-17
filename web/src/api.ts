@@ -7,7 +7,12 @@ export type Health = {
 };
 export type LabelStatus = {
   currentVersion: string;
+  snapshotSetHash?: string;
+  trackedSecurities?: number;
   files: number;
+  currentSnapshotFiles?: number;
+  staleSnapshotFiles?: number;
+  missingCurrentFiles?: number;
   supersededFiles: number;
   orphanedFiles: number;
   rows: number;
@@ -291,12 +296,19 @@ export type DriftReport = {
 };
 export type FeatureCatalog = {
   version: string;
+  snapshotSetHash?: string;
+  trackedSecurities?: number;
   featureColumns: string[];
   missingColumns: string[];
   securityCount: number;
   rowCount: number;
   unreadableFiles: number;
   unreadableExamples: string[];
+  currentSnapshotFiles?: number;
+  staleSnapshotFiles?: number;
+  missingCurrentFiles?: number;
+  orphanedFiles?: number;
+  supersededFiles?: number;
   ready: boolean;
 };
 export type PortfolioValidation = {
@@ -350,6 +362,11 @@ export type GenericTask = {
   currentSecurity?: string | null;
   speed?: number;
   etaSeconds?: number | null;
+  stage?: string;
+  stages?: Record<
+    string,
+    { status: string; done: number; total: number; rows: number; errors: number }
+  >;
 };
 export type ProviderMetric = {
   observations: number;
@@ -524,7 +541,14 @@ export type ResearchAcceptance = {
 };
 export type ScoreStatus = {
   currentVersion: string;
+  snapshotSetHash?: string;
+  trackedSecurities?: number;
   files: number;
+  currentSnapshotFiles?: number;
+  staleSnapshotFiles?: number;
+  missingCurrentFiles?: number;
+  orphanedFiles?: number;
+  supersededFiles?: number;
   rows: number;
   compatibleFiles: number;
   staleFiles: number;
@@ -611,6 +635,11 @@ export const api = {
   recentTasks: (limit = 10) =>
     request<GenericTask[]>(`/api/tasks/recent?limit=${limit}`),
   taskStatus: (taskId: string) => request<GenericTask>(`/api/tasks/${taskId}`),
+  buildResearchPipeline: (scope: "representative" | "stale" | "all" = "stale") =>
+    request<{ taskId: string; total: number; stages: number }>(
+      "/api/pipeline/research/build",
+      { method: "POST", body: JSON.stringify({ scope }) },
+    ),
   labelStatus: () => request<LabelStatus>("/api/labels/status"),
   bars: (exchange: string, code: string) =>
     request<Bar[]>(`/api/securities/${exchange}/${code}/bars`),

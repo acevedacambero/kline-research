@@ -351,7 +351,12 @@ def test_label_status_reports_stale_and_current_files(tmp_path):
     assert response.status_code == 200
     assert response.json() == {
         "currentVersion": "daily-v2-exit-delay",
+        "snapshotSetHash": "e3b0c44298fc1c149afbf4c8",
+        "trackedSecurities": 0,
         "files": 2,
+        "currentSnapshotFiles": 2,
+        "staleSnapshotFiles": 0,
+        "missingCurrentFiles": 0,
         "supersededFiles": 0,
         "orphanedFiles": 0,
         "rows": 2,
@@ -399,7 +404,8 @@ def test_label_status_uses_only_latest_snapshot_per_security(tmp_path):
 def test_label_status_excludes_orphans_when_current_manifest_exists(tmp_path):
     data_path = tmp_path / "data"
     seed_security(data_path)
-    root = data_path / "data-foundation-v1" / "labels" / "snapshot"
+    snapshot = DatasetPipeline(data_path).latest_snapshot_version("sh", "600000")
+    root = data_path / "data-foundation-v1" / "labels" / str(snapshot)
     current = root / "sh" / "600000.parquet"
     orphan = root / "sh" / "603124.parquet"
     current.parent.mkdir(parents=True)
@@ -423,6 +429,79 @@ def test_label_status_excludes_orphans_when_current_manifest_exists(tmp_path):
     assert body["orphanedFiles"] == 1
     assert body["compatibleFiles"] == 1
     assert body["staleFiles"] == 0
+
+
+def test_research_layers_report_old_data_snapshots_and_block_queries(tmp_path):
+    data_path = tmp_path / "data"
+    seed_security(data_path)
+    old_snapshot = "snapshot-old"
+
+    label_path = (
+        data_path
+        / "data-foundation-v1"
+        / "labels"
+        / old_snapshot
+        / "sh"
+        / "600000.parquet"
+    )
+    feature_path = (
+        data_path
+        / "data-foundation-v1"
+        / "features"
+        / "daily-features-v1"
+        / f"{old_snapshot}__factor__rule"
+        / "sh"
+        / "600000.parquet"
+    )
+    score_path = (
+        data_path
+        / "data-foundation-v1"
+        / "scores"
+        / "p3-rule-score-v1"
+        / f"{old_snapshot}__factor__rule__daily-features-v1"
+        / "sh"
+        / "600000.parquet"
+    )
+    for path in (label_path, feature_path, score_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [{"label_definition_version": "daily-v2-exit-delay"}]
+    ).to_parquet(label_path, index=False)
+    pd.DataFrame(
+        [
+            {
+                "bullish_alignment": True,
+                "return_20": 0.1,
+                "volume_ratio_5": 1.2,
+                "volatility_20": 0.02,
+            }
+        ]
+    ).to_parquet(feature_path, index=False)
+    pd.DataFrame(
+        [
+            {
+                "score": 80.0,
+                "usable": True,
+                "score_definition_version": "p3-rule-score-v1",
+            }
+        ]
+    ).to_parquet(score_path, index=False)
+
+    client = TestClient(create_app(Settings(data_path=data_path), FakeSource()))
+    labels = client.get("/api/labels/status").json()
+    features = client.get("/api/model/p7/features").json()
+    scores = client.get("/api/scores/status").json()
+
+    assert labels["currentSnapshotFiles"] == 0
+    assert labels["staleSnapshotFiles"] == 1
+    assert features["currentSnapshotFiles"] == 0
+    assert features["staleSnapshotFiles"] == 1
+    assert features["ready"] is False
+    assert scores["currentSnapshotFiles"] == 0
+    assert scores["staleSnapshotFiles"] == 1
+    response = client.post("/api/scan/p3", json={})
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "RESEARCH_ARTIFACT_STALE"
 
 
 def test_label_status_isolates_unreadable_parquet(tmp_path):
@@ -481,6 +560,52 @@ def seed_security(data_path):
     pipeline = DatasetPipeline(data_path)
     pipeline.initialize_catalog()
     pipeline.import_security("sh", "600000", pd.DataFrame(rows), factors)
+
+
+def test_research_pipeline_builds_p1_p2_p3_in_one_durable_task(tmp_path):
+    class PipelineSource(FakeSource):
+        def index_history(self, *args, **kwargs):
+            rows = []
+            for index in range(400):
+                close = 3000 + index
+                rows.append(
+                    {
+                        "date": date(2023, 1, 1) + timedelta(days=index),
+                        "open": close,
+                        "high": close + 1,
+                        "low": close - 1,
+                        "close": close,
+                    }
+                )
+            return pd.DataFrame(rows)
+
+    data_path = tmp_path / "data"
+    seed_security(data_path)
+    app = create_app(Settings(data_path=data_path), PipelineSource())
+
+    with TestClient(app) as client:
+        started = client.post(
+            "/api/pipeline/research/build", json={"scope": "representative"}
+        )
+        assert started.status_code == 202
+        assert started.json()["stages"] == 3
+        task_id = started.json()["taskId"]
+        for _ in range(200):
+            task = client.get(f"/api/pipeline/research/tasks/{task_id}").json()
+            if task["status"] not in {"queued", "running"}:
+                break
+            time.sleep(0.01)
+
+    assert task["status"] == "completed"
+    assert task["done"] == 3
+    assert task["total"] == 3
+    assert task["stage"] == "finished"
+    assert task["stages"]["labels"]["status"] == "completed"
+    assert task["stages"]["features"]["status"] == "completed"
+    assert task["stages"]["scores"]["status"] == "completed"
+    assert task["errors"] == []
+    assert len(list(data_path.glob("data-foundation-v1/features/*/*/sh/600000.parquet"))) == 1
+    assert len(list(data_path.glob("data-foundation-v1/scores/*/*/sh/600000.parquet"))) == 1
 
 
 def test_feature_build_task_and_point_in_time_audit(tmp_path):

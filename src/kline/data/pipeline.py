@@ -124,6 +124,42 @@ class DatasetPipeline:
             digest.update(pd.util.hash_pandas_object(frame, index=True).values.tobytes())
         return digest.hexdigest()
 
+    @staticmethod
+    def _merge_by_date(existing: pd.DataFrame, incoming: pd.DataFrame) -> pd.DataFrame:
+        return (
+            pd.concat([existing, incoming], ignore_index=True)
+            .sort_values("date")
+            .drop_duplicates("date", keep="last")
+            .reset_index(drop=True)
+        )
+
+    def _preserve_existing_history(
+        self,
+        exchange: str,
+        code: str,
+        raw: pd.DataFrame,
+        factors: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, str | None]:
+        paths = self.latest_bundle_paths(exchange, code)
+        if not paths or not all(path.exists() for path in paths):
+            return raw, factors, None
+        old_raw = pd.read_parquet(paths[0])
+        old_factors = pd.read_parquet(paths[1])
+        if old_raw.empty or "date" not in old_raw or "date" not in raw:
+            return raw, factors, None
+        existing_dates = set(pd.to_datetime(old_raw["date"]).dt.date)
+        incoming_dates = set(pd.to_datetime(raw["date"]).dt.date)
+        lost_dates = existing_dates - incoming_dates
+        if not lost_dates:
+            return raw, factors, None
+        merged_raw = self._merge_by_date(old_raw, raw)
+        merged_factors = self._merge_by_date(old_factors, factors)
+        message = (
+            f"prevented history shrink from {len(existing_dates)} to "
+            f"{len(incoming_dates)} dates; preserved {len(lost_dates)} existing dates"
+        )
+        return merged_raw, merged_factors, message
+
     def import_security(
         self,
         exchange: str,
@@ -134,6 +170,9 @@ class DatasetPipeline:
     ) -> ImportReport:
         if raw.empty or factors.empty:
             raise ValueError(f"AkShare returned empty raw/factor facts for {exchange}{code}")
+        raw, factors, shrink_prevention = self._preserve_existing_history(
+            exchange, code, raw, factors
+        )
         dataset_key = f"stock:{exchange}:{code}"
         content_hash = self._hash_frames(raw, factors)
         snapshot_version = "snapshot-" + content_hash[:16]
@@ -183,6 +222,13 @@ class DatasetPipeline:
                     ) values (?, 'factor-approximation', 'warning',
                         'one or more adjustment factors use an audited approximation', ?)""",
                     [dataset_key, content_hash],
+                )
+            if shrink_prevention:
+                connection.execute(
+                    """insert into data_quality_events(
+                        dataset_key, event_type, severity, message, content_hash
+                    ) values (?, 'history-shrink-prevented', 'warning', ?, ?)""",
+                    [dataset_key, shrink_prevention, content_hash],
                 )
             for length in (5, 10, 20, 60):
                 normalized[f"ma{length}"] = normalized["close_qfq"].rolling(length).mean().round(6)
@@ -257,18 +303,8 @@ class DatasetPipeline:
         if paths:
             old_raw = pd.read_parquet(paths[0])
             old_factors = pd.read_parquet(paths[1])
-            raw = (
-                pd.concat([old_raw, raw], ignore_index=True)
-                .sort_values("date")
-                .drop_duplicates("date", keep="last")
-                .reset_index(drop=True)
-            )
-            factors = (
-                pd.concat([old_factors, factors], ignore_index=True)
-                .sort_values("date")
-                .drop_duplicates("date", keep="last")
-                .reset_index(drop=True)
-            )
+            raw = self._merge_by_date(old_raw, raw)
+            factors = self._merge_by_date(old_factors, factors)
         return self.import_security(exchange, code, raw, factors, dataset_version)
 
     def cached_market_counts(self) -> dict[str, int]:

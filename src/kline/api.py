@@ -35,6 +35,7 @@ from .data.provider_policy import (
     SUPPORTED_EXCHANGES,
 )
 from .data.pipeline import DatasetPipeline
+from .artifact_lineage import ArtifactLineage, classify_artifacts
 from .data.tencent_source import TencentHttpSource
 from .data.security_identity import (
     SecurityIdentityError,
@@ -55,7 +56,7 @@ from .p1 import (
     resolve_executable_exit,
     sample_eligibility,
 )
-from .p1.batch import BatchLabelBuilder, LabelDatasetStore
+from .p1.batch import BatchLabelBuilder, LabelDatasetStore, LabelStoreReport
 from .p1.market_rules import is_no_limit_session, status_from_name
 from .score import SCORE_DEFINITION_VERSION, compute_rule_score
 from .score.batch import BatchScoreBuilder, ScoreDatasetStore
@@ -536,6 +537,123 @@ class ScoreTaskStore(_TaskFacade):
         return self._submit("scores", securities, operation)
 
 
+class ResearchPipelineTaskStore(_TaskFacade):
+    def __init__(self, coordinator, store, lock):
+        super().__init__(coordinator, store, lock, {"research_pipeline"})
+
+    def submit(self, pipeline, source, securities, names, output_root) -> str:
+        payload = {"securities": securities, "names": names}
+
+        def operation(payload, progress):
+            securities = payload["securities"]
+            stage_names = ("labels", "features", "scores")
+            state = {
+                "total": len(securities) * len(stage_names),
+                "done": 0,
+                "rows": 0,
+                "errors": [],
+                "currentSecurity": None,
+                "stage": "labels",
+                "stages": {
+                    stage: {
+                        "status": "pending",
+                        "total": len(securities),
+                        "done": 0,
+                        "rows": 0,
+                        "errors": 0,
+                    }
+                    for stage in stage_names
+                },
+            }
+
+            def update(stage, security, report=None, error=None):
+                stage_state = state["stages"][stage]
+                stage_state["done"] += 1
+                state["done"] += 1
+                state["currentSecurity"] = security
+                if report is not None:
+                    stage_state["rows"] += report.rows
+                    state["rows"] += report.rows
+                if error is not None:
+                    stage_state["errors"] += 1
+                    state["errors"].append(
+                        {"stage": stage, "security": security, "message": str(error)}
+                    )
+                progress(state)
+
+            label_builder = BatchLabelBuilder()
+            label_store = LabelDatasetStore(output_root)
+            benchmarks = {}
+            state["stages"]["labels"]["status"] = "running"
+            for security in securities:
+                exchange, code = security["exchange"], security["code"]
+                key = f"{exchange}{code}"
+                try:
+                    report = label_store.reuse_current(
+                        exchange,
+                        code,
+                        security["snapshot_version"],
+                        label_definition_version=VERSIONS["labelDefinitionVersion"],
+                        limit_rule_version=VERSIONS["limitRuleVersion"],
+                    )
+                    if report is None:
+                        if exchange not in benchmarks:
+                            benchmark = source.index_history(
+                                exchange, date(1990, 1, 1), date.today()
+                            )
+                            for column in ("open", "high", "low", "close"):
+                                benchmark[f"{column}_qfq"] = benchmark[column]
+                                benchmark[f"{column}_total_return"] = benchmark[column]
+                            benchmarks[exchange] = benchmark.to_dict("records")
+                        bars = pd.read_parquet(security["derived_path"]).to_dict("records")
+                        rows = label_builder.build(
+                            exchange,
+                            code,
+                            bars,
+                            benchmarks[exchange],
+                            security["snapshot_version"],
+                            st_status=status_from_name(payload["names"].get(key, "")).is_st,
+                        )
+                        report = (
+                            label_store.write(exchange, code, rows)
+                            if rows
+                            else LabelStoreReport("empty", "", 0)
+                        )
+                        if not rows:
+                            label_store.remove_security(exchange, code)
+                    update("labels", key, report=report)
+                except Exception as exc:
+                    update("labels", key, error=exc)
+            state["stages"]["labels"]["status"] = "completed"
+
+            state["stage"] = "features"
+            state["stages"]["features"]["status"] = "running"
+            feature_builder = BatchFeatureBuilder(FeatureDatasetStore(output_root))
+            feature_builder.build_many(
+                securities,
+                on_progress=lambda security, report, error: update(
+                    "features", security, report, error
+                ),
+            )
+            state["stages"]["features"]["status"] = "completed"
+
+            state["stage"] = "scores"
+            state["stages"]["scores"]["status"] = "running"
+            score_builder = BatchScoreBuilder(ScoreDatasetStore(output_root))
+            score_builder.build_many(
+                securities,
+                on_progress=lambda security, report, error: update(
+                    "scores", security, report, error
+                ),
+            )
+            state["stages"]["scores"]["status"] = "completed"
+            state["stage"] = "finished"
+            state["currentSecurity"] = None
+            return state
+
+        return self._submit("research_pipeline", payload, operation)
+
+
 class HistoryBackfillTaskStore(_TaskFacade):
     def __init__(self, coordinator, store, lock):
         super().__init__(coordinator, store, lock, {"history_backfill"})
@@ -719,6 +837,7 @@ def build_research_readiness(
                 "scoresCurrent": (
                     int(scores.get("files", 0)) > 0
                     and int(scores.get("compatibleFiles", 0)) == int(scores.get("files", 0))
+                    and int(scores.get("staleFiles", 0)) == 0
                 ),
             }
         )
@@ -878,6 +997,9 @@ def create_app(
     label_tasks = LabelTaskStore(coordinator, job_store, submission_lock)
     feature_tasks = FeatureTaskStore(coordinator, job_store, submission_lock)
     score_tasks = ScoreTaskStore(coordinator, job_store, submission_lock)
+    research_pipeline_tasks = ResearchPipelineTaskStore(
+        coordinator, job_store, submission_lock
+    )
     history_backfill_service = HistoryBackfillService(
         pipeline,
         download_source,
@@ -946,12 +1068,28 @@ def create_app(
             ) from exc
 
     def current_cached_keys() -> set[tuple[str, str]]:
+        return set(current_snapshot_versions())
+
+    def current_snapshot_versions() -> dict[tuple[str, str], str]:
         return {
-            (item["exchange"], item["code"])
+            (item["exchange"], item["code"]): item["snapshot_version"]
             for item in pipeline.cached_securities()
             if item["exchange"] in SUPPORTED_EXCHANGES
             and is_security_identity_valid(item["exchange"], item["code"])
         }
+
+    def artifact_lineage(pattern: str) -> ArtifactLineage:
+        return classify_artifacts(
+            settings.data_path.glob(pattern),
+            current_snapshot_versions(),
+        )
+
+    def current_snapshot_set_hash() -> str:
+        payload = "\n".join(
+            f"{exchange}:{code}:{snapshot}"
+            for (exchange, code), snapshot in sorted(current_snapshot_versions().items())
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
 
     def current_approximate_securities() -> set[str]:
         events = pipeline.quality_events(limit=100_000)
@@ -1058,10 +1196,22 @@ def create_app(
     feature_tasks.on_finish = invalidate_feature_catalog
     score_tasks.on_finish = invalidate_score_status
 
+    def invalidate_research_pipeline_status():
+        invalidate_label_status()
+        invalidate_feature_catalog()
+        invalidate_score_status()
+
+    research_pipeline_tasks.on_finish = invalidate_research_pipeline_status
+
     @app.get("/api/labels/status")
     def label_dataset_status():
+        snapshot_set_hash = current_snapshot_set_hash()
         with label_status_lock:
-            if time.monotonic() < float(label_status_cache["expires"]):
+            if (
+                time.monotonic() < float(label_status_cache["expires"])
+                and (label_status_cache.get("value") or {}).get("snapshotSetHash")
+                == snapshot_set_hash
+            ):
                 return label_status_cache["value"]
         current_version = VERSIONS["labelDefinitionVersion"]
         if label_status_path.exists():
@@ -1069,6 +1219,7 @@ def create_app(
                 persisted = json.loads(label_status_path.read_text(encoding="utf-8"))
                 if (
                     persisted.get("currentVersion") == current_version
+                    and persisted.get("snapshotSetHash") == snapshot_set_hash
                     and "unreadableFiles" in persisted
                     and "incompatibleFiles" in persisted
                     and "supersededFiles" in persisted
@@ -1079,20 +1230,8 @@ def create_app(
                     return persisted
             except (OSError, ValueError, AttributeError):
                 pass
-        all_paths = sorted(
-            settings.data_path.glob("data-foundation-v1/labels/*/*/*.parquet"),
-            key=lambda item: item.stat().st_mtime,
-        )
-        unfiltered_count = len(all_paths)
-        current_keys = current_cached_keys()
-        if current_keys:
-            all_paths = [
-                path for path in all_paths if (path.parent.name, path.stem) in current_keys
-            ]
-        latest_paths: dict[tuple[str, str], Path] = {}
-        for path in all_paths:
-            latest_paths[(path.parent.name, path.stem)] = path
-        paths = sorted(latest_paths.values())
+        lineage = artifact_lineage("data-foundation-v1/labels/*/*/*.parquet")
+        paths = sorted(lineage.current_paths.values())
         version_counts: dict[str, int] = {}
         rows = 0
         compatible_files = 0
@@ -1150,13 +1289,18 @@ def create_app(
                 delayed_exit_files += 1
         result = {
             "currentVersion": current_version,
+            "snapshotSetHash": snapshot_set_hash,
+            "trackedSecurities": len(current_snapshot_versions()),
             "files": len(paths),
-            "supersededFiles": len(all_paths) - len(paths),
-            "orphanedFiles": unfiltered_count - len(all_paths),
+            "currentSnapshotFiles": len(paths),
+            "staleSnapshotFiles": len(lineage.stale_paths),
+            "missingCurrentFiles": len(lineage.missing_keys),
+            "supersededFiles": len(lineage.superseded_paths),
+            "orphanedFiles": len(lineage.orphan_paths),
             "rows": rows,
             "versionCounts": version_counts,
             "compatibleFiles": compatible_files,
-            "staleFiles": len(paths) - compatible_files,
+            "staleFiles": len(lineage.stale_paths) + len(paths) - compatible_files,
             "unreadableFiles": len(unreadable_files),
             "unreadableExamples": unreadable_files[:20],
             "incompatibleFiles": incompatible_files,
@@ -1678,6 +1822,7 @@ def create_app(
             start,
             date.today(),
             settings.security_fetch_timeout_seconds,
+            incremental=True,
             job_type="repair",
         )
         return {"taskId": task_id, "total": len(securities), "statuses": request.statuses}
@@ -1847,6 +1992,84 @@ def create_app(
             )
         return score_tasks.items[task_id]
 
+    @app.post("/api/pipeline/research/build", status_code=202)
+    def build_research_pipeline(request: ImportRequest):
+        research_pipeline_tasks.active()
+        cached = [
+            item
+            for item in pipeline.cached_securities()
+            if item["exchange"] in SUPPORTED_EXCHANGES
+            and is_security_identity_valid(item["exchange"], item["code"])
+        ]
+        if request.scope == "representative":
+            cached = cached[:3]
+        elif request.scope == "stale":
+            label_lineage = artifact_lineage(
+                "data-foundation-v1/labels/*/*/*.parquet"
+            )
+            feature_lineage = artifact_lineage(
+                f"data-foundation-v1/features/{FEATURE_DEFINITION_VERSION}/*/*/*.parquet"
+            )
+            score_lineage = artifact_lineage(
+                f"data-foundation-v1/scores/{SCORE_DEFINITION_VERSION}/*/*/*.parquet"
+            )
+            rebuild_keys = set().union(
+                label_lineage.stale_paths,
+                label_lineage.missing_keys,
+                feature_lineage.stale_paths,
+                feature_lineage.missing_keys,
+                score_lineage.stale_paths,
+                score_lineage.missing_keys,
+            )
+            cached = [
+                item for item in cached if (item["exchange"], item["code"]) in rebuild_keys
+            ]
+        elif request.scope != "all":
+            raise HTTPException(
+                422,
+                detail={
+                    "code": "INVALID_PIPELINE_SCOPE",
+                    "message": "scope must be representative, stale, or all",
+                },
+            )
+        if not cached:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "RESEARCH_PIPELINE_UP_TO_DATE",
+                    "message": "当前研究数据层已经与行情快照一致",
+                },
+            )
+        try:
+            names = {
+                f"{item['exchange']}{item['code']}": item["name"]
+                for item in securities_list()
+            }
+        except Exception:
+            names = {}
+        cached = [
+            {
+                **item,
+                "st_status": status_from_name(
+                    names.get(f"{item['exchange']}{item['code']}", "")
+                ).is_st,
+            }
+            for item in cached
+        ]
+        task_id = research_pipeline_tasks.submit(
+            pipeline, download_source, cached, names, settings.data_path
+        )
+        return {"taskId": task_id, "total": len(cached), "stages": 3}
+
+    @app.get("/api/pipeline/research/tasks/{task_id}")
+    def research_pipeline_task_status(task_id: str):
+        if task_id not in research_pipeline_tasks.items:
+            raise HTTPException(
+                404,
+                detail={"code": "TASK_NOT_FOUND", "message": "pipeline task not found"},
+            )
+        return research_pipeline_tasks.items[task_id]
+
     def read_dataset_glob(
         pattern: str,
         unique_keys: list[str] | None = None,
@@ -1857,23 +2080,16 @@ def create_app(
     ) -> pd.DataFrame:
         frames = []
         paths = sorted(settings.data_path.glob(pattern), key=lambda path: path.stat().st_mtime)
-        current_keys = current_cached_keys()
-        if current_keys:
-            paths = [
-                path
-                for path in paths
-                if path.name.endswith(".manifest.json")
-                or (path.parent.name, path.stem) in current_keys
-            ]
+        parquet_paths = [path for path in paths if not path.name.endswith(".manifest.json")]
+        paths = list(
+            classify_artifacts(parquet_paths, current_snapshot_versions()).current_paths.values()
+        )
         if latest_per_security:
             latest: dict[tuple[str, str], Path] = {}
             for path in paths:
-                if not path.name.endswith(".manifest.json"):
-                    latest[(path.parent.name, path.stem)] = path
+                latest[(path.parent.name, path.stem)] = path
             paths = list(latest.values())
         for path in paths:
-            if path.name.endswith(".manifest.json"):
-                continue
             selected = columns
             if columns is not None:
                 parquet = pq.ParquetFile(path)
@@ -1909,6 +2125,29 @@ def create_app(
                     "code": "RESEARCH_ARTIFACT_UNREADABLE",
                     "message": "研究数据包含不可读文件，请先重建对应数据层",
                     "artifacts": failures,
+                },
+            )
+        stale = [
+            {
+                "artifact": name,
+                "staleSnapshotFiles": int(status.get("staleSnapshotFiles", 0)),
+                "missingCurrentFiles": int(status.get("missingCurrentFiles", 0)),
+            }
+            for name, status in artifacts.items()
+            if int(status.get("trackedSecurities", 0)) > 0
+            and (
+                int(status.get("staleSnapshotFiles", 0)) > 0
+                or (name in {"features", "scores"} and not bool(status.get("ready")))
+                or (name == "labels" and int(status.get("files", 0)) == 0)
+            )
+        ]
+        if stale:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "RESEARCH_ARTIFACT_STALE",
+                    "message": "研究数据与当前行情快照不一致，请先重建对应数据层",
+                    "artifacts": stale,
                 },
             )
         mismatches = [
@@ -2125,28 +2364,40 @@ def create_app(
 
     @app.get("/api/model/p7/features")
     def p7_feature_catalog():
+        snapshot_set_hash = current_snapshot_set_hash()
         with feature_catalog_lock:
-            if time.monotonic() < float(feature_catalog_cache["expires"]):
+            if (
+                time.monotonic() < float(feature_catalog_cache["expires"])
+                and (feature_catalog_cache.get("value") or {}).get("snapshotSetHash")
+                == snapshot_set_hash
+            ):
                 return feature_catalog_cache["value"]
         expected = ["bullish_alignment", "return_20", "volume_ratio_5", "volatility_20"]
-        latest_paths: dict[tuple[str, str], Path] = {}
-        for path in sorted(
-            settings.data_path.glob("data-foundation-v1/features/*/*/*/*.parquet"),
-            key=lambda item: item.stat().st_mtime,
-        ):
-            latest_paths[(path.parent.name, path.stem)] = path
-        current_keys = current_cached_keys()
-        if current_keys:
-            latest_paths = {key: path for key, path in latest_paths.items() if key in current_keys}
+        snapshots = current_snapshot_versions()
+        feature_paths = list(
+            settings.data_path.glob("data-foundation-v1/features/*/*/*/*.parquet")
+        )
+        if snapshots:
+            feature_paths = [
+                path for path in feature_paths if path.parents[2].name == FEATURE_DEFINITION_VERSION
+            ]
+        lineage = classify_artifacts(feature_paths, snapshots)
+        latest_paths = lineage.current_paths
         if not latest_paths:
             result = {
                 "version": "daily-features-v1",
+                "snapshotSetHash": snapshot_set_hash,
+                "trackedSecurities": len(current_snapshot_versions()),
                 "featureColumns": [],
                 "missingColumns": expected,
                 "securityCount": 0,
                 "rowCount": 0,
                 "unreadableFiles": 0,
                 "unreadableExamples": [],
+                "currentSnapshotFiles": 0,
+                "staleSnapshotFiles": len(lineage.stale_paths),
+                "missingCurrentFiles": len(lineage.missing_keys),
+                "orphanedFiles": len(lineage.orphan_paths),
                 "ready": False,
             }
             with feature_catalog_lock:
@@ -2169,13 +2420,26 @@ def create_app(
         security_count = len(latest_paths)
         result = {
             "version": "daily-features-v1",
+            "snapshotSetHash": snapshot_set_hash,
+            "trackedSecurities": len(current_snapshot_versions()),
             "featureColumns": sorted(columns),
             "missingColumns": missing,
             "securityCount": security_count,
+            "currentSnapshotFiles": security_count,
+            "staleSnapshotFiles": len(lineage.stale_paths),
+            "missingCurrentFiles": len(lineage.missing_keys),
+            "orphanedFiles": len(lineage.orphan_paths),
+            "supersededFiles": len(lineage.superseded_paths),
             "rowCount": row_count,
             "unreadableFiles": len(unreadable),
             "unreadableExamples": unreadable[:20],
-            "ready": bool(security_count and not missing and not unreadable),
+            "ready": bool(
+                security_count
+                and not missing
+                and not unreadable
+                and not lineage.stale_paths
+                and not lineage.missing_keys
+            ),
         }
         with feature_catalog_lock:
             feature_catalog_cache.update(value=result, expires=time.monotonic() + 60)
@@ -2183,13 +2447,24 @@ def create_app(
 
     @app.get("/api/scores/status")
     def score_dataset_status():
+        snapshot_set_hash = current_snapshot_set_hash()
         with score_status_lock:
-            if time.monotonic() < float(score_status_cache["expires"]):
+            if (
+                time.monotonic() < float(score_status_cache["expires"])
+                and (score_status_cache.get("value") or {}).get("snapshotSetHash")
+                == snapshot_set_hash
+            ):
                 return score_status_cache["value"]
-        paths = sorted(settings.data_path.glob("data-foundation-v1/scores/*/*/*/*.parquet"))
-        current_keys = current_cached_keys()
-        if current_keys:
-            paths = [path for path in paths if (path.parent.name, path.stem) in current_keys]
+        snapshots = current_snapshot_versions()
+        score_paths = list(
+            settings.data_path.glob("data-foundation-v1/scores/*/*/*/*.parquet")
+        )
+        if snapshots:
+            score_paths = [
+                path for path in score_paths if path.parents[2].name == SCORE_DEFINITION_VERSION
+            ]
+        lineage = classify_artifacts(score_paths, snapshots)
+        paths = sorted(lineage.current_paths.values())
         rows = 0
         compatible = 0
         unreadable: list[str] = []
@@ -2230,15 +2505,24 @@ def create_app(
                 unreadable.append(f"{path.name}: {exc}")
         result = {
             "currentVersion": SCORE_DEFINITION_VERSION,
+            "snapshotSetHash": snapshot_set_hash,
+            "trackedSecurities": len(current_snapshot_versions()),
             "files": len(paths),
+            "currentSnapshotFiles": len(paths),
+            "staleSnapshotFiles": len(lineage.stale_paths),
+            "missingCurrentFiles": len(lineage.missing_keys),
+            "orphanedFiles": len(lineage.orphan_paths),
+            "supersededFiles": len(lineage.superseded_paths),
             "rows": rows,
             "compatibleFiles": compatible,
-            "staleFiles": len(paths) - compatible,
+            "staleFiles": len(lineage.stale_paths) + len(paths) - compatible,
             "unreadableFiles": len(unreadable),
             "unreadableExamples": unreadable[:20],
             "incompatibleFiles": incompatible,
             "legacyFiles": legacy,
-            "ready": bool(paths) and compatible == len(paths) and not unreadable,
+            "ready": bool(paths) and compatible == len(paths) and not unreadable and not (
+                lineage.stale_paths or lineage.missing_keys
+            ),
         }
         with score_status_lock:
             score_status_cache.update(value=result, expires=time.monotonic() + 60)
