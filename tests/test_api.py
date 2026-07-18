@@ -336,6 +336,21 @@ def test_feature_build_resumes_user_cancelled_task_with_same_id(tmp_path):
         assert response.json()["taskId"] == cancelled.id
 
 
+def test_feature_build_does_not_resume_when_requested_payload_changed(tmp_path):
+    data_path = tmp_path / "data"
+    jobs_path = data_path / "jobs.duckdb"
+    seed_security(data_path)
+    with JobStore(jobs_path) as store:
+        interrupted = store.create("features", [], resumable=True)
+        store.transition(interrupted.id, JobStatus.RUNNING)
+
+    app = create_app(Settings(data_path=data_path), FakeSource())
+    with TestClient(app) as client:
+        response = client.post("/api/features/build", json={"scope": "all"})
+        assert response.status_code == 202
+        assert response.json()["taskId"] != interrupted.id
+
+
 def test_label_failed_scope_retries_only_previous_error_securities(tmp_path):
     data_path = tmp_path / "data"
     seed_security(data_path)

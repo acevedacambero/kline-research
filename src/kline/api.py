@@ -358,7 +358,9 @@ class _TaskFacade:
                 job
                 for status in (JobStatus.INTERRUPTED, JobStatus.CANCELLED)
                 for job in self.store.list(status=status)
-                if job.job_type == job_type and job.resumable
+                if job.job_type == job_type
+                and job.resumable
+                and job.payload == payload
             ]
             if recoverable:
                 latest = max(recoverable, key=lambda item: item.updated_at)
