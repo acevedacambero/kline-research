@@ -14,9 +14,9 @@ import time
 
 import pandas as pd
 import pyarrow.parquet as pq
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -1090,6 +1090,18 @@ def create_app(
         settings.backup_path or settings.data_path.parent / "backups",
         exclude_paths=(jobs_db_path, jobs_db_path.with_name(jobs_db_path.name + ".wal")),
     )
+
+    def read_backup_checksum(path: Path) -> str | None:
+        try:
+            checksum = path.with_suffix(".sha256").read_text(encoding="utf-8").split()[0]
+        except (FileNotFoundError, OSError, IndexError, UnicodeError):
+            return None
+        if len(checksum) != 64 or any(
+            character not in "0123456789abcdefABCDEF" for character in checksum
+        ):
+            return None
+        return checksum.lower()
+
     artifact_cleanup_plan_path = settings.data_path / "artifact-cleanup-plan-latest.json"
     artifact_cleanup_receipt_root = settings.data_path / "artifact-cleanup-receipts"
     history_backfill_scan_lock = threading.Lock()
@@ -1608,10 +1620,12 @@ def create_app(
         backup_manager.backup_path.mkdir(parents=True, exist_ok=True)
         items = []
         for path in sorted(backup_manager.backup_path.glob("kline-data-*.tar.gz"), reverse=True):
+            checksum = read_backup_checksum(path)
             items.append(
                 {
                     "name": path.name,
                     "size": path.stat().st_size,
+                    "sha256": checksum,
                     "createdAt": datetime.fromtimestamp(
                         path.stat().st_mtime, tz=timezone.utc
                     ).isoformat(),
@@ -1656,6 +1670,55 @@ def create_app(
             raise HTTPException(
                 409, detail={"code": "BACKUP_INVALID", "message": str(exc)}
             ) from exc
+
+    @app.get("/api/system/backups/{name}/download")
+    def download_data_backup(name: str):
+        if Path(name).name != name or not name.endswith(".tar.gz"):
+            raise HTTPException(422, detail={"code": "INVALID_BACKUP_NAME"})
+        path = backup_manager.backup_path / name
+        if not path.is_file():
+            raise HTTPException(404, detail={"code": "BACKUP_NOT_FOUND"})
+        headers = {"Cache-Control": "private, no-store"}
+        checksum = read_backup_checksum(path)
+        if checksum:
+            headers["X-Checksum-SHA256"] = checksum
+        return FileResponse(
+            path,
+            media_type="application/gzip",
+            filename=name,
+            headers=headers,
+        )
+
+    @app.delete("/api/system/backups/{name}")
+    def delete_data_backup(
+        name: str, sha256: str = Query(pattern=r"^[0-9a-fA-F]{64}$")
+    ):
+        if Path(name).name != name or not name.endswith(".tar.gz"):
+            raise HTTPException(422, detail={"code": "INVALID_BACKUP_NAME"})
+        path = backup_manager.backup_path / name
+        checksum_path = path.with_suffix(".sha256")
+        with submission_lock:
+            active = coordinator.active()
+            if active:
+                raise HTTPException(
+                    409,
+                    detail={
+                        "code": "HEAVY_JOB_ALREADY_RUNNING",
+                        "message": f"已有后台任务运行中：{active[0].id}",
+                        "taskId": active[0].id,
+                    },
+                )
+            if not path.is_file():
+                raise HTTPException(404, detail={"code": "BACKUP_NOT_FOUND"})
+            recorded = read_backup_checksum(path)
+            if not recorded:
+                raise HTTPException(409, detail={"code": "BACKUP_CHECKSUM_MISSING"})
+            if recorded.lower() != sha256.lower():
+                raise HTTPException(409, detail={"code": "BACKUP_CHECKSUM_MISMATCH"})
+            size = path.stat().st_size
+            path.unlink()
+            checksum_path.unlink(missing_ok=True)
+        return {"deleted": True, "name": name, "size": size, "sha256": recorded}
 
     @app.get("/api/system/artifact-cleanup")
     def artifact_cleanup_status():

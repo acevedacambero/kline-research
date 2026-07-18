@@ -94,11 +94,51 @@ def test_coverage_schedule_and_backup_operations_are_auditable(tmp_path):
             time.sleep(0.01)
         listed = client.get("/api/system/backups").json()
         assert len(listed["items"]) == 1
+        backup_item = listed["items"][0]
+        assert len(backup_item["sha256"]) == 64
         verified = client.get(
-            f"/api/system/backups/{listed['items'][0]['name']}/verify"
+            f"/api/system/backups/{backup_item['name']}/verify"
         )
         assert verified.status_code == 200
         assert verified.json()["valid"] is True
+        downloaded = client.get(
+            f"/api/system/backups/{backup_item['name']}/download"
+        )
+        assert downloaded.status_code == 200
+        assert downloaded.headers["content-disposition"].endswith(
+            f'filename="{backup_item["name"]}"'
+        )
+        assert downloaded.headers["x-checksum-sha256"] == backup_item["sha256"]
+        assert downloaded.headers["cache-control"] == "private, no-store"
+        assert downloaded.content
+
+        checksum_path = (Path(listed["path"]) / backup_item["name"]).with_suffix(
+            ".sha256"
+        )
+        checksum_path.write_text("invalid\n", encoding="utf-8")
+        assert client.get("/api/system/backups").json()["items"][0]["sha256"] is None
+        missing_checksum = client.delete(
+            f"/api/system/backups/{backup_item['name']}",
+            params={"sha256": backup_item["sha256"]},
+        )
+        assert missing_checksum.status_code == 409
+        assert missing_checksum.json()["detail"]["code"] == "BACKUP_CHECKSUM_MISSING"
+        checksum_path.write_text(
+            f"{backup_item['sha256']}  {backup_item['name']}\n", encoding="utf-8"
+        )
+
+        mismatched = client.delete(
+            f"/api/system/backups/{backup_item['name']}",
+            params={"sha256": "0" * 64},
+        )
+        assert mismatched.status_code == 409
+        deleted = client.delete(
+            f"/api/system/backups/{backup_item['name']}",
+            params={"sha256": backup_item["sha256"]},
+        )
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] is True
+        assert client.get("/api/system/backups").json()["items"] == []
 
 
 def test_research_readiness_separates_refresh_audit_and_model_gates():

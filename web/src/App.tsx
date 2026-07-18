@@ -824,6 +824,43 @@ export function App() {
     }
   }
 
+  function downloadLatestBackup() {
+    const item = backups?.items?.[0];
+    if (!item) return;
+    const link = document.createElement("a");
+    link.href = api.backupDownloadUrl(item.name);
+    link.download = item.name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setMessage(
+      `已开始下载 ${item.name}${item.sha256 ? `；SHA256 ${item.sha256}` : ""}`,
+    );
+  }
+
+  async function deleteLatestBackup() {
+    const item = backups?.items?.[0];
+    if (!item?.sha256) {
+      setMessage("备份缺少 SHA256 校验值，拒绝删除");
+      return;
+    }
+    const confirmed = window.confirm(
+      `仅在 ${item.name} 已下载到本地并校验无误后继续。将从 VPS 永久删除该临时备份，确认吗？`,
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      await api.deleteBackup(item.name, item.sha256);
+      const latest = await api.backups();
+      setBackups(latest);
+      setMessage(`已从 VPS 删除临时备份 ${item.name}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "删除临时备份失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function planArtifactCleanup() {
     setBusy(true);
     setMessage("正在扫描孤儿和已被替代的衍生产物…");
@@ -2277,6 +2314,20 @@ export function App() {
               {maintenance?.enabled ? "关闭自动更新" : "开启自动更新"}
             </button>
             <button className="secondary" disabled={busy} onClick={createBackup}>生成临时备份并校验</button>
+            <button
+              className="secondary"
+              disabled={busy || !backups?.items?.length}
+              onClick={downloadLatestBackup}
+            >
+              下载最新备份到本地
+            </button>
+            <button
+              className="danger"
+              disabled={busy || !backups?.items?.[0]?.sha256}
+              onClick={deleteLatestBackup}
+            >
+              删除 VPS 临时备份
+            </button>
             <button className="secondary" disabled={busy} onClick={planArtifactCleanup}>
               扫描旧产物
             </button>

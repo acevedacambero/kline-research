@@ -195,7 +195,7 @@ P7 模型注册表支持显式选择“当前模型”。只有状态为 `traine
 
 日常维护支持手动“更新今日行情”和工作日定时增量更新。增量任务只请求最近行情窗口，再与不可变历史事实合并生成新快照。
 
-VPS 只作为备份生成时的临时中转，不长期保存归档。网页备份显示完成后，应立即在项目目录的 Windows PowerShell 中执行：
+VPS 只作为备份生成时的临时中转，不长期保存归档。网页现在支持下载已校验的最新备份，并要求使用归档 SHA-256 二次确认后才能删除 VPS 副本。大型全量备份仍建议在项目目录的 Windows PowerShell 中执行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\pull_server_backups.ps1

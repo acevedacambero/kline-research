@@ -97,4 +97,15 @@ describe('API errors', () => {
       body: JSON.stringify({ plan_id: 'a'.repeat(64), mode: 'quarantine' }),
     })
   })
+
+  it('downloads and checksum-confirms deletion of a server backup', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    const name = 'kline-data-20260718T010203Z.tar.gz'
+    const sha256 = 'a'.repeat(64)
+    expect(api.backupDownloadUrl(name)).toBe(`/api/system/backups/${name}/download`)
+    await api.deleteBackup(name, sha256)
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/system/backups/${name}?sha256=${sha256}`)
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+  })
 })

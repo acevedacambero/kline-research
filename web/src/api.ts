@@ -478,7 +478,7 @@ export type MaintenanceSchedule = {
 };
 export type BackupList = {
   path: string;
-  items: Array<{ name: string; size: number; createdAt: string }>;
+  items: Array<{ name: string; size: number; createdAt: string; sha256?: string | null }>;
 };
 export type ArtifactCleanupPlan = {
   version: string;
@@ -756,6 +756,13 @@ export const api = {
   backups: () => request<BackupList>("/api/system/backups"),
   createBackup: () =>
     request<{ taskId: string }>("/api/system/backups", { method: "POST" }),
+  backupDownloadUrl: (name: string) =>
+    `/api/system/backups/${encodeURIComponent(name)}/download`,
+  deleteBackup: (name: string, sha256: string) =>
+    request<{ deleted: boolean; name: string; size: number; sha256: string }>(
+      `/api/system/backups/${encodeURIComponent(name)}?sha256=${encodeURIComponent(sha256)}`,
+      { method: "DELETE" },
+    ),
   researchRuns: (kind = "", limit = 100) =>
     request<ResearchRunList>(
       `/api/research/runs?limit=${limit}${kind ? `&kind=${encodeURIComponent(kind)}` : ""}`,

@@ -176,6 +176,44 @@ describe("App", () => {
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("不能撤销"));
   });
 
+  it("deletes a downloaded VPS backup only with checksum confirmation", async () => {
+    const name = "kline-data-20260718T010203Z.tar.gz";
+    const sha256 = "b".repeat(64);
+    let deleted = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      let body: unknown = {};
+      if (path === "/api/system/health") {
+        body = { status: "ok", dataSource: "AkShare", cachePath: "data", versions: {} };
+      } else if (path === "/api/system/backups") {
+        body = {
+          path: "/backups",
+          items: deleted ? [] : [{ name, size: 8192, createdAt: "2026-07-18T01:02:03Z", sha256 }],
+        };
+      } else if (path === `/api/system/backups/${name}?sha256=${sha256}`) {
+        deleted = true;
+        body = { deleted: true, name, size: 8192, sha256 };
+      } else if (path.startsWith("/api/tasks/recent")) {
+        body = [];
+      } else if (path.includes("/quality")) {
+        body = { totalCached: 0 };
+      }
+      return { ok: true, json: async () => body };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "删除 VPS 临时备份" }));
+
+    expect(await screen.findByText(`已从 VPS 删除临时备份 ${name}`)).toBeInTheDocument();
+    const deleteCall = fetchMock.mock.calls.find(
+      ([input]) => String(input).includes(`/api/system/backups/${name}?sha256=`),
+    );
+    expect(deleteCall?.[1]).toMatchObject({ method: "DELETE" });
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("已下载到本地"));
+  });
+
   it("runs the P1-P3 pipeline and renders stage progress", async () => {
     vi.stubGlobal(
       "fetch",
