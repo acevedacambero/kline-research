@@ -528,8 +528,9 @@ class LabelTaskStore(_TaskFacade):
 
 
 class FeatureTaskStore(_TaskFacade):
-    def __init__(self, coordinator, store, lock):
+    def __init__(self, coordinator, store, lock, workers: int):
         super().__init__(coordinator, store, lock, {"features"})
+        self.workers = max(1, min(workers, 3))
 
     def submit(self, securities, output_root) -> str:
         def operation(payload, progress):
@@ -540,7 +541,9 @@ class FeatureTaskStore(_TaskFacade):
                 "errors": [],
                 "currentSecurity": None,
             }
-            builder = BatchFeatureBuilder(FeatureDatasetStore(output_root))
+            builder = BatchFeatureBuilder(
+                FeatureDatasetStore(output_root), workers=self.workers
+            )
 
             def on_progress(security, report, error):
                 state["currentSecurity"] = security
@@ -594,8 +597,9 @@ class ScoreTaskStore(_TaskFacade):
 
 
 class ResearchPipelineTaskStore(_TaskFacade):
-    def __init__(self, coordinator, store, lock):
+    def __init__(self, coordinator, store, lock, workers: int):
         super().__init__(coordinator, store, lock, {"research_pipeline"})
+        self.workers = max(1, min(workers, 3))
 
     def submit(
         self,
@@ -693,7 +697,9 @@ class ResearchPipelineTaskStore(_TaskFacade):
 
             state["stage"] = "features"
             state["stages"]["features"]["status"] = "running"
-            feature_builder = BatchFeatureBuilder(FeatureDatasetStore(output_root))
+            feature_builder = BatchFeatureBuilder(
+                FeatureDatasetStore(output_root), workers=self.workers
+            )
             feature_builder.build_many(
                 securities,
                 on_progress=lambda security, report, error: update(
@@ -1297,10 +1303,12 @@ def create_app(
     submission_lock = threading.Lock()
     tasks = TaskStore(coordinator, job_store, submission_lock, settings.download_workers)
     label_tasks = LabelTaskStore(coordinator, job_store, submission_lock)
-    feature_tasks = FeatureTaskStore(coordinator, job_store, submission_lock)
+    feature_tasks = FeatureTaskStore(
+        coordinator, job_store, submission_lock, settings.download_workers
+    )
     score_tasks = ScoreTaskStore(coordinator, job_store, submission_lock)
     research_pipeline_tasks = ResearchPipelineTaskStore(
-        coordinator, job_store, submission_lock
+        coordinator, job_store, submission_lock, settings.download_workers
     )
     artifact_cleanup_tasks = ArtifactCleanupTaskStore(
         coordinator, job_store, submission_lock
