@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 import os
 from pathlib import Path
+import threading
 import time
 
 import pandas as pd
@@ -294,6 +295,22 @@ def test_feature_build_resumes_interrupted_task_with_same_id(tmp_path):
         assert response.json()["taskId"] == interrupted.id
 
 
+def test_feature_build_resumes_user_cancelled_task_with_same_id(tmp_path):
+    data_path = tmp_path / "data"
+    jobs_path = data_path / "jobs.duckdb"
+    data_path.mkdir(parents=True)
+    with JobStore(jobs_path) as store:
+        cancelled = store.create("features", [], resumable=True)
+        store.cancel(cancelled.id)
+
+    app = create_app(Settings(data_path=data_path), FakeSource())
+    with TestClient(app) as client:
+        assert client.get("/api/system/health").json()["recoverableTasks"] == 1
+        response = client.post("/api/features/build", json={"scope": "all"})
+        assert response.status_code == 202
+        assert response.json()["taskId"] == cancelled.id
+
+
 def test_label_failed_scope_retries_only_previous_error_securities(tmp_path):
     data_path = tmp_path / "data"
     seed_security(data_path)
@@ -323,6 +340,36 @@ def test_generic_task_status_returns_404_for_unknown_id(tmp_path):
     response = TestClient(app).get("/api/tasks/missing")
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "TASK_NOT_FOUND"
+
+
+def test_generic_task_can_be_cooperatively_cancelled_and_persisted(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    started = threading.Event()
+    release = threading.Event()
+
+    def operation(payload, progress):
+        started.set()
+        release.wait(timeout=2)
+        progress({"done": 1, "total": 2})
+        return payload
+
+    with TestClient(app) as client:
+        submitted = app.state.heavy_coordinator.submit(
+            "test-cancel", {"value": 1}, operation, resumable=True
+        )
+        assert started.wait(timeout=2)
+        response = client.delete(f"/api/tasks/{submitted.job_id}")
+        assert response.status_code == 202
+        assert response.json()["cancellationRequested"] is True
+        release.set()
+        assert submitted.future.result(timeout=2) is None
+        detail = client.get(f"/api/tasks/{submitted.job_id}").json()
+        assert detail["status"] == "cancelled"
+        assert detail["resumable"] is True
+        assert client.get("/api/system/health").json()["recoverableTasks"] == 1
+        refused = client.delete(f"/api/tasks/{submitted.job_id}")
+        assert refused.status_code == 409
+        assert refused.json()["detail"]["code"] == "TASK_NOT_CANCELLABLE"
 
 
 def test_provider_gate_probe_is_persisted_and_queryable(tmp_path):

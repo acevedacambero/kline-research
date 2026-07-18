@@ -101,6 +101,20 @@ def test_only_resumable_interrupted_jobs_can_be_requeued(tmp_path):
             recovered.requeue(fixed.id)
 
 
+def test_cancelled_jobs_are_persisted_and_only_resumable_jobs_can_requeue(tmp_path):
+    with JobStore(tmp_path / "jobs.duckdb") as store:
+        resumable = store.create("labels", {"items": [1]}, resumable=True)
+        fixed = store.create("backup", {}, resumable=False)
+        store.update_progress(resumable.id, {"done": 3, "cancellationRequested": True})
+        assert store.cancel(resumable.id).status is JobStatus.CANCELLED
+        assert store.cancel(fixed.id).status is JobStatus.CANCELLED
+        requeued = store.requeue(resumable.id)
+        assert requeued.status is JobStatus.QUEUED
+        assert requeued.progress == {"done": 3}
+        with pytest.raises(ValueError, match="not resumable"):
+            store.requeue(fixed.id)
+
+
 def test_closed_store_rejects_queries(tmp_path):
     store = JobStore(tmp_path / "jobs.duckdb")
     store.close()

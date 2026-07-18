@@ -759,6 +759,52 @@ describe("App", () => {
     expect(screen.getByText("sh600000：detail failure")).toBeInTheDocument();
   });
 
+  it("safely cancels an active task from task history", async () => {
+    let cancelled = false;
+    const task = () => ({
+      id: "active-task",
+      jobType: "labels",
+      status: cancelled ? "cancelled" : "running",
+      resumable: true,
+      cancellationRequested: cancelled,
+      createdAt: "2026-07-18T01:00:00Z",
+      updatedAt: "2026-07-18T01:01:00Z",
+      done: 4,
+      total: 10,
+      rows: 400,
+      errors: [],
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      let body: unknown = {};
+      if (path === "/api/system/health") {
+        body = { status: "ok", dataSource: "AkShare", cachePath: "data", versions: {} };
+      } else if (path.startsWith("/api/tasks/recent")) {
+        body = [task()];
+      } else if (path === "/api/tasks/active-task" && init?.method === "DELETE") {
+        cancelled = true;
+        body = task();
+      } else if (path === "/api/tasks/active-task") {
+        body = task();
+      } else if (path.includes("/quality")) {
+        body = { totalCached: 0 };
+      }
+      return { ok: true, json: async () => body };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "取消任务 active-task" }));
+
+    expect(await screen.findByText("任务 active-task 已安全取消")).toBeInTheDocument();
+    expect(screen.getByText("已取消", { selector: "span.message" })).toBeInTheDocument();
+    const cancelCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/tasks/active-task" && init?.method === "DELETE",
+    );
+    expect(cancelCall).toBeDefined();
+  });
+
   it("resumes an interrupted task directly from task history", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {

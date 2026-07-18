@@ -20,6 +20,7 @@ class JobStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     INTERRUPTED = "interrupted"
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,9 +39,15 @@ class Job:
 
 _MEMORY_LIMIT = re.compile(r"^[1-9][0-9]*(?:\.[0-9]+)?(?:KB|MB|GB|TB)$", re.IGNORECASE)
 _TRANSITIONS = {
-    JobStatus.QUEUED: {JobStatus.RUNNING, JobStatus.FAILED},
-    JobStatus.RUNNING: {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.INTERRUPTED},
+    JobStatus.QUEUED: {JobStatus.RUNNING, JobStatus.FAILED, JobStatus.CANCELLED},
+    JobStatus.RUNNING: {
+        JobStatus.COMPLETED,
+        JobStatus.FAILED,
+        JobStatus.INTERRUPTED,
+        JobStatus.CANCELLED,
+    },
     JobStatus.INTERRUPTED: {JobStatus.QUEUED, JobStatus.FAILED},
+    JobStatus.CANCELLED: {JobStatus.QUEUED},
     JobStatus.COMPLETED: set(),
     JobStatus.FAILED: set(),
 }
@@ -177,13 +184,30 @@ class JobStore:
     def requeue(self, job_id: str) -> Job:
         with self._lock:
             current = self._require(job_id)
-            if current.status is not JobStatus.INTERRUPTED:
+            if current.status not in {JobStatus.INTERRUPTED, JobStatus.CANCELLED}:
                 raise ValueError(f"cannot requeue job in {current.status.value} state")
             if not current.resumable:
                 raise ValueError("job is not resumable")
+            progress = current.progress
+            if isinstance(progress, dict):
+                progress = dict(progress)
+                progress.pop("cancellationRequested", None)
             self._connection.execute(
-                "UPDATE jobs SET status = ?, error = NULL, updated_at = current_timestamp WHERE id = ?",
-                [JobStatus.QUEUED.value, job_id],
+                """UPDATE jobs SET status = ?, progress = ?, error = NULL,
+                   updated_at = current_timestamp WHERE id = ?""",
+                [JobStatus.QUEUED.value, _json(progress), job_id],
+            )
+            return self._require(job_id)
+
+    def cancel(self, job_id: str) -> Job:
+        with self._lock:
+            current = self._require(job_id)
+            if JobStatus.CANCELLED not in _TRANSITIONS[current.status]:
+                raise ValueError(f"cannot cancel job in {current.status.value} state")
+            self._connection.execute(
+                """UPDATE jobs SET status = ?, error = NULL, updated_at = current_timestamp
+                   WHERE id = ?""",
+                [JobStatus.CANCELLED.value, job_id],
             )
             return self._require(job_id)
 

@@ -347,13 +347,15 @@ class _TaskFacade:
                         "taskId": task_id,
                     },
                 )
-            interrupted = [
+            recoverable = [
                 job
-                for job in self.store.list(status=JobStatus.INTERRUPTED)
+                for status in (JobStatus.INTERRUPTED, JobStatus.CANCELLED)
+                for job in self.store.list(status=status)
                 if job.job_type == job_type and job.resumable
             ]
-            if interrupted:
-                return self.coordinator.resume(interrupted[-1].id, finalizing_operation).job_id
+            if recoverable:
+                latest = max(recoverable, key=lambda item: item.updated_at)
+                return self.coordinator.resume(latest.id, finalizing_operation).job_id
             return self.coordinator.submit(
                 job_type, payload, finalizing_operation, resumable=True
             ).job_id
@@ -1224,7 +1226,9 @@ def create_app(
             "cachePath": str(settings.data_path),
             "versions": VERSIONS,
             "recoverableTasks": sum(
-                job.resumable for job in job_store.list(status=JobStatus.INTERRUPTED)
+                job.resumable
+                for status in (JobStatus.INTERRUPTED, JobStatus.CANCELLED)
+                for job in job_store.list(status=status)
             ),
         }
 
@@ -1439,6 +1443,24 @@ def create_app(
         if job is None:
             raise HTTPException(404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"})
         return _task_response(job)
+
+    @app.delete("/api/tasks/{task_id}", status_code=202)
+    def cancel_task(task_id: str):
+        try:
+            coordinator.cancel(task_id)
+        except KeyError as exc:
+            raise HTTPException(
+                404, detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"}
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                409,
+                detail={"code": "TASK_NOT_CANCELLABLE", "message": str(exc)},
+            ) from exc
+        job = job_store.get(task_id)
+        if job is None:
+            raise HTTPException(404, detail={"code": "TASK_NOT_FOUND"})
+        return {**_task_response(job), "cancellationRequested": True}
 
     @app.post("/api/datasets/validate")
     def validate_dataset():

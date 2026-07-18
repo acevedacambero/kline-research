@@ -19,6 +19,10 @@ class DuplicateActiveJobError(CoordinatorError):
     pass
 
 
+class JobCancelledError(CoordinatorError):
+    pass
+
+
 class CoordinatorShutdownError(CoordinatorError):
     """One or more jobs failed before the coordinator finished shutting down."""
 
@@ -46,6 +50,7 @@ class HeavyTaskCoordinator:
         self._futures: dict[str, Future[Any]] = {}
         self._job_types: dict[str, str] = {}
         self._failures: dict[str, str] = {}
+        self._cancellations: dict[str, threading.Event] = {}
         self._shutdown_state = "open"
         self._shutdown_error: CoordinatorShutdownError | None = None
 
@@ -84,10 +89,15 @@ class HeavyTaskCoordinator:
         if job_type in self._job_types:
             raise DuplicateActiveJobError(f"active {job_type!r} job already exists")
         self._job_types[job_type] = job.id
+        cancellation = threading.Event()
+        self._cancellations[job.id] = cancellation
         try:
-            future = self._executor.submit(self._run, job.id, job.payload, operation)
+            future = self._executor.submit(
+                self._run, job.id, job.payload, operation, cancellation
+            )
         except BaseException:
             del self._job_types[job_type]
+            del self._cancellations[job.id]
             self._store.fail(job.id, "submission failed")
             raise
         self._futures[job.id] = future
@@ -98,13 +108,35 @@ class HeavyTaskCoordinator:
         )
         return SubmittedJob(job.id, future)
 
-    def _run(self, job_id: str, payload: Any, operation: Operation) -> Any:
+    def _run(
+        self,
+        job_id: str,
+        payload: Any,
+        operation: Operation,
+        cancellation: threading.Event,
+    ) -> Any:
         self._worker_context.active = True
         try:
+            if cancellation.is_set():
+                raise JobCancelledError("job cancelled before execution")
             self._store.transition(job_id, JobStatus.RUNNING)
-            result = operation(payload, lambda progress: self._store.update_progress(job_id, progress))
+            def report_progress(progress: Any) -> None:
+                if cancellation.is_set():
+                    raise JobCancelledError("job cancelled by user")
+                self._store.update_progress(job_id, progress)
+                if cancellation.is_set():
+                    raise JobCancelledError("job cancelled by user")
+
+            result = operation(payload, report_progress)
+            if cancellation.is_set():
+                raise JobCancelledError("job cancelled by user")
             self._store.complete(job_id, result)
             return result
+        except JobCancelledError:
+            current = self._store.get(job_id)
+            if current and current.status in {JobStatus.QUEUED, JobStatus.RUNNING}:
+                self._store.cancel(job_id)
+            return None
         except BaseException as exc:
             error = f"{type(exc).__name__}: {exc}"
             try:
@@ -124,13 +156,43 @@ class HeavyTaskCoordinator:
                 return
             if self._job_types.get(job_type) == job_id:
                 del self._job_types[job_type]
-            if future.cancelled():
+            cancellation = self._cancellations.pop(job_id, None)
+            job = self._store.get(job_id)
+            if job is not None and job.status is JobStatus.CANCELLED:
+                pass
+            elif (
+                future.cancelled()
+                and cancellation is not None
+                and cancellation.is_set()
+            ):
+                pass
+            elif future.cancelled():
                 self._failures[job_id] = "CancelledError: job was cancelled"
             else:
                 exception = future.exception()
                 if exception is not None:
                     self._failures[job_id] = f"{type(exception).__name__}: {exception}"
             self._condition.notify_all()
+
+    def cancel(self, job_id: str) -> Job:
+        with self._lock:
+            self._prune_completed_locked()
+            future = self._futures.get(job_id)
+            cancellation = self._cancellations.get(job_id)
+            job = self._store.get(job_id)
+            if job is None:
+                raise KeyError(job_id)
+            if future is None or cancellation is None:
+                raise ValueError(f"cannot cancel job in {job.status.value} state")
+            cancellation.set()
+            progress = dict(job.progress) if isinstance(job.progress, dict) else {}
+            progress["cancellationRequested"] = True
+            self._store.update_progress(job_id, progress)
+            if future.cancel():
+                job = self._store.cancel(job_id)
+                self._finished(job_id, job.job_type, future)
+                return job
+            return self._store.get(job_id) or job
 
     def _prune_completed_locked(self) -> None:
         for job_id, future in tuple(self._futures.items()):

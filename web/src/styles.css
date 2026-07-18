@@ -916,6 +916,9 @@ select {
 .resume-link {
   color: #ffd166;
 }
+.danger-link {
+  color: #ff8fa3;
+}
 .task-row-actions .link-button:disabled {
   cursor: wait;
 }

@@ -165,6 +165,7 @@ type TaskView = {
   stages?: GenericTask["stages"];
   errorCategories?: Record<string, number>;
   retryableErrors?: number;
+  cancellationRequested?: boolean;
 };
 const taskErrorText = (error: unknown) =>
   typeof error === "string"
@@ -199,6 +200,7 @@ const taskStatusNames: Record<string, string> = {
   completed_with_errors: "完成（有错误）",
   failed: "失败",
   interrupted: "已中断（可恢复）",
+  cancelled: "已取消",
 };
 const taskStatusName = (status: string) => taskStatusNames[status] ?? status;
 const taskElapsedTime = (createdAt?: string, updatedAt?: string) => {
@@ -427,6 +429,7 @@ export function App() {
       stages?: GenericTask["stages"];
       errorCategories?: Record<string, number>;
       retryableErrors?: number;
+      cancellationRequested?: boolean;
     },
   ) => {
     setTaskView({
@@ -448,6 +451,7 @@ export function App() {
       stages: task.stages,
       errorCategories: task.errorCategories,
       retryableErrors: task.retryableErrors,
+      cancellationRequested: task.cancellationRequested,
     });
   };
 
@@ -485,7 +489,7 @@ export function App() {
   }
 
   function resumeHistoricalTask(task: GenericTask) {
-    if (task.status !== "interrupted" || !task.resumable) {
+    if (!["interrupted", "cancelled"].includes(task.status) || !task.resumable) {
       setMessage(`任务 ${task.id} 当前不可续跑`);
       return;
     }
@@ -514,6 +518,9 @@ export function App() {
       case "scores":
         void startScores();
         break;
+      case "research_pipeline":
+        void startResearchPipeline();
+        break;
       case "artifact_cleanup":
         if (artifactCleanup?.plan) {
           void runArtifactCleanup(task.mode ?? "quarantine");
@@ -523,6 +530,38 @@ export function App() {
         break;
       default:
         setMessage(`任务类型 ${task.jobType} 不支持续跑`);
+    }
+  }
+
+  async function cancelTask(taskId: string) {
+    try {
+      const requested = await api.cancelTask(taskId);
+      showTask(taskKindNames[requested.jobType] ?? requested.jobType, taskId, requested);
+      setMessage(`已请求取消任务 ${taskId}，将在当前安全检查点停止`);
+      const poll = async (): Promise<void> => {
+        const detail = await api.taskStatus(taskId);
+        showTask(taskKindNames[detail.jobType] ?? detail.jobType, taskId, detail);
+        if (detail.status === "queued" || detail.status === "running") {
+          window.setTimeout(() => void poll(), 500);
+          return;
+        }
+        setMessage(
+          detail.status === "cancelled"
+            ? `任务 ${taskId} 已安全取消`
+            : `任务 ${taskId} 已结束：${taskStatusName(detail.status)}`,
+        );
+        await refreshTaskHistory(false);
+      };
+      if (requested.status === "queued" || requested.status === "running") {
+        window.setTimeout(() => void poll(), 500);
+      } else {
+        if (requested.status === "cancelled") {
+          setMessage(`任务 ${taskId} 已安全取消`);
+        }
+        await refreshTaskHistory(false);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "取消任务失败");
     }
   }
 
@@ -2520,6 +2559,7 @@ export function App() {
               </span>
             )}
             {taskView.resumable && <span>支持中断续跑</span>}
+            {taskView.cancellationRequested && <span>正在等待安全取消</span>}
             {taskView.rows != null && <span>生成 {taskView.rows} 行</span>}
             {taskView.current && <span>当前 {taskView.current}</span>}
             {taskView.speed ? (
@@ -2537,6 +2577,17 @@ export function App() {
                 <span key={category}>{category} {count}</span>
               ))}
           </div>
+          {(taskView.status === "queued" || taskView.status === "running") && (
+            <div className="status-actions">
+              <button
+                className="danger"
+                disabled={taskView.cancellationRequested}
+                onClick={() => void cancelTask(taskView.id)}
+              >
+                {taskView.cancellationRequested ? "正在取消" : "安全取消任务"}
+              </button>
+            </div>
+          )}
           {taskView.stages && (
             <div className="task-facts" aria-label="流水线阶段">
               {Object.entries(taskView.stages).map(([stage, detail]) => (
@@ -2662,7 +2713,7 @@ export function App() {
                       >
                         查看
                       </button>
-                      {task.status === "interrupted" && task.resumable && (
+                      {["interrupted", "cancelled"].includes(task.status) && task.resumable && (
                         <button
                           className="link-button resume-link"
                           aria-label={`续跑任务 ${task.id}`}
@@ -2670,6 +2721,15 @@ export function App() {
                           onClick={() => resumeHistoricalTask(task)}
                         >
                           续跑
+                        </button>
+                      )}
+                      {(task.status === "queued" || task.status === "running") && (
+                        <button
+                          className="link-button danger-link"
+                          aria-label={`取消任务 ${task.id}`}
+                          onClick={() => void cancelTask(task.id)}
+                        >
+                          取消
                         </button>
                       )}
                     </div>

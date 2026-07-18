@@ -370,6 +370,7 @@ export type GenericTask = {
   mode?: "quarantine" | "delete";
   errorCategories?: Record<string, number>;
   retryableErrors?: number;
+  cancellationRequested?: boolean;
 };
 export type ProviderMetric = {
   observations: number;
@@ -663,6 +664,10 @@ export const api = {
   recentTasks: (limit = 10) =>
     request<GenericTask[]>(`/api/tasks/recent?limit=${limit}`),
   taskStatus: (taskId: string) => request<GenericTask>(`/api/tasks/${taskId}`),
+  cancelTask: (taskId: string) =>
+    request<GenericTask>(`/api/tasks/${encodeURIComponent(taskId)}`, {
+      method: "DELETE",
+    }),
   artifactCleanupStatus: () =>
     request<ArtifactCleanupStatus>("/api/system/artifact-cleanup"),
   planArtifactCleanup: () =>

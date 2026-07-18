@@ -260,3 +260,74 @@ def test_completed_job_does_not_spuriously_block_same_type_submission(tmp_path):
     assert second.future.result(timeout=2) == {}
     coordinator.shutdown()
     store.close()
+
+
+def test_running_job_is_cooperatively_cancelled_and_can_resume(tmp_path):
+    store = JobStore(tmp_path / "jobs.duckdb")
+    coordinator = HeavyTaskCoordinator(store)
+    started = threading.Event()
+    release = threading.Event()
+
+    def operation(payload, progress):
+        started.set()
+        release.wait(timeout=2)
+        progress({"done": 1, "total": 2})
+        return payload
+
+    submitted = coordinator.submit("labels", {"value": 7}, operation, resumable=True)
+    assert started.wait(timeout=2)
+    requested = coordinator.cancel(submitted.job_id)
+    assert requested.progress["cancellationRequested"] is True
+    release.set()
+    assert submitted.future.result(timeout=2) is None
+    assert store.get(submitted.job_id).status is JobStatus.CANCELLED
+
+    resumed = coordinator.resume(
+        submitted.job_id, lambda payload, progress: {"value": payload["value"]}
+    )
+    assert resumed.job_id == submitted.job_id
+    assert resumed.future.result(timeout=2) == {"value": 7}
+    assert store.get(submitted.job_id).status is JobStatus.COMPLETED
+    coordinator.shutdown()
+    store.close()
+
+
+def test_queued_job_cancels_without_becoming_shutdown_failure(tmp_path):
+    store = JobStore(tmp_path / "jobs.duckdb")
+    coordinator = HeavyTaskCoordinator(store)
+    release = threading.Event()
+    first = coordinator.submit(
+        "download", {}, lambda payload, progress: release.wait(timeout=2)
+    )
+    queued = coordinator.submit("features", {}, lambda payload, progress: payload)
+
+    cancelled = coordinator.cancel(queued.job_id)
+    assert cancelled.status is JobStatus.CANCELLED
+    assert queued.future.cancelled()
+    release.set()
+    assert first.future.result(timeout=2) is True
+    coordinator.shutdown()
+    store.close()
+
+
+def test_cancellation_request_does_not_hide_a_real_operation_failure(tmp_path):
+    store = JobStore(tmp_path / "jobs.duckdb")
+    coordinator = HeavyTaskCoordinator(store)
+    started = threading.Event()
+    release = threading.Event()
+
+    def operation(payload, progress):
+        started.set()
+        release.wait(timeout=2)
+        raise RuntimeError("disk write failed")
+
+    submitted = coordinator.submit("labels", {}, operation, resumable=True)
+    assert started.wait(timeout=2)
+    coordinator.cancel(submitted.job_id)
+    release.set()
+    with pytest.raises(RuntimeError, match="disk write failed"):
+        submitted.future.result(timeout=2)
+    assert store.get(submitted.job_id).status is JobStatus.FAILED
+    with pytest.raises(CoordinatorShutdownError, match="disk write failed"):
+        coordinator.shutdown()
+    store.close()

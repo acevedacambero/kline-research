@@ -108,4 +108,12 @@ describe('API errors', () => {
     expect(fetchMock.mock.calls[0][0]).toBe(`/api/system/backups/${name}?sha256=${sha256}`)
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
   })
+
+  it('requests cooperative cancellation through the generic task endpoint', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.cancelTask('task with space')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/tasks/task%20with%20space')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'DELETE' })
+  })
 })
