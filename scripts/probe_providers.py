@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Sequence
+from zoneinfo import ZoneInfo
 
 from kline.ops.provider_probe import ProviderProbeRunner
+from kline.storage import atomic_write_text
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -29,10 +32,12 @@ def main(
 ) -> int:
     args = _parser().parse_args(argv)
     report = (runner or ProviderProbeRunner()).run(quick=args.quick)
+    payload = report.to_dict()
+    payload["probedAt"] = datetime.now(ZoneInfo("Asia/Shanghai")).isoformat()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(report.to_dict(), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    atomic_write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        args.output,
     )
 
     print("provider    ok/total   success   mean(s)   p95(s)")
