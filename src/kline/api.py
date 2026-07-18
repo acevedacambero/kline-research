@@ -3373,7 +3373,11 @@ def create_app(
             != current_manifest_hash
         ]
         blockers = list(readiness_result.get("blockers", []))
-        if quality_result.get("staleSecurities", 0):
+        if (
+            quality_result.get("staleSecurities", 0)
+            and float(quality_result.get("freshnessCoverage", 0.0))
+            < float(quality_result.get("freshnessMinCoverage", 1.0))
+        ):
             blockers.append(f"存在 {quality_result['staleSecurities']} 只行情过期证券")
         if missing_runs:
             blockers.append(f"缺少 {len(missing_runs)} 类正式研究实验记录")
