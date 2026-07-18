@@ -114,6 +114,23 @@ class BatchFeatureBuilder:
             if "factor_version" in frame and not frame["factor_version"].dropna().empty
             else "unknown"
         )
+        path = self.store.path_for(
+            security["exchange"],
+            security["code"],
+            snapshot_version=security["snapshot_version"],
+            factor_version=factor_version,
+            limit_rule_version=VERSIONS["limitRuleVersion"],
+            feature_definition_version=FEATURE_DEFINITION_VERSION,
+        )
+        manifest_path = path.parent / f"{security['code']}.manifest.json"
+        if path.exists() and manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            return FeatureStoreReport(
+                "reused",
+                str(path),
+                str(manifest_path),
+                int(manifest.get("rows", 0)),
+            )
         features = compute_daily_features(
             frame,
             exchange=security["exchange"],

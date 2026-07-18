@@ -81,6 +81,39 @@ def test_feature_store_reuses_identical_current_output(tmp_path):
     assert reused.rows == 260
 
 
+def test_batch_builder_skips_feature_computation_for_existing_output(tmp_path, monkeypatch):
+    source = tmp_path / "source.parquet"
+    derived_frame().to_parquet(source, index=False)
+    store = FeatureDatasetStore(tmp_path / "output")
+    store.write(
+        "sh",
+        "600000",
+        derived_frame(),
+        snapshot_version="snapshot-one",
+        factor_version="factor-v1",
+        limit_rule_version="cn-equity-v1",
+        feature_definition_version="daily-features-v1",
+    )
+    monkeypatch.setattr(
+        "kline.features.batch.compute_daily_features",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("existing P2 output must be reused before computation")
+        ),
+    )
+
+    report = BatchFeatureBuilder(store).build_security(
+        {
+            "exchange": "sh",
+            "code": "600000",
+            "derived_path": str(source),
+            "snapshot_version": "snapshot-one",
+        }
+    )
+
+    assert report.status == "reused"
+    assert report.rows == 260
+
+
 def test_batch_builder_isolates_invalid_security(tmp_path):
     valid_path = tmp_path / "valid.parquet"
     invalid_path = tmp_path / "invalid.parquet"
