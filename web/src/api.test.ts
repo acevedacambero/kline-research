@@ -85,6 +85,17 @@ describe('API errors', () => {
     })
   })
 
+  it('starts the five-stage daily research maintenance pipeline', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.buildDailyPipeline('changed')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/pipeline/daily/build')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      method: 'POST',
+      body: '{"scope":"changed"}',
+    })
+  })
+
   it('plans and executes safe artifact cleanup', async () => {
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({}) }))
     vi.stubGlobal('fetch', fetchMock)

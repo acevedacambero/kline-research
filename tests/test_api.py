@@ -47,11 +47,26 @@ def test_health_exposes_all_version_keys(tmp_path):
     assert body["versions"]["labelDefinitionVersion"] == "daily-v2-exit-delay"
     assert body["versions"]["limitRuleVersion"] == "cn-equity-v1"
     assert body["versions"]["modelDefinitionVersion"] == "p7-score-logistic-v1"
-    assert body["versions"]["multiFeatureModelDefinitionVersion"] == "p7-multifeature-logistic-v1"
+    assert body["versions"]["multiFeatureModelDefinitionVersion"] == "p7-multifeature-logistic-v2-inference"
     assert body["versions"]["walkForwardModelDefinitionVersion"] == "p7-walk-forward-v2-nonoverlap"
-    assert body["versions"]["portfolioValidationVersion"] == "p8-top-score-portfolio-v4-benchmark"
+    assert body["versions"]["portfolioValidationVersion"] == "p8-top-score-portfolio-v5-turnover"
     assert body["versions"]["transactionCostVersion"] == "p8-flat-bps-v1"
     assert body["recoverableTasks"] == 0
+
+
+def test_operations_status_combines_disk_data_tasks_and_provider_alerts(tmp_path):
+    app = create_app(Settings(data_path=tmp_path / "data"), FakeSource())
+    response = TestClient(app).get("/api/system/operations")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] in {"ok", "warning", "critical"}
+    assert body["disk"]["totalBytes"] > 0
+    assert body["disk"]["freeBytes"] >= 0
+    assert 0 <= body["disk"]["freeRatio"] <= 1
+    assert body["tasks"]["active"] == 0
+    assert body["provider"]["passed"] is False
+    assert any(alert["code"] == "PROVIDER_GATE" for alert in body["alerts"])
 
 
 def test_coverage_schedule_and_backup_operations_are_auditable(tmp_path):
@@ -140,6 +155,16 @@ def test_coverage_schedule_and_backup_operations_are_auditable(tmp_path):
         assert deleted.status_code == 200
         assert deleted.json()["deleted"] is True
         assert client.get("/api/system/backups").json()["items"] == []
+
+        audit = client.get("/api/system/operations/audit").json()
+        actions = [item["action"] for item in audit["items"]]
+        assert actions[:3] == [
+            "backup_deleted",
+            "backup_submitted",
+            "maintenance_schedule_configured",
+        ]
+        assert audit["total"] == 3
+        assert "secret" not in str(audit).lower()
 
 
 def test_research_readiness_separates_refresh_audit_and_model_gates():
@@ -696,6 +721,69 @@ def test_research_pipeline_builds_p1_p2_p3_in_one_durable_task(tmp_path):
     assert len(list(data_path.glob("data-foundation-v1/scores/*/*/sh/600000.parquet"))) == 1
 
 
+def test_daily_pipeline_updates_quality_and_rebuilds_changed_research_layers(tmp_path):
+    class PipelineSource(FakeSource):
+        def index_history(self, *args, **kwargs):
+            return pd.DataFrame(
+                [
+                    {
+                        "date": date(2023, 1, 1) + timedelta(days=index),
+                        "open": 3000 + index,
+                        "high": 3001 + index,
+                        "low": 2999 + index,
+                        "close": 3000 + index,
+                    }
+                    for index in range(500)
+                ]
+            )
+
+    data_path = tmp_path / "data"
+    seed_security(data_path)
+    pipeline = DatasetPipeline(data_path)
+    original_snapshot = pipeline.latest_snapshot_version("sh", "600000")
+    raw = pd.read_parquet(pipeline.latest_derived_path("sh", "600000"))[
+        ["date", "open", "high", "low", "close", "volume", "amount"]
+    ]
+    latest = raw.iloc[-1].to_dict()
+    latest.update(
+        date=pd.Timestamp(latest["date"]).date() + timedelta(days=1),
+        open=float(latest["open"]) + 0.1,
+        high=float(latest["high"]) + 0.1,
+        low=float(latest["low"]) + 0.1,
+        close=float(latest["close"]) + 0.1,
+    )
+    updated_raw = pd.concat([raw, pd.DataFrame([latest])], ignore_index=True)
+    factors = pd.DataFrame(
+        [{"date": date(1900, 1, 1), "qfq_factor": 1.0, "hfq_factor": 1.0}]
+    )
+    app = create_app(Settings(data_path=data_path), PipelineSource())
+    app.state.download_source.fetch_bundle = (
+        lambda exchange, code, start_date, end_date: (updated_raw, factors)
+    )
+
+    with TestClient(app) as client:
+        started = client.post("/api/pipeline/daily/build", json={"scope": "changed"})
+        assert started.status_code == 202
+        assert started.json()["stages"] == 5
+        task_id = started.json()["taskId"]
+        for _ in range(300):
+            task = client.get(f"/api/pipeline/daily/tasks/{task_id}").json()
+            if task["status"] not in {"queued", "running"}:
+                break
+            time.sleep(0.01)
+
+    assert task["status"] == "completed"
+    assert task["stage"] == "finished"
+    assert task["changedSecurities"] == 1
+    assert task["rebuiltSecurities"] == 1
+    assert all(
+        task["stages"][stage]["status"] == "completed"
+        for stage in ("market_data", "quality", "labels", "features", "scores")
+    )
+    assert pipeline.latest_snapshot_version("sh", "600000") != original_snapshot
+    assert (data_path / "market-coverage-latest.json").exists()
+
+
 def test_artifact_cleanup_plan_and_quarantine_task_are_auditable(tmp_path):
     data_path = tmp_path / "data"
     seed_security(data_path)
@@ -1012,10 +1100,68 @@ def test_p3_scan_returns_latest_usable_scores(tmp_path):
     )
     assert response.status_code == 200
     assert [row["code"] for row in response.json()["rows"]] == ["000001", "600001", "600000"]
+    assert response.json()["rankingMode"] == "p3"
+    assert "使用 P3 排序" in response.json()["fallbackReason"]
     response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post(
         "/api/scan/p3", json={"exchange": "sh", "min_score": 80}
     )
     assert [row["code"] for row in response.json()["rows"]] == ["600001"]
+
+
+def test_p3_scan_uses_promoted_current_baseline_model_for_ranking(tmp_path):
+    data_path = tmp_path / "data"
+    score_dir = (
+        data_path
+        / "data-foundation-v1"
+        / "scores"
+        / "p3-rule-score-v1"
+        / "identity"
+        / "sh"
+    )
+    score_dir.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {"exchange": "sh", "code": "600000", "date": date(2024, 1, 2), "score": 75, "grade": "B", "usable": True},
+            {"exchange": "sh", "code": "600001", "date": date(2024, 1, 2), "score": 90, "grade": "A", "usable": True},
+        ]
+    ).to_parquet(score_dir / "scores.parquet", index=False)
+    snapshot_hash = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    registry = api_module.ModelRegistry(data_path)
+    saved = registry.save(
+        "baseline",
+        {
+            "version": "p7-score-logistic-v1",
+            "status": "trained",
+            "labelColumn": "p20_executable_return",
+            "intercept": 0.0,
+            "coefficient": -1.0,
+        },
+        dependencies={
+            "scoreDefinitionVersion": "p3-rule-score-v1",
+            "labelDefinitionVersion": "daily-v2-exit-delay",
+            "dataSnapshotHash": snapshot_hash,
+        },
+    )
+    registry.promote(
+        saved["modelId"],
+        expected_dependencies={
+            "scoreDefinitionVersion": "p3-rule-score-v1",
+            "featureDefinitionVersion": "daily-features-v1",
+            "labelDefinitionVersion": "daily-v2-exit-delay",
+            "dataSnapshotHash": snapshot_hash,
+        },
+    )
+
+    response = TestClient(create_app(Settings(data_path=data_path), FakeSource())).post(
+        "/api/scan/p3", json={"min_score": 70}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rankingMode"] == "model"
+    assert body["activeModel"]["modelId"] == saved["modelId"]
+    assert [row["code"] for row in body["rows"]] == ["600000", "600001"]
+    assert body["rows"][0]["modelProbability"] > body["rows"][1]["modelProbability"]
 
 
 def test_p7_baseline_endpoint_returns_version_when_data_missing(tmp_path):
@@ -1276,7 +1422,7 @@ def test_p7_multifeature_endpoint_returns_version_when_data_missing(tmp_path):
         "/api/model/p7/multifeature", json={"label_column": "p20_executable_return"}
     )
     assert response.status_code == 200
-    assert response.json()["version"] == "p7-multifeature-logistic-v1"
+    assert response.json()["version"] == "p7-multifeature-logistic-v2-inference"
 
 
 def test_model_registry_endpoint_promotes_only_trained_current_model(tmp_path):
@@ -1385,7 +1531,7 @@ def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):
         json={"label_column": "p20_executable_return", "top_fraction": 0.1},
     )
     assert response.status_code == 200
-    assert response.json()["version"] == "p8-top-score-portfolio-v4-benchmark"
+    assert response.json()["version"] == "p8-top-score-portfolio-v5-turnover"
     assert response.json()["sampleCount"] == 0
 
 

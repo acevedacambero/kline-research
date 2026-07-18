@@ -261,6 +261,56 @@ describe("App", () => {
     expect(screen.getByLabelText("流水线阶段")).toHaveTextContent("P3 评分：1/1");
   });
 
+  it("runs market update through P3 as one daily maintenance task", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        const body = path === "/api/pipeline/daily/build"
+          ? { taskId: "daily-task", total: 1, stages: 5, scope: "changed" }
+          : path === "/api/tasks/daily-task"
+            ? {
+                id: "daily-task",
+                jobType: "daily_research_pipeline",
+                status: "completed",
+                resumable: true,
+                done: 5,
+                total: 5,
+                rows: 520,
+                errors: [],
+                stage: "finished",
+                stages: {
+                  market_data: { status: "completed", done: 1, total: 1, rows: 0, errors: 0 },
+                  quality: { status: "completed", done: 1, total: 1, rows: 1, errors: 0 },
+                  labels: { status: "completed", done: 1, total: 1, rows: 10, errors: 0 },
+                  features: { status: "completed", done: 1, total: 1, rows: 255, errors: 0 },
+                  scores: { status: "completed", done: 1, total: 1, rows: 255, errors: 0 },
+                },
+              }
+            : path === "/api/system/health"
+              ? { status: "ok", dataSource: "AkShare", cachePath: "data", versions: {} }
+              : path.startsWith("/api/tasks/recent")
+                ? []
+                : path.startsWith("/api/research/runs?")
+                  ? { version: "v1", runs: [], total: 0, unreadableFiles: 0 }
+                  : path.includes("/quality")
+                    ? { totalCached: 1 }
+                    : {};
+        return { ok: true, json: async () => body };
+      }),
+    );
+
+    render(<App />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "一键日常更新与研究维护" }),
+    );
+
+    expect(await screen.findByText(/日常研究维护 · 全部完成/)).toBeInTheDocument();
+    expect(screen.getByLabelText("流水线阶段")).toHaveTextContent("行情更新：1/1");
+    expect(screen.getByLabelText("流水线阶段")).toHaveTextContent("质量检查：1/1");
+    expect(screen.getByLabelText("流水线阶段")).toHaveTextContent("P3 评分：1/1");
+  });
+
   it("restores audit inputs from a bookmarked URL", async () => {
     window.history.replaceState(
       null,

@@ -9,7 +9,7 @@ import pandas as pd
 from .baseline import binary_auc
 from ..validation.isolation import purged_time_split
 
-MULTI_FEATURE_MODEL_VERSION = "p7-multifeature-logistic-v1"
+MULTI_FEATURE_MODEL_VERSION = "p7-multifeature-logistic-v2-inference"
 DEFAULT_FEATURE_COLUMNS = ("score", "bullish_alignment", "return_20", "volume_ratio_5", "volatility_20")
 
 
@@ -17,7 +17,7 @@ def train_multifeature_baseline(scores: pd.DataFrame | list[dict], labels: pd.Da
     sf = pd.DataFrame(scores).copy()
     ff = pd.DataFrame(features).copy()
     lf = pd.DataFrame(labels).copy()
-    base = {"version": MULTI_FEATURE_MODEL_VERSION, "labelColumn": label_column, "featureColumns": list(feature_columns), "status": "insufficient_data", "trainCount": 0, "testCount": 0, "accuracy": None, "auc": None, "weights": {}, "warnings": []}
+    base = {"version": MULTI_FEATURE_MODEL_VERSION, "labelColumn": label_column, "featureColumns": list(feature_columns), "status": "insufficient_data", "trainCount": 0, "testCount": 0, "accuracy": None, "auc": None, "intercept": None, "featureMeans": {}, "featureStds": {}, "weights": {}, "warnings": []}
     if not {"exchange", "code", "date", *feature_columns}.issubset(set(sf.columns) | set(ff.columns)):
         base["warnings"] = ["缺少 P2/P3 特征字段"]
         return base
@@ -74,4 +74,4 @@ def train_multifeature_baseline(scores: pd.DataFrame | list[dict], labels: pd.Da
     accuracy = float(((prediction >= 0.5) == yt).mean())
     auc = binary_auc(yt, prediction)
     warnings = ["样本外 AUC 低于 0.5，需要复核"] if auc is not None and auc < 0.5 else []
-    return {**base, "status": "trained" if not warnings else "review", "trainUntil": train_until, "accuracy": accuracy, "auc": auc, "weights": {column: float(weight) for column, weight in zip(feature_columns, weights)}, "warnings": warnings, "isolation": isolation}
+    return {**base, "status": "trained" if not warnings else "review", "trainUntil": train_until, "accuracy": accuracy, "auc": auc, "intercept": float(intercept), "featureMeans": {column: float(value) for column, value in zip(feature_columns, mean)}, "featureStds": {column: float(value) for column, value in zip(feature_columns, std)}, "weights": {column: float(weight) for column, weight in zip(feature_columns, weights)}, "warnings": warnings, "isolation": isolation}

@@ -5,6 +5,14 @@ export type Health = {
   versions: Record<string, string>;
   recoverableTasks?: number;
 };
+export type OperationsStatus = {
+  status: "ok" | "warning" | "critical";
+  disk: { totalBytes: number; usedBytes: number; freeBytes: number; freeRatio: number };
+  data: { latestDataDate?: string | null; freshnessCoverage: number; freshnessMinCoverage: number };
+  tasks: { active: number; activeTaskId?: string | null; failedInRecent50: number };
+  provider: { available: boolean; passed: boolean; probedAt?: string | null };
+  alerts: Array<{ severity: string; code: string; message: string }>;
+};
 export type LabelStatus = {
   currentVersion: string;
   snapshotSetHash?: string;
@@ -202,6 +210,7 @@ export type ScanRow = {
   date: string;
   score: number;
   grade?: string | null;
+  modelProbability?: number | null;
 };
 export type ScanResult = {
   version: string;
@@ -210,6 +219,14 @@ export type ScanResult = {
   minScore: number;
   scannedCount: number;
   truncated: boolean;
+  rankingMode: "model" | "p3";
+  activeModel?: {
+    modelId: string;
+    kind: string;
+    version: string;
+    labelColumn?: string | null;
+  } | null;
+  fallbackReason?: string | null;
   rows: ScanRow[];
 };
 export type BaselineModel = {
@@ -324,6 +341,8 @@ export type PortfolioValidation = {
   excessReturn?: number | null;
   netExcessReturn?: number | null;
   winRate?: number | null;
+  averageTurnover?: number | null;
+  turnoverObservations: number;
   maxDrawdown?: number | null;
   annualizedReturn?: number | null;
   annualizedVolatility?: number | null;
@@ -640,6 +659,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<Health>("/api/system/health"),
+  operations: () => request<OperationsStatus>("/api/system/operations"),
   providerGate: () => request<ProviderGateStatus>("/api/system/provider-gate"),
   readiness: () => request<ResearchReadiness>("/api/system/readiness"),
   researchAcceptance: () =>
@@ -688,6 +708,11 @@ export const api = {
   buildResearchPipeline: (scope: "representative" | "stale" | "all" = "stale") =>
     request<{ taskId: string; total: number; stages: number }>(
       "/api/pipeline/research/build",
+      { method: "POST", body: JSON.stringify({ scope }) },
+    ),
+  buildDailyPipeline: (scope: "changed" | "all" = "changed") =>
+    request<{ taskId: string; total: number; stages: number; scope: string }>(
+      "/api/pipeline/daily/build",
       { method: "POST", body: JSON.stringify({ scope }) },
     ),
   labelStatus: () => request<LabelStatus>("/api/labels/status"),

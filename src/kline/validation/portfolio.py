@@ -7,11 +7,11 @@ import numpy as np
 import pandas as pd
 
 
-PORTFOLIO_VALIDATION_VERSION = "p8-top-score-portfolio-v4-benchmark"
+PORTFOLIO_VALIDATION_VERSION = "p8-top-score-portfolio-v5-turnover"
 
 
 def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.DataFrame | list[dict], *, label_column: str = "p20_executable_return", top_fraction: float = 0.1, as_of_date: date | None = None, non_overlapping: bool = False, transaction_cost_bps: float = 0, slippage_bps: float = 0) -> dict[str, Any]:
-    base = {"version": PORTFOLIO_VALIDATION_VERSION, "labelColumn": label_column, "topFraction": top_fraction, "sampleCount": 0, "tradingDayCount": 0, "selectedCount": 0, "averageReturn": None, "benchmarkReturn": None, "excessReturn": None, "winRate": None, "annualizedReturn": None, "annualizedVolatility": None, "sharpeRatio": None, "calmarRatio": None, "equityCurve": [], "benchmarkEquityCurve": [], "warnings": []}
+    base = {"version": PORTFOLIO_VALIDATION_VERSION, "labelColumn": label_column, "topFraction": top_fraction, "sampleCount": 0, "tradingDayCount": 0, "selectedCount": 0, "averageReturn": None, "benchmarkReturn": None, "excessReturn": None, "winRate": None, "averageTurnover": None, "turnoverObservations": 0, "annualizedReturn": None, "annualizedVolatility": None, "sharpeRatio": None, "calmarRatio": None, "equityCurve": [], "benchmarkEquityCurve": [], "warnings": []}
     sf, lf = pd.DataFrame(scores).copy(), pd.DataFrame(labels).copy()
     required = {"exchange", "code", "date", "score"} | {"signal_date", label_column}
     if not required.issubset(set(sf.columns) | set(lf.columns)) or not {"exchange", "code", "date", "score"}.issubset(sf.columns) or not {"exchange", "code", "signal_date", label_column}.issubset(lf.columns):
@@ -44,6 +44,15 @@ def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.D
         for _trading_date, frame in merged.groupby("date", sort=True)
     ], ignore_index=True)
     selected_returns = selected[label_column]
+    holdings = [
+        set(zip(frame["exchange"], frame["code"]))
+        for _trading_date, frame in selected.groupby("date", sort=True)
+    ]
+    turnover_values = [
+        1 - len(previous & current) / max(len(previous), len(current), 1)
+        for previous, current in zip(holdings, holdings[1:])
+    ]
+    average_turnover = float(np.mean(turnover_values)) if turnover_values else None
     total_cost_rate = (max(0.0, transaction_cost_bps) + max(0.0, slippage_bps)) / 10_000
     net_returns = selected_returns - total_cost_rate
     benchmark = merged[label_column]
@@ -87,4 +96,4 @@ def validate_top_score_portfolio(scores: pd.DataFrame | list[dict], labels: pd.D
         warnings.append("前瞻收益窗口存在重叠，暂不计算组合最大回撤")
     if len(selected) < 20:
         warnings.append("入选样本少于 20，仅供探索")
-    return {**base, "sampleCount": int(len(merged)), "tradingDayCount": int(merged["date"].nunique()), "selectedCount": int(len(selected)), "averageReturn": float(selected_returns.mean()), "netAverageReturn": float(net_returns.mean()), "benchmarkReturn": float(benchmark.mean()), "excessReturn": float(selected_returns.mean() - benchmark.mean()), "netExcessReturn": float(net_returns.mean() - benchmark.mean()), "winRate": float((net_returns > 0).mean()), "maxDrawdown": max_drawdown, "annualizedReturn": annualized_return, "annualizedVolatility": annualized_volatility, "sharpeRatio": sharpe_ratio, "calmarRatio": calmar_ratio, "equityCurve": equity_curve, "benchmarkEquityCurve": benchmark_equity_curve, "nonOverlapping": non_overlapping, "transactionCostBps": transaction_cost_bps, "slippageBps": slippage_bps, "totalCostRate": total_cost_rate, "warnings": warnings}
+    return {**base, "sampleCount": int(len(merged)), "tradingDayCount": int(merged["date"].nunique()), "selectedCount": int(len(selected)), "averageReturn": float(selected_returns.mean()), "netAverageReturn": float(net_returns.mean()), "benchmarkReturn": float(benchmark.mean()), "excessReturn": float(selected_returns.mean() - benchmark.mean()), "netExcessReturn": float(net_returns.mean() - benchmark.mean()), "winRate": float((net_returns > 0).mean()), "averageTurnover": average_turnover, "turnoverObservations": len(turnover_values), "maxDrawdown": max_drawdown, "annualizedReturn": annualized_return, "annualizedVolatility": annualized_volatility, "sharpeRatio": sharpe_ratio, "calmarRatio": calmar_ratio, "equityCurve": equity_curve, "benchmarkEquityCurve": benchmark_equity_curve, "nonOverlapping": non_overlapping, "transactionCostBps": transaction_cost_bps, "slippageBps": slippage_bps, "totalCostRate": total_cost_rate, "warnings": warnings}

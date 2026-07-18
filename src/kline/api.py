@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Literal
 import hashlib
 import json
+import math
 import queue
+import shutil
 import threading
 import time
 
@@ -71,6 +73,7 @@ from .model import (
 from .ops.provider_probe import ProviderProbeRunner, classify_error
 from .ops.maintenance import DailyMaintenanceScheduler
 from .ops.backup import DataBackupManager
+from .ops.audit import ManagementAuditLog
 from .research import ResearchRunRegistry
 from .monitoring import compute_feature_drift
 from .storage import atomic_write_text
@@ -111,6 +114,10 @@ class _InjectedProviderAdapter:
 class ImportRequest(BaseModel):
     scope: str = "representative"
     refresh: bool = False
+
+
+class DailyPipelineRequest(BaseModel):
+    scope: Literal["changed", "all"] = "changed"
 
 
 class RepairQueueRequest(BaseModel):
@@ -588,7 +595,16 @@ class ResearchPipelineTaskStore(_TaskFacade):
     def __init__(self, coordinator, store, lock):
         super().__init__(coordinator, store, lock, {"research_pipeline"})
 
-    def submit(self, pipeline, source, securities, names, output_root) -> str:
+    def submit(
+        self,
+        pipeline,
+        source,
+        securities,
+        names,
+        output_root,
+        *,
+        inline_progress=None,
+    ):
         payload = {"securities": securities, "names": names}
 
         def operation(payload, progress):
@@ -698,7 +714,220 @@ class ResearchPipelineTaskStore(_TaskFacade):
             state["currentSecurity"] = None
             return state
 
+        if inline_progress is not None:
+            return operation(payload, inline_progress)
         return self._submit("research_pipeline", payload, operation)
+
+
+class DailyResearchPipelineTaskStore(_TaskFacade):
+    def __init__(self, coordinator, store, lock, layer_tasks, workers: int):
+        super().__init__(coordinator, store, lock, {"daily_research_pipeline"})
+        self.layer_tasks = layer_tasks
+        self.workers = max(1, min(workers, 3))
+
+    def submit(
+        self,
+        pipeline,
+        source,
+        coverage_service,
+        securities,
+        names,
+        old_snapshots,
+        stale_keys,
+        approximate_provider,
+        output_root,
+        *,
+        start_date,
+        end_date,
+        timeout_seconds,
+        downstream_scope,
+    ) -> str:
+        payload = {
+            "securities": securities,
+            "names": names,
+            "oldSnapshots": old_snapshots,
+            "staleKeys": sorted(stale_keys),
+            "startDate": start_date.isoformat(),
+            "endDate": end_date.isoformat(),
+            "timeoutSeconds": timeout_seconds,
+            "downstreamScope": downstream_scope,
+            "directAvailable": source.direct_available,
+        }
+
+        def operation(payload, progress):
+            universe = payload["securities"]
+            market_errors = []
+            state = {
+                "total": len(universe) * 2,
+                "done": 0,
+                "rows": 0,
+                "errors": market_errors,
+                "currentSecurity": None,
+                "stage": "market_data",
+                "directAvailable": source.direct_available,
+                "stages": {
+                    "market_data": {
+                        "status": "running",
+                        "total": len(universe),
+                        "done": 0,
+                        "rows": 0,
+                        "errors": 0,
+                    },
+                    "quality": {
+                        "status": "pending",
+                        "total": len(universe),
+                        "done": 0,
+                        "rows": 0,
+                        "errors": 0,
+                    },
+                },
+            }
+            progress(state)
+            started = time.monotonic()
+            start = date.fromisoformat(payload["startDate"])
+            end = date.fromisoformat(payload["endDate"])
+
+            def fetch(security):
+                security_start = start
+                latest = pipeline.latest_data_date(
+                    security["exchange"], security["code"]
+                )
+                if latest is not None:
+                    security_start = max(start, latest - timedelta(days=14))
+                return source.fetch_bundle(
+                    security["exchange"], security["code"], security_start, end
+                )
+
+            def market_finished(security, error=None):
+                key = f"{security['exchange']}{security['code']}"
+                stage = state["stages"]["market_data"]
+                stage["done"] += 1
+                state["done"] += 1
+                state["currentSecurity"] = key
+                if error is not None:
+                    stage["errors"] += 1
+                    market_errors.append(
+                        _classified_task_error(key, error, stage="market_data")
+                    )
+                elapsed = max(time.monotonic() - started, 0.001)
+                state["speed"] = round(stage["done"] / elapsed, 3)
+                remaining = stage["total"] - stage["done"]
+                state["etaSeconds"] = (
+                    round(remaining / state["speed"]) if state["speed"] else None
+                )
+                state["directAvailable"] = source.direct_available
+                progress(state)
+
+            for offset in range(0, len(universe), self.workers):
+                batch = universe[offset : offset + self.workers]
+                executor = ThreadPoolExecutor(
+                    max_workers=len(batch), thread_name_prefix="daily-market-fetch"
+                )
+                try:
+                    futures = {
+                        executor.submit(fetch, security): security for security in batch
+                    }
+                    completed, pending = wait(
+                        futures, timeout=float(payload["timeoutSeconds"])
+                    )
+                    for future in completed:
+                        security = futures[future]
+                        try:
+                            raw, factors = future.result()
+                            pipeline.import_incremental_security(
+                                security["exchange"], security["code"], raw, factors
+                            )
+                            market_finished(security)
+                        except Exception as exc:
+                            market_finished(security, exc)
+                    for future in pending:
+                        future.cancel()
+                        market_finished(
+                            futures[future],
+                            TimeoutError(
+                                f"fetch timed out after {payload['timeoutSeconds']}s"
+                            ),
+                        )
+                finally:
+                    executor.shutdown(wait=False, cancel_futures=True)
+            state["stages"]["market_data"]["status"] = "completed"
+
+            state["stage"] = "quality"
+            state["stages"]["quality"]["status"] = "running"
+
+            def quality_progress(item):
+                done = int(item.get("done", 0))
+                state["stages"]["quality"]["done"] = done
+                state["done"] = len(universe) + done
+                state["currentSecurity"] = item.get("currentSecurity")
+                progress(state)
+
+            coverage = coverage_service.build(
+                universe,
+                approximate_securities=approximate_provider(),
+                progress=quality_progress,
+            )
+            state["stages"]["quality"].update(
+                status="completed", rows=coverage["readyCount"]
+            )
+
+            latest = {
+                f"{item['exchange']}{item['code']}": item
+                for item in pipeline.cached_securities()
+                if item["exchange"] in SUPPORTED_EXCHANGES
+                and is_security_identity_valid(item["exchange"], item["code"])
+            }
+            changed = {
+                key
+                for key, item in latest.items()
+                if payload["oldSnapshots"].get(key) != item.get("snapshot_version")
+            }
+            target_keys = (
+                set(latest)
+                if payload["downstreamScope"] == "all"
+                else changed | set(payload["staleKeys"])
+            )
+            targets = [latest[key] for key in sorted(target_keys & set(latest))]
+            base_done = len(universe) * 2
+            base_errors = list(market_errors)
+
+            if targets:
+                def layer_progress(layer_state):
+                    state["stage"] = layer_state["stage"]
+                    state["stages"].update(layer_state["stages"])
+                    state["done"] = base_done + layer_state["done"]
+                    state["total"] = base_done + layer_state["total"]
+                    state["rows"] = layer_state["rows"]
+                    state["errors"] = base_errors + layer_state["errors"]
+                    state["currentSecurity"] = layer_state.get("currentSecurity")
+                    progress(state)
+
+                layer_result = self.layer_tasks.submit(
+                    pipeline,
+                    source,
+                    targets,
+                    payload["names"],
+                    output_root,
+                    inline_progress=layer_progress,
+                )
+                layer_progress(layer_result)
+            else:
+                for name in ("labels", "features", "scores"):
+                    state["stages"][name] = {
+                        "status": "skipped",
+                        "total": 0,
+                        "done": 0,
+                        "rows": 0,
+                        "errors": 0,
+                    }
+            state["stage"] = "finished"
+            state["currentSecurity"] = None
+            state["changedSecurities"] = len(changed)
+            state["rebuiltSecurities"] = len(targets)
+            progress(state)
+            return state
+
+        return self._submit("daily_research_pipeline", payload, operation)
 
 
 class ArtifactCleanupTaskStore(_TaskFacade):
@@ -1087,10 +1316,20 @@ def create_app(
         min_history_rows=settings.history_backfill_min_days,
         freshness_days=settings.history_backfill_freshness_days,
     )
+    daily_pipeline_tasks = DailyResearchPipelineTaskStore(
+        coordinator,
+        job_store,
+        submission_lock,
+        research_pipeline_tasks,
+        settings.download_workers,
+    )
     backup_manager = DataBackupManager(
         settings.data_path,
         settings.backup_path or settings.data_path.parent / "backups",
         exclude_paths=(jobs_db_path, jobs_db_path.with_name(jobs_db_path.name + ".wal")),
+    )
+    management_audit = ManagementAuditLog(
+        settings.data_path / "operations" / "management-audit.json"
     )
 
     def read_backup_checksum(path: Path) -> str | None:
@@ -1285,6 +1524,11 @@ def create_app(
             submitted = coordinator.submit(
                 "provider_probe", {"quick": quick}, operation, resumable=False
             )
+        management_audit.record(
+            "provider_probe_submitted",
+            target=submitted.job_id,
+            details={"quick": quick},
+        )
         return {"taskId": submitted.job_id, "quick": quick}
 
     label_status_cache: dict[str, object] = {"expires": 0.0, "value": None}
@@ -1318,6 +1562,7 @@ def create_app(
         invalidate_score_status()
 
     research_pipeline_tasks.on_finish = invalidate_research_pipeline_status
+    daily_pipeline_tasks.on_finish = invalidate_research_pipeline_status
 
     @app.get("/api/labels/status")
     def label_dataset_status():
@@ -1431,6 +1676,66 @@ def create_app(
     @app.get("/healthz", include_in_schema=False)
     def healthz():
         return {"status": "ok", "activeTasks": len(coordinator.active())}
+
+    @app.get("/api/system/operations")
+    def operations_status():
+        usage = shutil.disk_usage(settings.data_path)
+        free_ratio = usage.free / usage.total if usage.total else 0.0
+        recent = list(reversed(job_store.list()))[:50]
+        failed = sum(job.status is JobStatus.FAILED for job in recent)
+        active = coordinator.active()
+        quality_result = quality()
+        provider = provider_gate_status()
+        alerts = []
+        if free_ratio < 0.1:
+            alerts.append({"severity": "critical", "code": "DISK_LOW", "message": "磁盘剩余空间低于 10%"})
+        elif free_ratio < 0.2:
+            alerts.append({"severity": "warning", "code": "DISK_WARNING", "message": "磁盘剩余空间低于 20%"})
+        if failed:
+            alerts.append({"severity": "warning", "code": "TASK_FAILURES", "message": f"最近 50 个任务中有 {failed} 个失败"})
+        if not (provider.get("report") or {}).get("passed"):
+            alerts.append({"severity": "warning", "code": "PROVIDER_GATE", "message": "数据源上线 Gate 尚未通过"})
+        if quality_result.get("freshnessCoverage", 0) < quality_result.get(
+            "freshnessMinCoverage", 1
+        ):
+            alerts.append({"severity": "warning", "code": "DATA_STALE", "message": "行情新鲜度覆盖未达研究门槛"})
+        overall = (
+            "critical"
+            if any(item["severity"] == "critical" for item in alerts)
+            else "warning" if alerts else "ok"
+        )
+        return {
+            "status": overall,
+            "disk": {
+                "totalBytes": usage.total,
+                "usedBytes": usage.used,
+                "freeBytes": usage.free,
+                "freeRatio": free_ratio,
+            },
+            "data": {
+                "latestDataDate": quality_result.get("latestDataDate"),
+                "freshnessCoverage": quality_result.get("freshnessCoverage", 0),
+                "freshnessMinCoverage": quality_result.get(
+                    "freshnessMinCoverage", 1
+                ),
+            },
+            "tasks": {
+                "active": len(active),
+                "activeTaskId": active[0].id if active else None,
+                "failedInRecent50": failed,
+            },
+            "provider": {
+                "available": provider.get("available", False),
+                "passed": bool((provider.get("report") or {}).get("passed")),
+                "probedAt": (provider.get("report") or {}).get("probedAt"),
+            },
+            "alerts": alerts,
+        }
+
+    @app.get("/api/system/operations/audit")
+    def management_audit_entries(limit: int = 100):
+        items = management_audit.list(limit=max(1, min(500, limit)))
+        return {"items": items, "total": len(items)}
 
     @app.get("/api/tasks/recent")
     def recent_tasks(limit: int = 10):
@@ -1629,9 +1934,18 @@ def create_app(
 
     @app.put("/api/system/maintenance-schedule")
     def configure_maintenance_schedule(request: MaintenanceScheduleRequest):
-        return maintenance_scheduler.configure(
+        result = maintenance_scheduler.configure(
             enabled=request.enabled, hour=request.hour, minute=request.minute
         )
+        management_audit.record(
+            "maintenance_schedule_configured",
+            details={
+                "enabled": request.enabled,
+                "hour": request.hour,
+                "minute": request.minute,
+            },
+        )
+        return result
 
     @app.post("/api/system/maintenance-schedule/run", status_code=202)
     def run_scheduled_maintenance_now():
@@ -1677,6 +1991,7 @@ def create_app(
                 return {"done": 1, "total": 1, "errors": [], **verification}
 
             submitted = coordinator.submit("backup", {}, operation, resumable=False)
+        management_audit.record("backup_submitted", target=submitted.job_id)
         return {"taskId": submitted.job_id}
 
     @app.get("/api/system/backups/{name}/verify")
@@ -1740,6 +2055,11 @@ def create_app(
             size = path.stat().st_size
             path.unlink()
             checksum_path.unlink(missing_ok=True)
+        management_audit.record(
+            "backup_deleted",
+            target=name,
+            details={"size": size, "sha256": recorded},
+        )
         return {"deleted": True, "name": name, "size": size, "sha256": recorded}
 
     @app.get("/api/system/artifact-cleanup")
@@ -1761,6 +2081,11 @@ def create_app(
         atomic_write_text(
             json.dumps(plan.to_dict(), ensure_ascii=False, indent=2),
             artifact_cleanup_plan_path,
+        )
+        management_audit.record(
+            "artifact_cleanup_planned",
+            target=plan.plan_id,
+            details={"files": len(plan.files)},
         )
         return artifact_cleanup_plan_response(plan)
 
@@ -1801,6 +2126,15 @@ def create_app(
             request.mode,
             artifact_cleanup_receipt_root,
             artifact_cleanup_plan_path,
+        )
+        management_audit.record(
+            "artifact_cleanup_submitted",
+            target=task_id,
+            details={
+                "planId": plan.plan_id,
+                "mode": request.mode,
+                "files": len(plan.files),
+            },
         )
         return {
             "taskId": task_id,
@@ -2332,6 +2666,79 @@ def create_app(
             )
         return research_pipeline_tasks.items[task_id]
 
+    @app.post("/api/pipeline/daily/build", status_code=202)
+    def build_daily_research_pipeline(request: DailyPipelineRequest):
+        daily_pipeline_tasks.active()
+        universe = [
+            item
+            for item in securities_list()
+            if item["exchange"] in SUPPORTED_EXCHANGES
+            and is_security_identity_valid(item["exchange"], item["code"])
+        ]
+        if not universe:
+            raise HTTPException(
+                409,
+                detail={"code": "SECURITY_UNIVERSE_EMPTY", "message": "沪深证券清单为空"},
+            )
+        cached = {
+            f"{item['exchange']}{item['code']}": item
+            for item in pipeline.cached_securities()
+            if item["exchange"] in SUPPORTED_EXCHANGES
+        }
+        lineages = (
+            artifact_lineage("data-foundation-v1/labels/*/*/*.parquet"),
+            artifact_lineage(
+                f"data-foundation-v1/features/{FEATURE_DEFINITION_VERSION}/*/*/*.parquet"
+            ),
+            artifact_lineage(
+                f"data-foundation-v1/scores/{SCORE_DEFINITION_VERSION}/*/*/*.parquet"
+            ),
+        )
+        stale_keys = set().union(
+            *(set(lineage.stale_paths) | lineage.missing_keys for lineage in lineages)
+        )
+        names = {
+            f"{item['exchange']}{item['code']}": item.get("name", "")
+            for item in universe
+        }
+        start = date.fromisoformat(
+            f"{settings.history_start_date[:4]}-{settings.history_start_date[4:6]}-"
+            f"{settings.history_start_date[6:]}"
+        )
+        task_id = daily_pipeline_tasks.submit(
+            pipeline,
+            download_source,
+            coverage_service,
+            universe,
+            names,
+            {
+                key: item.get("snapshot_version")
+                for key, item in cached.items()
+            },
+            {f"{exchange}{code}" for exchange, code in stale_keys},
+            current_approximate_securities,
+            settings.data_path,
+            start_date=start,
+            end_date=date.today(),
+            timeout_seconds=settings.security_fetch_timeout_seconds,
+            downstream_scope=request.scope,
+        )
+        return {
+            "taskId": task_id,
+            "total": len(universe),
+            "scope": request.scope,
+            "stages": 5,
+        }
+
+    @app.get("/api/pipeline/daily/tasks/{task_id}")
+    def daily_research_pipeline_task_status(task_id: str):
+        if task_id not in daily_pipeline_tasks.items:
+            raise HTTPException(
+                404,
+                detail={"code": "TASK_NOT_FOUND", "message": "daily pipeline task not found"},
+            )
+        return daily_pipeline_tasks.items[task_id]
+
     def read_dataset_glob(
         pattern: str,
         unique_keys: list[str] | None = None,
@@ -2533,6 +2940,34 @@ def create_app(
     @app.post("/api/scan/p3")
     def scan_p3(request: ScanRequest):
         require_readable_artifacts(scores=score_dataset_status())
+        registry = model_registry.list()
+        current_manifest_hash = research_data_snapshot()["manifestHash"]
+        selected_model = None
+        fallback_reasons = []
+        for kind in ("multifeature", "baseline"):
+            active = registry.get("activeModels", {}).get(kind)
+            if not isinstance(active, dict):
+                continue
+            artifact = model_registry.get(str(active.get("modelId", "")))
+            if artifact is None:
+                fallback_reasons.append(f"{kind} 当前模型不可读取")
+                continue
+            expected_version = VERSIONS[
+                "multiFeatureModelDefinitionVersion"
+                if kind == "multifeature"
+                else "modelDefinitionVersion"
+            ]
+            if artifact.get("result", {}).get("version") != expected_version:
+                fallback_reasons.append(f"{kind} 当前模型版本已过期")
+                continue
+            if (
+                artifact.get("dependencies", {}).get("dataSnapshotHash")
+                != current_manifest_hash
+            ):
+                fallback_reasons.append(f"{kind} 当前模型依赖旧行情快照")
+                continue
+            selected_model = artifact
+            break
         scores = read_dataset_glob(
             "data-foundation-v1/scores/*/*/*/*.parquet",
             ["exchange", "code", "date"],
@@ -2546,6 +2981,9 @@ def create_app(
                 "minScore": request.min_score,
                 "scannedCount": 0,
                 "truncated": False,
+                "rankingMode": "p3",
+                "activeModel": None,
+                "fallbackReason": "没有可扫描的当前评分",
                 "rows": [],
             }
             return register_research_run("p6-scan", result, request)
@@ -2561,9 +2999,77 @@ def create_app(
         scores = scores.sort_values(["exchange", "code", "date"]).drop_duplicates(
             ["exchange", "code"], keep="last"
         )
-        scores = scores.loc[scores["score"] >= request.min_score].sort_values(
-            ["score", "date"], ascending=[False, False]
-        )
+        scores = scores.loc[scores["score"] >= request.min_score]
+        active_model = None
+        ranking_mode = "p3"
+        fallback_reason = None
+        if selected_model is not None:
+            model_result = selected_model["result"]
+            kind = selected_model["kind"]
+            try:
+                if kind == "multifeature":
+                    feature_columns = list(model_result["featureColumns"])
+                    required_features = [
+                        column for column in feature_columns if column != "score"
+                    ]
+                    features = read_dataset_glob(
+                        "data-foundation-v1/features/*/*/*/*.parquet",
+                        ["exchange", "code", "date"],
+                        ["exchange", "code", "date", *required_features],
+                        tail_rows_per_file=SCAN_ROWS_PER_SECURITY,
+                    )
+                    features["date"] = pd.to_datetime(features["date"]).dt.date
+                    if request.as_of_date is not None:
+                        features = features.loc[features["date"] <= request.as_of_date]
+                    features = features.sort_values(
+                        ["exchange", "code", "date"]
+                    ).drop_duplicates(["exchange", "code"], keep="last")
+                    scores = scores.merge(
+                        features,
+                        on=["exchange", "code", "date"],
+                        how="left",
+                    )
+                    linear = pd.Series(
+                        float(model_result["intercept"]), index=scores.index
+                    )
+                    for column in feature_columns:
+                        values = pd.to_numeric(scores[column], errors="coerce")
+                        mean = float(model_result["featureMeans"][column])
+                        std = float(model_result["featureStds"][column]) or 1.0
+                        weight = float(model_result["weights"][column])
+                        linear = linear + weight * ((values - mean) / std)
+                else:
+                    normalized_score = (scores["score"] - 50.0) / 25.0
+                    linear = float(model_result["intercept"]) + float(
+                        model_result["coefficient"]
+                    ) * normalized_score
+                clipped = linear.clip(lower=-35, upper=35)
+                scores["modelProbability"] = 1.0 / (
+                    1.0 + (-clipped).map(math.exp)
+                )
+                ranking_mode = "model"
+                active_model = {
+                    "modelId": selected_model["modelId"],
+                    "kind": kind,
+                    "version": model_result["version"],
+                    "labelColumn": model_result.get("labelColumn"),
+                }
+            except (KeyError, TypeError, ValueError) as exc:
+                scores["modelProbability"] = None
+                fallback_reason = f"当前模型缺少推理参数：{exc}"
+        if ranking_mode == "model":
+            scores = scores.sort_values(
+                ["modelProbability", "score", "date"],
+                ascending=[False, False, False],
+                na_position="last",
+            )
+        else:
+            scores = scores.sort_values(
+                ["score", "date"], ascending=[False, False]
+            )
+            fallback_reason = fallback_reason or (
+                "；".join(fallback_reasons) if fallback_reasons else "尚未启用可用当前模型，使用 P3 排序"
+            )
         candidate_count = int(len(scores))
         scores = scores.head(request.limit)
         rows = [
@@ -2573,6 +3079,11 @@ def create_app(
                 "date": row.date,
                 "score": float(row.score),
                 "grade": getattr(row, "grade", None),
+                "modelProbability": (
+                    float(row.modelProbability)
+                    if pd.notna(getattr(row, "modelProbability", None))
+                    else None
+                ),
             }
             for row in scores.itertuples(index=False)
         ]
@@ -2583,6 +3094,9 @@ def create_app(
             "minScore": request.min_score,
             "scannedCount": candidate_count,
             "truncated": candidate_count > request.limit,
+            "rankingMode": ranking_mode,
+            "activeModel": active_model,
+            "fallbackReason": fallback_reason,
             "rows": rows,
         }
         return register_research_run("p6-scan", result, request)
@@ -2967,6 +3481,11 @@ def create_app(
                 404 if exc.code == "MODEL_NOT_FOUND" else 409,
                 detail={"code": exc.code, "message": str(exc)},
             ) from exc
+        management_audit.record(
+            "model_promoted",
+            target=model_id,
+            details={"kind": active["kind"], "previousModelId": active["previousModelId"]},
+        )
         return {"status": "active", **active}
 
     @app.get("/api/research/runs")

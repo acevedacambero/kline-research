@@ -91,6 +91,60 @@
         }
       }
     },
+    "/api/system/operations": {
+      "get": {
+        "summary": "Operations Status",
+        "operationId": "operations_status_api_system_operations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/operations/audit": {
+      "get": {
+        "summary": "Management Audit Entries",
+        "operationId": "management_audit_entries_api_system_operations_audit_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/tasks/recent": {
       "get": {
         "summary": "Recent Tasks",
@@ -1225,6 +1279,79 @@
         }
       }
     },
+    "/api/pipeline/daily/build": {
+      "post": {
+        "summary": "Build Daily Research Pipeline",
+        "operationId": "build_daily_research_pipeline_api_pipeline_daily_build_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DailyPipelineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pipeline/daily/tasks/{task_id}": {
+      "get": {
+        "summary": "Daily Research Pipeline Task Status",
+        "operationId": "daily_research_pipeline_task_status_api_pipeline_daily_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/validation/single-factor": {
       "post": {
         "summary": "Single Factor Validation",
@@ -2098,6 +2225,21 @@
         },
         "type": "object",
         "title": "CoverageRebuildRequest"
+      },
+      "DailyPipelineRequest": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "all"
+            ],
+            "title": "Scope",
+            "default": "changed"
+          }
+        },
+        "type": "object",
+        "title": "DailyPipelineRequest"
       },
       "DriftRequest": {
         "properties": {

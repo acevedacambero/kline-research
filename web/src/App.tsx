@@ -6,6 +6,7 @@ import {
   type FeatureAudit,
   type FeatureValue,
   type Health,
+  type OperationsStatus,
   type LabelStatus,
   type Security,
   type ScoreAudit,
@@ -190,6 +191,7 @@ const taskKindNames: Record<string, string> = {
   features: "P2 特征",
   scores: "P3 评分",
   research_pipeline: "P1–P3 研究流水线",
+  daily_research_pipeline: "日常研究维护流水线",
   provider_probe: "数据源诊断",
   artifact_cleanup: "衍生产物清理",
 };
@@ -323,6 +325,7 @@ const readinessCheckNames: Record<string, string> = {
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null);
+  const [operations, setOperations] = useState<OperationsStatus | null>(null);
   const [providerGate, setProviderGate] = useState<ProviderGateStatus | null>(
     null,
   );
@@ -521,6 +524,9 @@ export function App() {
       case "research_pipeline":
         void startResearchPipeline();
         break;
+      case "daily_research_pipeline":
+        void startDailyPipeline("changed");
+        break;
       case "artifact_cleanup":
         if (artifactCleanup?.plan) {
           void runArtifactCleanup(task.mode ?? "quarantine");
@@ -578,6 +584,7 @@ export function App() {
       .health()
       .then(setHealth)
       .catch((e) => setMessage(e.message));
+    api.operations().then(setOperations).catch(() => undefined);
     api
       .providerGate()
       .then(setProviderGate)
@@ -1162,6 +1169,52 @@ export function App() {
     }
   }
 
+  async function startDailyPipeline(scope: "changed" | "all" = "changed") {
+    setBusy(true);
+    try {
+      const result = await api.buildDailyPipeline(scope);
+      setMessage(
+        `日常研究维护 ${result.taskId.slice(0, 8)} 已启动，共 ${result.total} 只证券`,
+      );
+      const poll = async (): Promise<void> => {
+        const task = await api.taskStatus(result.taskId);
+        showTask("日常研究维护流水线", result.taskId, task);
+        const stageName =
+          task.stage === "market_data"
+            ? "行情增量更新"
+            : task.stage === "quality"
+              ? "质量检查"
+              : task.stage === "labels"
+                ? "P1 标签"
+                : task.stage === "features"
+                  ? "P2 特征"
+                  : task.stage === "scores"
+                    ? "P3 评分"
+                    : task.stage === "finished"
+                      ? "全部完成"
+                      : "准备中";
+        setMessage(
+          `日常研究维护 · ${stageName} · ${task.done}/${task.total} · 错误 ${task.errors.length}`,
+        );
+        if (task.status === "queued" || task.status === "running") {
+          window.setTimeout(() => void poll(), 1000);
+        } else {
+          setBusy(false);
+          await Promise.all([
+            refreshResearchStatus(),
+            api.coverage().then(setCoverage),
+            api.quality().then(setDatasetQuality),
+            refreshTaskHistory(false),
+          ]).catch(() => undefined);
+        }
+      };
+      await poll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "日常研究维护启动失败");
+      setBusy(false);
+    }
+  }
+
   async function runValidation() {
     setBusy(true);
     try {
@@ -1401,7 +1454,7 @@ export function App() {
   function exportPortfolio() {
     if (!portfolio) return;
     const csv = [
-      "version,labelColumn,topFraction,tradingDayCount,sampleCount,selectedCount,grossReturn,netReturn,benchmarkReturn,netExcessReturn,winRate,maxDrawdown,transactionCostBps,slippageBps,warnings",
+      "version,labelColumn,topFraction,tradingDayCount,sampleCount,selectedCount,grossReturn,netReturn,benchmarkReturn,netExcessReturn,winRate,averageTurnover,turnoverObservations,maxDrawdown,transactionCostBps,slippageBps,warnings",
       [
         portfolio.version,
         portfolio.labelColumn,
@@ -1414,6 +1467,8 @@ export function App() {
         portfolio.benchmarkReturn ?? "",
         portfolio.netExcessReturn ?? "",
         portfolio.winRate ?? "",
+        portfolio.averageTurnover ?? "",
+        portfolio.turnoverObservations,
         portfolio.maxDrawdown ?? "",
         portfolio.transactionCostBps,
         portfolio.slippageBps,
@@ -1433,11 +1488,18 @@ export function App() {
   function exportScan() {
     if (!scan?.rows.length) return;
     const csv = [
-      "exchange,code,date,score,grade",
+      "exchange,code,date,score,grade,ranking_mode,model_id,model_probability",
       ...scan.rows.map((row) =>
-        [row.exchange, row.code, row.date, row.score, row.grade ?? ""].join(
-          ",",
-        ),
+        [
+          row.exchange,
+          row.code,
+          row.date,
+          row.score,
+          row.grade ?? "",
+          scan.rankingMode,
+          scan.activeModel?.modelId ?? "",
+          row.modelProbability ?? "",
+        ].join(","),
       ),
     ].join("\n");
     const url = URL.createObjectURL(
@@ -1807,6 +1869,24 @@ export function App() {
             <span>可恢复任务</span>
             <strong>{health?.recoverableTasks ?? 0}</strong>
             <small>再次点击对应任务即可续跑</small>
+          </div>
+          <div className="version">
+            <span>VPS 磁盘剩余</span>
+            <strong>{operations?.disk ? formatBytes(operations.disk.freeBytes) : "—"}</strong>
+            <small>
+              {operations?.disk
+                ? `${pct(operations.disk.freeRatio)} · ${operations.status === "critical" ? "严重不足" : operations.status === "warning" ? "需要关注" : "正常"}`
+                : "正在读取"}
+            </small>
+          </div>
+          <div className="version">
+            <span>运维告警</span>
+            <strong>{operations?.alerts?.length ?? "—"}</strong>
+            <small>
+              {operations?.alerts?.length
+                ? operations.alerts.slice(0, 2).map((item) => item.message).join("；")
+                : "磁盘、数据、任务和数据源正常"}
+            </small>
           </div>
           <div className="version">
             <span>交易规则</span>
@@ -2426,6 +2506,16 @@ export function App() {
           >
             补全短历史
           </button>
+          <button disabled={busy} onClick={() => startDailyPipeline("changed")}>
+            一键日常更新与研究维护
+          </button>
+          <button
+            className="secondary"
+            disabled={busy}
+            onClick={() => startDailyPipeline("all")}
+          >
+            全量运行研究维护
+          </button>
           <button disabled={busy} onClick={startResearchPipeline}>
             一键补齐 P1–P3
           </button>
@@ -2594,6 +2684,10 @@ export function App() {
                 <span key={stage}>
                   {stage === "labels"
                     ? "P1 标签"
+                    : stage === "market_data"
+                      ? "行情更新"
+                      : stage === "quality"
+                        ? "质量检查"
                     : stage === "features"
                       ? "P2 特征"
                       : stage === "scores"
@@ -3175,6 +3269,13 @@ export function App() {
                     : ""}
                 </small>
               </article>
+              <article>
+                <span>平均单向换手率</span>
+                <strong>{pct(portfolio.averageTurnover)}</strong>
+                <small>
+                  {portfolio.turnoverObservations} 次相邻调仓观察 · 成本与滑点按当前简化口径扣除
+                </small>
+              </article>
             </div>
             <EquityCurveChart
               points={portfolio.equityCurve ?? []}
@@ -3439,7 +3540,7 @@ export function App() {
           </div>
           {scan && (
             <span className="message">
-              最低分 {scan.minScore} · {scan.scannedCount} 条
+              最低分 {scan.minScore} · {scan.scannedCount} 条 · {scan.rankingMode === "model" ? "当前模型排序" : "P3 排序"}
             </span>
           )}
         </div>
@@ -3483,6 +3584,13 @@ export function App() {
             </button>
           ) : null}
         </div>
+        {scan && (
+          <p className="muted">
+            {scan.rankingMode === "model" && scan.activeModel
+              ? `使用当前 ${modelKindNames[scan.activeModel.kind] ?? scan.activeModel.kind} ${scan.activeModel.modelId.slice(0, 8)}，预测口径 ${resultLabelName(scan.activeModel.labelColumn)}`
+              : `未使用当前模型：${scan.fallbackReason ?? "使用 P3 结构评分排序"}`}
+          </p>
+        )}
         {scan ? (
           <table className="scan-table">
             <thead>
@@ -3492,6 +3600,7 @@ export function App() {
                 <th>评分日期</th>
                 <th>分数</th>
                 <th>等级</th>
+                <th>模型概率</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -3503,6 +3612,7 @@ export function App() {
                   <td>{row.date}</td>
                   <td>{row.score.toFixed(1)}</td>
                   <td>{row.grade ?? "—"}</td>
+                  <td>{row.modelProbability == null ? "—" : pct(row.modelProbability)}</td>
                   <td>
                     <button
                       className="link-button"

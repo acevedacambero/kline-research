@@ -159,7 +159,10 @@ def test_multifeature_baseline_trains_with_p2_columns():
     labels = label_rows(40)
     labels["label_maturity_date"] = labels["signal_date"]
     result = train_multifeature_baseline(scores, labels, features, train_until=date(2024, 1, 30))
-    assert result["version"] == "p7-multifeature-logistic-v1"
+    assert result["version"] == "p7-multifeature-logistic-v2-inference"
+    assert result["intercept"] is not None
+    assert set(result["featureMeans"]) == set(result["featureColumns"])
+    assert set(result["featureStds"]) == set(result["featureColumns"])
     assert result["trainCount"] == 30
     assert set(result["weights"]) == {
         "score",
@@ -215,7 +218,9 @@ def test_walk_forward_windows_allow_long_horizon_labels_to_mature():
 
 def test_top_score_portfolio_reports_excess_return():
     result = validate_top_score_portfolio(score_rows(20), mature_label_rows(20), top_fraction=0.2)
-    assert result["version"] == "p8-top-score-portfolio-v4-benchmark"
+    assert result["version"] == "p8-top-score-portfolio-v5-turnover"
+    assert result["turnoverObservations"] > 0
+    assert 0 <= result["averageTurnover"] <= 1
     assert result["selectedCount"] > 0
     assert result["tradingDayCount"] == 20
     assert result["maxDrawdown"] is None
