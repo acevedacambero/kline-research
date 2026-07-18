@@ -34,3 +34,5 @@ For the final production rebuild, stop `kline.service` first and run
 writer while it completes history backfill, coverage rebuild and a full
 P1→P2→P3 rebuild. Always restart the service afterward; use a shell trap in
 unattended operation so a failed build cannot leave the web service stopped.
+`deploy/run-final-data-build.sh` provides that guarded server wrapper and can
+be launched as a transient user systemd unit for durable unattended execution.
