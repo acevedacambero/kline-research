@@ -875,6 +875,15 @@ export function App() {
     }
   }
 
+  function confirmArtifactDeletion() {
+    const plan = artifactCleanup?.plan;
+    if (!plan?.fileCount) return;
+    const confirmed = window.confirm(
+      `将永久删除 ${plan.fileCount} 个已有替代品或孤儿文件（${formatBytes(plan.totalBytes)}），此操作不能撤销。确认继续？`,
+    );
+    if (confirmed) void runArtifactCleanup("delete");
+  }
+
   async function startLabels(scope: "failed" | "all" = "all") {
     setBusy(true);
     try {
@@ -2277,6 +2286,13 @@ export function App() {
               onClick={() => runArtifactCleanup("quarantine")}
             >
               隔离清理旧产物
+            </button>
+            <button
+              className="danger"
+              disabled={busy || !artifactCleanup?.plan?.fileCount}
+              onClick={confirmArtifactDeletion}
+            >
+              永久删除旧产物
             </button>
           </div>
           <p className="muted">恢复操作需先停止服务，并使用服务器恢复命令，避免运行中的数据库被替换。</p>

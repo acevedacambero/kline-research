@@ -124,6 +124,58 @@ describe("App", () => {
     ).toHaveLength(4);
   });
 
+  it("requires confirmation before permanently deleting safe artifacts", async () => {
+    const planId = "a".repeat(64);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input);
+      let body: unknown = {};
+      if (path === "/api/system/health") {
+        body = { status: "ok", dataSource: "AkShare", cachePath: "data", versions: {} };
+      } else if (path === "/api/system/artifact-cleanup") {
+        body = {
+          available: true,
+          plan: {
+            version: "artifact-cleanup-v1",
+            planId,
+            snapshotSetHash: "snapshot",
+            fileCount: 2,
+            totalBytes: 4096,
+            createdAt: "2026-07-18T00:00:00Z",
+            reasons: { superseded: 2 },
+            layers: { labels: 2 },
+            examples: [],
+          },
+        };
+      } else if (path === "/api/system/artifact-cleanup/execute") {
+        body = { taskId: "cleanup-task", planId, mode: "delete", total: 2 };
+      } else if (path === "/api/tasks/cleanup-task") {
+        body = { id: "cleanup-task", jobType: "artifact_cleanup", status: "completed", done: 2, total: 2, errors: [] };
+      } else if (path.startsWith("/api/tasks/recent")) {
+        body = [];
+      } else if (path.includes("/quality")) {
+        body = { totalCached: 0 };
+      }
+      return { ok: true, json: async () => body };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "永久删除旧产物" }));
+
+    await waitFor(() => {
+      const executeCall = fetchMock.mock.calls.find(
+        ([input]) => String(input) === "/api/system/artifact-cleanup/execute",
+      );
+      expect(executeCall).toBeDefined();
+      expect(JSON.parse(String(executeCall?.[1]?.body))).toEqual({
+        plan_id: planId,
+        mode: "delete",
+      });
+    });
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("不能撤销"));
+  });
+
   it("runs the P1-P3 pipeline and renders stage progress", async () => {
     vi.stubGlobal(
       "fetch",

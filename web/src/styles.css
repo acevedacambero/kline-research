@@ -453,6 +453,11 @@ button.secondary {
   background: #182534;
   color: #b9c5d2;
 }
+button.danger {
+  background: #3a1c24;
+  color: #ffb4c0;
+  border: 1px solid #6f2e3c;
+}
 button:disabled {
   opacity: 0.45;
   cursor: wait;
