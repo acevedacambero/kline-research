@@ -67,6 +67,7 @@ def main() -> int:
     )
     parser.add_argument("--skip-backfill", action="store_true")
     parser.add_argument("--poll-seconds", type=float, default=5.0)
+    parser.add_argument("--research-scope", choices=("all", "stale"), default="all")
     args = parser.parse_args()
 
     settings = Settings(cloudflare_access_required=False)
@@ -86,7 +87,7 @@ def main() -> int:
         run_task(
             client,
             "/api/pipeline/research/build",
-            payload={"scope": "all"},
+            payload={"scope": args.research_scope},
             poll_seconds=args.poll_seconds,
         )
         acceptance = client.get("/api/system/research-acceptance")

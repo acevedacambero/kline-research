@@ -14,7 +14,10 @@ set -a
 source "${root}/shared/.env"
 set +a
 cd "${root}/current"
-args=(--poll-seconds "${KLINE_FINAL_BUILD_POLL_SECONDS:-10}")
+args=(
+  --poll-seconds "${KLINE_FINAL_BUILD_POLL_SECONDS:-10}"
+  --research-scope "${KLINE_FINAL_BUILD_RESEARCH_SCOPE:-all}"
+)
 if [[ "${KLINE_FINAL_BUILD_SKIP_BACKFILL:-0}" == "1" ]]; then
   args+=(--skip-backfill)
 fi
