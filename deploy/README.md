@@ -28,3 +28,9 @@ Use `deploy/install-release.sh RELEASE_ID SOURCE_TAR WEB_DIST_TAR` for normal
 deployments. It validates inputs, links the shared runtime, records the actual
 previous release, runs the bounded health check, rolls back on failure, and
 prunes obsolete releases after success.
+
+For the final production rebuild, stop `kline.service` first and run
+`python scripts/run_final_data_build.py`. The command owns the only job/data
+writer while it completes history backfill, coverage rebuild and a full
+P1→P2→P3 rebuild. Always restart the service afterward; use a shell trap in
+unattended operation so a failed build cannot leave the web service stopped.
