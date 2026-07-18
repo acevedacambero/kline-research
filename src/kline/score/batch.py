@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -159,8 +160,9 @@ class ScoreDatasetStore:
 
 
 class BatchScoreBuilder:
-    def __init__(self, store: ScoreDatasetStore):
+    def __init__(self, store: ScoreDatasetStore, *, workers: int = 1):
         self.store = store
+        self.workers = max(1, int(workers))
 
     def build_security(self, security: dict[str, Any]) -> ScoreStoreReport:
         frame = pd.read_parquet(security["derived_path"])
@@ -222,18 +224,40 @@ class BatchScoreBuilder:
         done = 0
         errors: list[dict[str, str]] = []
         outputs: list[ScoreStoreReport] = []
-        for security in securities:
+        items = list(securities)
+
+        def finished(security, report=None, error=None):
+            nonlocal rows, done
             security_key = f"{security['exchange']}{security['code']}"
-            try:
-                report = self.build_security(security)
+            if report is not None:
                 outputs.append(report)
                 rows += report.rows
                 if on_progress:
                     on_progress(security_key, report, None)
-            except Exception as exc:
-                errors.append({"security": security_key, "message": str(exc)})
+            if error is not None:
+                errors.append({"security": security_key, "message": str(error)})
                 if on_progress:
-                    on_progress(security_key, None, exc)
-            finally:
-                done += 1
+                    on_progress(security_key, None, error)
+            done += 1
+
+        if self.workers == 1:
+            for security in items:
+                try:
+                    finished(security, report=self.build_security(security))
+                except Exception as exc:
+                    finished(security, error=exc)
+        else:
+            with ThreadPoolExecutor(
+                max_workers=self.workers, thread_name_prefix="p3-score"
+            ) as executor:
+                futures = {
+                    executor.submit(self.build_security, security): security
+                    for security in items
+                }
+                for future in as_completed(futures):
+                    security = futures[future]
+                    try:
+                        finished(security, report=future.result())
+                    except Exception as exc:
+                        finished(security, error=exc)
         return BatchScoreReport(done, rows, errors, outputs)

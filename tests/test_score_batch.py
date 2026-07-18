@@ -89,7 +89,7 @@ def test_batch_score_builder_isolates_invalid_security(tmp_path):
     invalid_path = tmp_path / "invalid.parquet"
     derived_frame().to_parquet(valid_path, index=False)
     pd.DataFrame([{"date": date(2024, 1, 1)}]).to_parquet(invalid_path, index=False)
-    builder = BatchScoreBuilder(ScoreDatasetStore(tmp_path / "output"))
+    builder = BatchScoreBuilder(ScoreDatasetStore(tmp_path / "output"), workers=2)
 
     report = builder.build_many(
         [
