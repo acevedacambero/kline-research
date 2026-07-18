@@ -14,4 +14,4 @@ if ! journalctl --user -u "${build_unit}" -o cat --no-pager \
   exit 1
 fi
 
-exec "${KLINE_APP_ROOT:-${HOME}/apps/kline}/current/deploy/run-formal-research.sh"
+exec /bin/bash "${KLINE_APP_ROOT:-${HOME}/apps/kline}/current/deploy/run-formal-research.sh"
