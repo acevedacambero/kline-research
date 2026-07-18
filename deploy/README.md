@@ -36,3 +36,8 @@ P1→P2→P3 rebuild. Always restart the service afterward; use a shell trap in
 unattended operation so a failed build cannot leave the web service stopped.
 `deploy/run-final-data-build.sh` provides that guarded server wrapper and can
 be launched as a transient user systemd unit for durable unattended execution.
+
+After the data build succeeds, `deploy/run-formal-research.sh` runs the standard
+P4–P8 experiment set, promotes only the trained P7 candidate with the stronger
+measurable out-of-sample AUC, and prints the final research acceptance report.
+It uses 7-day embargo isolation and a 10 bps cost plus 10 bps slippage P8 case.
