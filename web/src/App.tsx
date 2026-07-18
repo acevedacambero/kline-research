@@ -30,6 +30,7 @@ import {
   type ResearchRunComparison,
   type DriftReport,
   type ResearchAcceptance,
+  type ArtifactCleanupStatus,
 } from "./api";
 import { KlineChart } from "./KlineChart";
 import { EquityCurveChart } from "./EquityCurveChart";
@@ -162,6 +163,8 @@ type TaskView = {
   resumable?: boolean;
   stage?: string;
   stages?: GenericTask["stages"];
+  errorCategories?: Record<string, number>;
+  retryableErrors?: number;
 };
 const taskErrorText = (error: unknown) =>
   typeof error === "string"
@@ -169,6 +172,7 @@ const taskErrorText = (error: unknown) =>
     : error && typeof error === "object"
       ? [
           String("security" in error ? error.security : ""),
+          String("category" in error ? `[${error.category}]` : ""),
           String("message" in error ? error.message : ""),
         ]
           .filter(Boolean)
@@ -186,6 +190,7 @@ const taskKindNames: Record<string, string> = {
   scores: "P3 评分",
   research_pipeline: "P1–P3 研究流水线",
   provider_probe: "数据源诊断",
+  artifact_cleanup: "衍生产物清理",
 };
 const taskStatusNames: Record<string, string> = {
   queued: "等待中",
@@ -209,6 +214,12 @@ const taskElapsedTime = (createdAt?: string, updatedAt?: string) => {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   return `${hours} 小时 ${minutes} 分`;
+};
+const formatBytes = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 };
 const p1TermNames: Record<string, string> = {
   ok: "正常",
@@ -389,6 +400,8 @@ export function App() {
   const [coverageStatus, setCoverageStatus] = useState("");
   const [maintenance, setMaintenance] = useState<MaintenanceSchedule | null>(null);
   const [backups, setBackups] = useState<BackupList | null>(null);
+  const [artifactCleanup, setArtifactCleanup] =
+    useState<ArtifactCleanupStatus | null>(null);
   const [researchRuns, setResearchRuns] = useState<ResearchRunList | null>(null);
   const [researchKindFilter, setResearchKindFilter] = useState("");
   const [comparison, setComparison] = useState<ResearchRunComparison | null>(null);
@@ -412,6 +425,8 @@ export function App() {
       resumable?: boolean;
       stage?: string;
       stages?: GenericTask["stages"];
+      errorCategories?: Record<string, number>;
+      retryableErrors?: number;
     },
   ) => {
     setTaskView({
@@ -431,6 +446,8 @@ export function App() {
       resumable: task.resumable,
       stage: task.stage,
       stages: task.stages,
+      errorCategories: task.errorCategories,
+      retryableErrors: task.retryableErrors,
     });
   };
 
@@ -497,6 +514,13 @@ export function App() {
       case "scores":
         void startScores();
         break;
+      case "artifact_cleanup":
+        if (artifactCleanup?.plan) {
+          void runArtifactCleanup(task.mode ?? "quarantine");
+        } else {
+          setMessage("清理计划不可用，请重新扫描旧产物");
+        }
+        break;
       default:
         setMessage(`任务类型 ${task.jobType} 不支持续跑`);
     }
@@ -542,6 +566,7 @@ export function App() {
     api.coverage().then(setCoverage).catch(() => undefined);
     api.maintenanceSchedule().then(setMaintenance).catch(() => undefined);
     api.backups().then(setBackups).catch(() => undefined);
+    api.artifactCleanupStatus().then(setArtifactCleanup).catch(() => undefined);
     api.researchRuns().then(setResearchRuns).catch(() => undefined);
     const restoreTask = (task: GenericTask) => {
       showTask(taskKindNames[task.jobType] ?? task.jobType, task.id, task);
@@ -795,6 +820,57 @@ export function App() {
       await pollOperationsTask(result.taskId, "数据备份");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "备份启动失败");
+      setBusy(false);
+    }
+  }
+
+  async function planArtifactCleanup() {
+    setBusy(true);
+    setMessage("正在扫描孤儿和已被替代的衍生产物…");
+    try {
+      const plan = await api.planArtifactCleanup();
+      setArtifactCleanup({ available: true, plan });
+      setMessage(
+        plan.fileCount
+          ? `清理计划已生成：${plan.fileCount} 个文件，共 ${formatBytes(plan.totalBytes)}`
+          : "未发现可安全清理的衍生产物",
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "扫描旧产物失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runArtifactCleanup(
+    mode: "quarantine" | "delete" = "quarantine",
+  ) {
+    const plan = artifactCleanup?.plan;
+    if (!plan) {
+      setMessage("请先扫描并生成清理计划");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await api.executeArtifactCleanup(plan.planId, mode);
+      const poll = async (): Promise<void> => {
+        const task = await api.taskStatus(result.taskId);
+        showTask("衍生产物清理", result.taskId, task);
+        setMessage(
+          `衍生产物${mode === "delete" ? "删除" : "隔离"}：${task.done}/${task.total}`,
+        );
+        if (task.status === "queued" || task.status === "running") {
+          window.setTimeout(() => void poll(), 1000);
+        } else {
+          setBusy(false);
+          const latest = await api.artifactCleanupStatus();
+          setArtifactCleanup(latest);
+          await refreshTaskHistory(false);
+        }
+      };
+      await poll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "清理旧产物失败");
       setBusy(false);
     }
   }
@@ -1353,30 +1429,73 @@ export function App() {
     try {
       const detail = await api.researchRun(runId);
       const result = detail.result;
+      const parameters = detail.parameters ?? {};
+      const stringParameter = (name: string) => {
+        const value = parameters[name];
+        return typeof value === "string" ? value : undefined;
+      };
+      const numberParameter = (name: string) => {
+        const value = parameters[name];
+        return typeof value === "number" ? value : undefined;
+      };
       switch (detail.kind) {
         case "p4-single-factor":
           setValidation(result as unknown as SingleFactorValidation);
+          setValidationLabel(
+            stringParameter("label_column") ?? validationLabel,
+          );
           break;
         case "p5-calibration":
           setCalibration(result as unknown as ScoreCalibration);
+          setCalibrationLabel(
+            stringParameter("label_column") ?? calibrationLabel,
+          );
+          setCalibrationBuckets(
+            numberParameter("buckets") ?? calibrationBuckets,
+          );
           break;
         case "p6-scan":
           setScan(result as unknown as ScanResult);
+          setScanMinScore(numberParameter("min_score") ?? scanMinScore);
+          setScanExchange(stringParameter("exchange") ?? "");
+          setScanAsOfDate(stringParameter("as_of_date") ?? "");
           break;
         case "p7-baseline":
           setBaseline(result as unknown as BaselineModel);
+          setBaselineLabel(stringParameter("label_column") ?? baselineLabel);
+          setBaselineTrainUntil(stringParameter("train_until") ?? "");
           break;
         case "p7-multifeature":
           setMultifeature(result as unknown as MultiFeatureModel);
+          setBaselineLabel(stringParameter("label_column") ?? baselineLabel);
+          setBaselineTrainUntil(stringParameter("train_until") ?? "");
           break;
         case "p7-walk-forward":
           setWalkForward(result as unknown as WalkForwardResult);
+          setBaselineLabel(stringParameter("label_column") ?? baselineLabel);
           break;
         case "drift-monitor":
           setDriftReport(result as unknown as DriftReport);
+          setDriftRecentDays(
+            numberParameter("recent_days") ?? driftRecentDays,
+          );
+          setDriftReferenceDays(
+            numberParameter("reference_days") ?? driftReferenceDays,
+          );
           break;
         case "p8-portfolio":
           setPortfolio(result as unknown as PortfolioValidation);
+          setPortfolioLabel(stringParameter("label_column") ?? portfolioLabel);
+          setPortfolioFraction(
+            (numberParameter("top_fraction") ?? portfolioFraction / 100) * 100,
+          );
+          setPortfolioAsOfDate(stringParameter("as_of_date") ?? "");
+          setTransactionCostBps(
+            numberParameter("transaction_cost_bps") ?? transactionCostBps,
+          );
+          setSlippageBps(
+            numberParameter("slippage_bps") ?? slippageBps,
+          );
           break;
       }
       setMessage(`已重新载入实验 ${runId.slice(0, 8)}`);
@@ -1907,6 +2026,26 @@ export function App() {
                   .join("、")}
               </p>
             )}
+            {Object.values(researchAcceptance.experiments.staleCounts ?? {}).some(
+              (count) => count > 0,
+            ) && (
+              <p className="muted">
+                旧数据快照实验不计入验收：
+                {Object.entries(researchAcceptance.experiments.staleCounts ?? {})
+                  .filter(([, count]) => count > 0)
+                  .map(
+                    ([kind, count]) =>
+                      `${researchKindNames[kind] ?? kind} ${count} 次`,
+                  )
+                  .join("、")}
+              </p>
+            )}
+            {(researchAcceptance.models.staleActiveModels?.length ?? 0) > 0 && (
+              <p className="muted">
+                当前模型使用旧数据快照：
+                {researchAcceptance.models.staleActiveModels?.join("、")}
+              </p>
+            )}
             {researchAcceptance.blockers.length > 0 && (
               <ul className="gate-messages readiness-blockers">
                 {researchAcceptance.blockers.map((blocker) => (
@@ -2114,12 +2253,31 @@ export function App() {
               <strong>{backups?.items?.length ?? 0}</strong>
               <small>{backups?.items?.[0]?.createdAt ? `待转移 · 最新 ${new Date(backups.items[0].createdAt).toLocaleString("zh-CN")}` : "远端已清空，长期归档保存在本机"}</small>
             </article>
+            <article>
+              <span>可安全清理产物</span>
+              <strong>{artifactCleanup?.plan?.fileCount ?? "未扫描"}</strong>
+              <small>
+                {artifactCleanup?.plan
+                  ? `${formatBytes(artifactCleanup.plan.totalBytes)} · 仅孤儿和已有替代品的旧文件`
+                  : "不会清理尚未重建的唯一旧产物"}
+              </small>
+            </article>
           </div>
           <div className="status-actions">
             <button className="secondary" onClick={toggleMaintenanceSchedule}>
               {maintenance?.enabled ? "关闭自动更新" : "开启自动更新"}
             </button>
             <button className="secondary" disabled={busy} onClick={createBackup}>生成临时备份并校验</button>
+            <button className="secondary" disabled={busy} onClick={planArtifactCleanup}>
+              扫描旧产物
+            </button>
+            <button
+              className="secondary"
+              disabled={busy || !artifactCleanup?.plan?.fileCount}
+              onClick={() => runArtifactCleanup("quarantine")}
+            >
+              隔离清理旧产物
+            </button>
           </div>
           <p className="muted">恢复操作需先停止服务，并使用服务器恢复命令，避免运行中的数据库被替换。</p>
         </details>
@@ -2185,17 +2343,28 @@ export function App() {
           <button className="secondary" disabled={busy} onClick={startScores}>
             生成 P3 评分
           </button>
-          <button className="secondary" disabled={busy} onClick={runValidation}>
+          <button
+            className="secondary"
+            disabled={busy || readiness?.readyForModel === false}
+            title={readiness?.readyForModel === false ? "请先补齐 P1–P3 当前快照" : undefined}
+            onClick={runValidation}
+          >
             验证 P4 单因子
           </button>
           <button
             className="secondary"
-            disabled={busy}
+            disabled={busy || readiness?.readyForModel === false}
+            title={readiness?.readyForModel === false ? "请先补齐 P1–P3 当前快照" : undefined}
             onClick={runCalibration}
           >
             运行 P5 概率校准
           </button>
-          <button className="secondary" disabled={busy} onClick={runScan}>
+          <button
+            className="secondary"
+            disabled={busy || scoreStatus?.ready === false}
+            title={scoreStatus?.ready === false ? "请先生成当前快照的 P3 评分" : undefined}
+            onClick={runScan}
+          >
             扫描 P6 高分样本
           </button>
           <button
@@ -2228,7 +2397,14 @@ export function App() {
           </button>
           <button
             className="secondary"
-            disabled={busy}
+            disabled={
+              busy || featureCatalog?.ready === false || scoreStatus?.ready === false
+            }
+            title={
+              featureCatalog?.ready === false || scoreStatus?.ready === false
+                ? "请先补齐当前快照的 P2 特征和 P3 评分"
+                : undefined
+            }
             onClick={runDriftMonitor}
           >
             检查特征漂移
@@ -2286,6 +2462,13 @@ export function App() {
               </span>
             ) : null}
             <span>错误 {taskView.errors}</span>
+            {taskView.retryableErrors ? (
+              <span>可重试 {taskView.retryableErrors}</span>
+            ) : null}
+            {taskView.errorCategories &&
+              Object.entries(taskView.errorCategories).map(([category, count]) => (
+                <span key={category}>{category} {count}</span>
+              ))}
           </div>
           {taskView.stages && (
             <div className="task-facts" aria-label="流水线阶段">

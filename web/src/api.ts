@@ -367,6 +367,9 @@ export type GenericTask = {
     string,
     { status: string; done: number; total: number; rows: number; errors: number }
   >;
+  mode?: "quarantine" | "delete";
+  errorCategories?: Record<string, number>;
+  retryableErrors?: number;
 };
 export type ProviderMetric = {
   observations: number;
@@ -477,6 +480,28 @@ export type BackupList = {
   path: string;
   items: Array<{ name: string; size: number; createdAt: string }>;
 };
+export type ArtifactCleanupPlan = {
+  version: string;
+  planId: string;
+  snapshotSetHash: string;
+  fileCount: number;
+  totalBytes: number;
+  createdAt: string;
+  reasons: Record<string, number>;
+  layers: Record<string, number>;
+  examples: Array<{
+    path: string;
+    layer: string;
+    reason: string;
+    size: number;
+    mtime_ns: number;
+  }>;
+};
+export type ArtifactCleanupStatus = {
+  available: boolean;
+  plan?: ArtifactCleanupPlan;
+  error?: string;
+};
 export type ResearchRun = {
   runId: string;
   kind: string;
@@ -530,12 +555,15 @@ export type ResearchAcceptance = {
     requiredKinds: string[];
     missingKinds: string[];
     counts: Record<string, number>;
+    staleCounts?: Record<string, number>;
     totalPermanentRuns: number;
+    currentManifestHash?: string;
   };
   models: {
     registered: number;
     trained: number;
     activeModels: Record<string, unknown>;
+    staleActiveModels?: string[];
   };
   readiness: ResearchReadiness;
 };
@@ -635,6 +663,23 @@ export const api = {
   recentTasks: (limit = 10) =>
     request<GenericTask[]>(`/api/tasks/recent?limit=${limit}`),
   taskStatus: (taskId: string) => request<GenericTask>(`/api/tasks/${taskId}`),
+  artifactCleanupStatus: () =>
+    request<ArtifactCleanupStatus>("/api/system/artifact-cleanup"),
+  planArtifactCleanup: () =>
+    request<ArtifactCleanupPlan>("/api/system/artifact-cleanup/plan", {
+      method: "POST",
+    }),
+  executeArtifactCleanup: (
+    planId: string,
+    mode: "quarantine" | "delete" = "quarantine",
+  ) =>
+    request<{ taskId: string; planId: string; mode: string; total: number }>(
+      "/api/system/artifact-cleanup/execute",
+      {
+        method: "POST",
+        body: JSON.stringify({ plan_id: planId, mode }),
+      },
+    ),
   buildResearchPipeline: (scope: "representative" | "stale" | "all" = "stale") =>
     request<{ taskId: string; total: number; stages: number }>(
       "/api/pipeline/research/build",

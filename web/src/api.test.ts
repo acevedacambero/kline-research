@@ -84,4 +84,17 @@ describe('API errors', () => {
       body: '{"scope":"stale"}',
     })
   })
+
+  it('plans and executes safe artifact cleanup', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api.planArtifactCleanup()
+    await api.executeArtifactCleanup('a'.repeat(64), 'quarantine')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/system/artifact-cleanup/plan')
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/system/artifact-cleanup/execute')
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ plan_id: 'a'.repeat(64), mode: 'quarantine' }),
+    })
+  })
 })

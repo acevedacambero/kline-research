@@ -170,8 +170,10 @@ def test_task_isolates_security_failure_and_keeps_processing(tmp_path):
         {
             "security": "sh600000",
             "stage": "history-fetch",
-            "code": "HISTORY_COVERAGE_INCOMPLETE",
-            "message": "stale",
+                "code": "HISTORY_COVERAGE_INCOMPLETE",
+                "message": "stale",
+                "category": "data",
+                "retryable": False,
         }
     ]
 
@@ -212,8 +214,10 @@ def test_task_times_out_stuck_history_fetch_and_continues(tmp_path):
         {
             "security": "sh600000",
             "stage": "history-fetch",
-            "code": "HISTORY_FETCH_TIMEOUT",
-            "message": "history fetch timed out after 0.05s",
+                "code": "HISTORY_FETCH_TIMEOUT",
+                "message": "history fetch timed out after 0.05s",
+                "category": "timeout",
+                "retryable": True,
         }
     ]
     assert failures == [

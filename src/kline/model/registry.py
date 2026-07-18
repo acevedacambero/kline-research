@@ -69,7 +69,11 @@ class ModelRegistry:
         if result.get("status") != "trained":
             raise ModelPromotionError("MODEL_NOT_PROMOTABLE", "只有训练通过的模型可以设为当前模型")
         dependencies = artifact.get("dependencies", {})
-        required_keys = {"scoreDefinitionVersion", "labelDefinitionVersion"}
+        required_keys = {
+            "scoreDefinitionVersion",
+            "labelDefinitionVersion",
+            "dataSnapshotHash",
+        }
         if artifact.get("kind") == "multifeature":
             required_keys.add("featureDefinitionVersion")
         mismatches = {

@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 import os
+from pathlib import Path
 import time
 
 import pandas as pd
@@ -608,6 +609,61 @@ def test_research_pipeline_builds_p1_p2_p3_in_one_durable_task(tmp_path):
     assert len(list(data_path.glob("data-foundation-v1/scores/*/*/sh/600000.parquet"))) == 1
 
 
+def test_artifact_cleanup_plan_and_quarantine_task_are_auditable(tmp_path):
+    data_path = tmp_path / "data"
+    seed_security(data_path)
+    snapshot = DatasetPipeline(data_path).latest_snapshot_version("sh", "600000")
+    current = (
+        data_path
+        / "data-foundation-v1"
+        / "labels"
+        / str(snapshot)
+        / "sh"
+        / "600000.parquet"
+    )
+    old = (
+        data_path
+        / "data-foundation-v1"
+        / "labels"
+        / "snapshot-old"
+        / "sh"
+        / "600000.parquet"
+    )
+    for path in (current, old):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(
+            [{"label_definition_version": "daily-v2-exit-delay"}]
+        ).to_parquet(path, index=False)
+
+    app = create_app(Settings(data_path=data_path), FakeSource())
+    with TestClient(app) as client:
+        planned = client.post("/api/system/artifact-cleanup/plan")
+        assert planned.status_code == 200
+        plan = planned.json()
+        assert plan["fileCount"] == 1
+        assert plan["reasons"] == {"superseded": 1}
+        started = client.post(
+            "/api/system/artifact-cleanup/execute",
+            json={"plan_id": plan["planId"], "mode": "quarantine"},
+        )
+        assert started.status_code == 202
+        task_id = started.json()["taskId"]
+        for _ in range(100):
+            task = client.get(
+                f"/api/system/artifact-cleanup/tasks/{task_id}"
+            ).json()
+            if task["status"] not in {"queued", "running"}:
+                break
+            time.sleep(0.01)
+
+    assert task["status"] == "completed"
+    assert task["files"] == 1
+    assert task["mode"] == "quarantine"
+    assert Path(task["receiptPath"]).exists()
+    assert current.exists()
+    assert not old.exists()
+
+
 def test_feature_build_task_and_point_in_time_audit(tmp_path):
     data_path = tmp_path / "data"
     seed_security(data_path)
@@ -1149,6 +1205,7 @@ def test_model_registry_endpoint_promotes_only_trained_current_model(tmp_path):
         dependencies={
             "scoreDefinitionVersion": "p3-rule-score-v1",
             "labelDefinitionVersion": "daily-v2-exit-delay",
+            "dataSnapshotHash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
         },
     )
     client = TestClient(create_app(Settings(data_path=data_path), FakeSource()))
@@ -1192,6 +1249,47 @@ def test_research_acceptance_reports_missing_evidence_and_active_model(tmp_path)
     assert body["experiments"]["missingKinds"] == body["experiments"]["requiredKinds"]
     assert body["models"]["registered"] == 0
     assert "尚未选择当前模型" in body["blockers"]
+
+
+def test_research_acceptance_requires_runs_and_models_from_current_data_snapshot(tmp_path):
+    data_path = tmp_path / "data"
+    registry = api_module.ResearchRunRegistry(data_path)
+    registry.save(
+        "p4-single-factor",
+        {"version": "v1", "sampleCount": 10},
+        parameters={},
+        dependencies={},
+        data_snapshot={"manifestHash": "old-snapshot", "securityCount": 1},
+        code_version="old-release",
+    )
+    model_registry = api_module.ModelRegistry(data_path)
+    model = model_registry.save(
+        "baseline",
+        {"version": "v1", "status": "trained"},
+        dependencies={
+            "scoreDefinitionVersion": "p3-rule-score-v1",
+            "labelDefinitionVersion": "daily-v2-exit-delay",
+            "dataSnapshotHash": "old-snapshot",
+        },
+    )
+    model_registry.promote(
+        model["modelId"],
+        expected_dependencies={
+            "scoreDefinitionVersion": "p3-rule-score-v1",
+            "labelDefinitionVersion": "daily-v2-exit-delay",
+            "dataSnapshotHash": "old-snapshot",
+        },
+    )
+
+    body = TestClient(create_app(Settings(data_path=data_path), FakeSource())).get(
+        "/api/system/research-acceptance"
+    ).json()
+
+    assert "p4-single-factor" in body["experiments"]["missingKinds"]
+    assert body["experiments"]["counts"]["p4-single-factor"] == 0
+    assert body["experiments"]["staleCounts"]["p4-single-factor"] == 1
+    assert body["models"]["staleActiveModels"] == ["baseline"]
+    assert any("旧行情快照" in blocker for blocker in body["blockers"])
 
 
 def test_p8_portfolio_endpoint_returns_version_when_data_missing(tmp_path):

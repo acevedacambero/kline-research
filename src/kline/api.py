@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from .config import Settings, VERSIONS
 from .access import AccessDenied, CloudflareAccessVerifier
 from .data.akshare_source import AkShareSource
+from .data.artifact_cleanup import ArtifactCleanupPlan, ArtifactCleanupService
 from .data.history_backfill import (
     BackfillCandidate,
     BackfillCoverageError,
@@ -67,7 +68,7 @@ from .model import (
     train_score_baseline,
     walk_forward_score_baseline,
 )
-from .ops.provider_probe import ProviderProbeRunner
+from .ops.provider_probe import ProviderProbeRunner, classify_error
 from .ops.maintenance import DailyMaintenanceScheduler
 from .ops.backup import DataBackupManager
 from .research import ResearchRunRegistry
@@ -125,6 +126,11 @@ class MaintenanceScheduleRequest(BaseModel):
     enabled: bool
     hour: int = Field(ge=0, le=23)
     minute: int = Field(ge=0, le=59)
+
+
+class ArtifactCleanupExecuteRequest(BaseModel):
+    plan_id: str = Field(min_length=64, max_length=64)
+    mode: Literal["quarantine", "delete"] = "quarantine"
 
 
 class DriftRequest(BaseModel):
@@ -239,7 +245,42 @@ def _task_response(job: Job) -> dict:
     item["status"] = status
     if job.error and not item["errors"]:
         item["errors"] = [{"message": job.error}]
+    categories: dict[str, int] = {}
+    retryable_errors = 0
+    for error in item["errors"]:
+        if not isinstance(error, dict):
+            continue
+        category = str(error.get("category", "unknown"))
+        categories[category] = categories.get(category, 0) + 1
+        retryable_errors += bool(error.get("retryable", False))
+    item["errorCategories"] = categories
+    item["retryableErrors"] = retryable_errors
     return item
+
+
+def _classified_task_error(
+    security: str | None,
+    error: BaseException,
+    *,
+    stage: str | None = None,
+) -> dict:
+    code = str(getattr(error, "code", "")).upper()
+    if "TIMEOUT" in code:
+        category = "timeout"
+    elif "COVERAGE" in code or "DATA" in code:
+        category = "data"
+    else:
+        category = classify_error(error)
+    result = {
+        "message": str(error),
+        "category": category,
+        "retryable": category in {"network", "timeout", "unknown"},
+    }
+    if security:
+        result["security"] = security
+    if stage:
+        result["stage"] = stage
+    return result
 
 
 class _DurableItems:
@@ -400,7 +441,7 @@ class TaskStore(_TaskFacade):
                             )
                             importer(security["exchange"], security["code"], raw, factors)
                         except Exception as exc:
-                            state["errors"].append({"security": key, "message": str(exc)})
+                            state["errors"].append(_classified_task_error(key, exc))
                         finally:
                             record_finished()
                     for future in pending:
@@ -408,10 +449,10 @@ class TaskStore(_TaskFacade):
                         security = futures[future]
                         key = f"{security['exchange']}{security['code']}"
                         state["errors"].append(
-                            {
-                                "security": key,
-                                "message": f"fetch timed out after {timeout_seconds}s",
-                            }
+                            _classified_task_error(
+                                key,
+                                TimeoutError(f"fetch timed out after {timeout_seconds}s"),
+                            )
                         )
                         record_finished()
                 finally:
@@ -466,7 +507,7 @@ class LabelTaskStore(_TaskFacade):
                     else:
                         output.remove_security(exchange, security["code"])
                 except Exception as exc:
-                    state["errors"].append({"security": key, "message": str(exc)})
+                    state["errors"].append(_classified_task_error(key, exc, stage="labels"))
                 finally:
                     state["done"] += 1
                     progress(state)
@@ -496,7 +537,9 @@ class FeatureTaskStore(_TaskFacade):
                 if report:
                     state["rows"] += report.rows
                 if error:
-                    state["errors"].append({"security": security, "message": str(error)})
+                    state["errors"].append(
+                        _classified_task_error(security, error, stage="features")
+                    )
                 progress(state)
 
             builder.build_many(payload, on_progress=on_progress)
@@ -527,7 +570,9 @@ class ScoreTaskStore(_TaskFacade):
                 if report:
                     state["rows"] += report.rows
                 if error:
-                    state["errors"].append({"security": security, "message": str(error)})
+                    state["errors"].append(
+                        _classified_task_error(security, error, stage="scores")
+                    )
                 progress(state)
 
             builder.build_many(payload, on_progress=on_progress)
@@ -577,7 +622,7 @@ class ResearchPipelineTaskStore(_TaskFacade):
                 if error is not None:
                     stage_state["errors"] += 1
                     state["errors"].append(
-                        {"stage": stage, "security": security, "message": str(error)}
+                        _classified_task_error(security, error, stage=stage)
                     )
                 progress(state)
 
@@ -652,6 +697,35 @@ class ResearchPipelineTaskStore(_TaskFacade):
             return state
 
         return self._submit("research_pipeline", payload, operation)
+
+
+class ArtifactCleanupTaskStore(_TaskFacade):
+    def __init__(self, coordinator, store, lock):
+        super().__init__(coordinator, store, lock, {"artifact_cleanup"})
+
+    def submit(self, service, plan, mode, receipt_root, latest_plan_path) -> str:
+        payload = {"plan": plan.to_dict(), "mode": mode}
+
+        def operation(payload, progress):
+            current_plan = ArtifactCleanupPlan.from_dict(payload["plan"])
+            receipt = service.execute(current_plan, payload["mode"], on_progress=progress)
+            receipt_root.mkdir(parents=True, exist_ok=True)
+            receipt_path = receipt_root / f"{current_plan.plan_id}.json"
+            atomic_write_text(
+                json.dumps(receipt, ensure_ascii=False, indent=2), receipt_path
+            )
+            next_plan = service.plan()
+            atomic_write_text(
+                json.dumps(next_plan.to_dict(), ensure_ascii=False, indent=2),
+                latest_plan_path,
+            )
+            return {
+                key: value
+                for key, value in receipt.items()
+                if key != "entries"
+            } | {"errors": [], "receiptPath": str(receipt_path)}
+
+        return self._submit("artifact_cleanup", payload, operation)
 
 
 class HistoryBackfillTaskStore(_TaskFacade):
@@ -751,14 +825,9 @@ class HistoryBackfillTaskStore(_TaskFacade):
                     else:
                         state["completed"] += 1
                 except Exception as exc:
-                    state["errors"].append(
-                        {
-                            "security": key,
-                            "stage": "history-fetch",
-                            "code": getattr(exc, "code", "HISTORY_BACKFILL_FAILED"),
-                            "message": str(exc),
-                        }
-                    )
+                    error = _classified_task_error(key, exc, stage="history-fetch")
+                    error["code"] = getattr(exc, "code", "HISTORY_BACKFILL_FAILED")
+                    state["errors"].append(error)
                 finally:
                     state["done"] += 1
                     elapsed = max(time.monotonic() - started, 0.001)
@@ -1000,6 +1069,9 @@ def create_app(
     research_pipeline_tasks = ResearchPipelineTaskStore(
         coordinator, job_store, submission_lock
     )
+    artifact_cleanup_tasks = ArtifactCleanupTaskStore(
+        coordinator, job_store, submission_lock
+    )
     history_backfill_service = HistoryBackfillService(
         pipeline,
         download_source,
@@ -1018,6 +1090,8 @@ def create_app(
         settings.backup_path or settings.data_path.parent / "backups",
         exclude_paths=(jobs_db_path, jobs_db_path.with_name(jobs_db_path.name + ".wal")),
     )
+    artifact_cleanup_plan_path = settings.data_path / "artifact-cleanup-plan-latest.json"
+    artifact_cleanup_receipt_root = settings.data_path / "artifact-cleanup-receipts"
     history_backfill_scan_lock = threading.Lock()
     history_backfill_candidate_count: int | None = None
     approximate_quality_lock = threading.Lock()
@@ -1090,6 +1164,32 @@ def create_app(
             for (exchange, code), snapshot in sorted(current_snapshot_versions().items())
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+
+    def artifact_cleanup_service() -> ArtifactCleanupService:
+        return ArtifactCleanupService(
+            settings.data_path,
+            current_snapshot_versions(),
+            feature_version=FEATURE_DEFINITION_VERSION,
+            score_version=SCORE_DEFINITION_VERSION,
+        )
+
+    def artifact_cleanup_plan_response(plan: ArtifactCleanupPlan) -> dict:
+        reasons: dict[str, int] = {}
+        layers: dict[str, int] = {}
+        for item in plan.files:
+            reasons[item.reason] = reasons.get(item.reason, 0) + 1
+            layers[item.layer] = layers.get(item.layer, 0) + 1
+        return {
+            "version": plan.version,
+            "planId": plan.plan_id,
+            "snapshotSetHash": plan.snapshot_set_hash,
+            "fileCount": len(plan.files),
+            "totalBytes": plan.total_bytes,
+            "createdAt": plan.created_at,
+            "reasons": reasons,
+            "layers": layers,
+            "examples": [asdict(item) for item in plan.files[:20]],
+        }
 
     def current_approximate_securities() -> set[str]:
         events = pipeline.quality_events(limit=100_000)
@@ -1410,7 +1510,8 @@ def create_app(
             failed_keys = {
                 str(error.get("security"))
                 for error in failed_job.result["errors"]
-                if isinstance(error, dict) and error.get("security")
+                if isinstance(error, dict)
+                and error.get("security")
             }
             securities = [
                 item
@@ -1555,6 +1656,82 @@ def create_app(
             raise HTTPException(
                 409, detail={"code": "BACKUP_INVALID", "message": str(exc)}
             ) from exc
+
+    @app.get("/api/system/artifact-cleanup")
+    def artifact_cleanup_status():
+        if not artifact_cleanup_plan_path.exists():
+            return {"available": False}
+        try:
+            plan = ArtifactCleanupPlan.from_dict(
+                json.loads(artifact_cleanup_plan_path.read_text(encoding="utf-8"))
+            )
+            return {"available": True, "plan": artifact_cleanup_plan_response(plan)}
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            return {"available": False, "error": str(exc)}
+
+    @app.post("/api/system/artifact-cleanup/plan")
+    def plan_artifact_cleanup():
+        artifact_cleanup_tasks.active()
+        plan = artifact_cleanup_service().plan()
+        atomic_write_text(
+            json.dumps(plan.to_dict(), ensure_ascii=False, indent=2),
+            artifact_cleanup_plan_path,
+        )
+        return artifact_cleanup_plan_response(plan)
+
+    @app.post("/api/system/artifact-cleanup/execute", status_code=202)
+    def execute_artifact_cleanup(request: ArtifactCleanupExecuteRequest):
+        artifact_cleanup_tasks.active()
+        try:
+            plan = ArtifactCleanupPlan.from_dict(
+                json.loads(artifact_cleanup_plan_path.read_text(encoding="utf-8"))
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "ARTIFACT_CLEANUP_PLAN_MISSING",
+                    "message": "请先生成衍生产物清理计划",
+                },
+            ) from exc
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "ARTIFACT_CLEANUP_PLAN_INVALID",
+                    "message": str(exc),
+                },
+            ) from exc
+        if plan.plan_id != request.plan_id:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "ARTIFACT_CLEANUP_PLAN_MISMATCH",
+                    "message": "清理计划已经变化，请重新生成计划",
+                },
+            )
+        task_id = artifact_cleanup_tasks.submit(
+            artifact_cleanup_service(),
+            plan,
+            request.mode,
+            artifact_cleanup_receipt_root,
+            artifact_cleanup_plan_path,
+        )
+        return {
+            "taskId": task_id,
+            "planId": plan.plan_id,
+            "mode": request.mode,
+            "total": len(plan.files),
+        }
+
+    @app.get("/api/system/artifact-cleanup/tasks/{task_id}")
+    def artifact_cleanup_task_status(task_id: str):
+        if task_id not in artifact_cleanup_tasks.items:
+            raise HTTPException(
+                404,
+                detail={"code": "TASK_NOT_FOUND", "message": "cleanup task not found"},
+            )
+        return artifact_cleanup_tasks.items[task_id]
 
     @app.get("/api/datasets/tasks/{task_id}")
     def task_status(task_id: str):
@@ -2355,6 +2532,7 @@ def create_app(
                     dependencies={
                         "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
                         "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
+                        "dataSnapshotHash": research_data_snapshot()["manifestHash"],
                         "trainUntil": request.train_until,
                         "embargoDays": request.embargo_days,
                     },
@@ -2544,6 +2722,8 @@ def create_app(
         quality_result = quality()
         research_runs_result = research_registry.list(limit=500)
         model_registry_result = model_registry.list()
+        current_data_snapshot = research_data_snapshot()
+        current_manifest_hash = current_data_snapshot["manifestHash"]
         required_run_kinds = (
             "p4-single-factor",
             "p5-calibration",
@@ -2553,12 +2733,29 @@ def create_app(
             "p7-walk-forward",
             "p8-portfolio",
         )
+        all_runs_by_kind: dict[str, list[dict]] = {
+            kind: [] for kind in required_run_kinds
+        }
         runs_by_kind: dict[str, list[dict]] = {kind: [] for kind in required_run_kinds}
         for run in research_runs_result["runs"]:
-            if run.get("kind") in runs_by_kind:
-                runs_by_kind[run["kind"]].append(run)
+            kind = run.get("kind")
+            if kind in runs_by_kind:
+                all_runs_by_kind[kind].append(run)
+                if run.get("dataSnapshot", {}).get("manifestHash") == current_manifest_hash:
+                    runs_by_kind[kind].append(run)
         missing_runs = [kind for kind, runs in runs_by_kind.items() if not runs]
         active_models = model_registry_result.get("activeModels", {})
+        artifacts_by_id = {
+            item.get("modelId"): item for item in model_registry_result["artifacts"]
+        }
+        stale_active_models = [
+            kind
+            for kind, active in active_models.items()
+            if artifacts_by_id.get(active.get("modelId"), {})
+            .get("dependencies", {})
+            .get("dataSnapshotHash")
+            != current_manifest_hash
+        ]
         blockers = list(readiness_result.get("blockers", []))
         if quality_result.get("staleSecurities", 0):
             blockers.append(f"存在 {quality_result['staleSecurities']} 只行情过期证券")
@@ -2566,6 +2763,8 @@ def create_app(
             blockers.append(f"缺少 {len(missing_runs)} 类正式研究实验记录")
         if not active_models:
             blockers.append("尚未选择当前模型")
+        elif stale_active_models:
+            blockers.append(f"存在 {len(stale_active_models)} 个依赖旧行情快照的当前模型")
         return {
             "version": "research-acceptance-v1",
             "generatedAt": datetime.now(timezone.utc).isoformat(),
@@ -2585,7 +2784,12 @@ def create_app(
                 "requiredKinds": list(required_run_kinds),
                 "missingKinds": missing_runs,
                 "counts": {kind: len(runs) for kind, runs in runs_by_kind.items()},
+                "staleCounts": {
+                    kind: len(all_runs_by_kind[kind]) - len(runs_by_kind[kind])
+                    for kind in required_run_kinds
+                },
                 "totalPermanentRuns": research_runs_result["total"],
+                "currentManifestHash": current_manifest_hash,
             },
             "models": {
                 "registered": len(model_registry_result["artifacts"]),
@@ -2594,6 +2798,7 @@ def create_app(
                     for item in model_registry_result["artifacts"]
                 ),
                 "activeModels": active_models,
+                "staleActiveModels": stale_active_models,
             },
             "readiness": readiness_result,
         }
@@ -2648,6 +2853,7 @@ def create_app(
                         "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
                         "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
                         "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
+                        "dataSnapshotHash": research_data_snapshot()["manifestHash"],
                         "trainUntil": request.train_until,
                         "embargoDays": request.embargo_days,
                     },
@@ -2668,6 +2874,7 @@ def create_app(
                     "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
                     "featureDefinitionVersion": FEATURE_DEFINITION_VERSION,
                     "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
+                    "dataSnapshotHash": research_data_snapshot()["manifestHash"],
                 },
             )
         except ModelPromotionError as exc:
@@ -2761,6 +2968,7 @@ def create_app(
                     dependencies={
                         "scoreDefinitionVersion": SCORE_DEFINITION_VERSION,
                         "labelDefinitionVersion": VERSIONS["labelDefinitionVersion"],
+                        "dataSnapshotHash": research_data_snapshot()["manifestHash"],
                         "labelColumn": request.label_column,
                         "folds": request.folds,
                         "embargoDays": request.embargo_days,

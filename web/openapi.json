@@ -367,6 +367,111 @@
         }
       }
     },
+    "/api/system/artifact-cleanup": {
+      "get": {
+        "summary": "Artifact Cleanup Status",
+        "operationId": "artifact_cleanup_status_api_system_artifact_cleanup_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/artifact-cleanup/plan": {
+      "post": {
+        "summary": "Plan Artifact Cleanup",
+        "operationId": "plan_artifact_cleanup_api_system_artifact_cleanup_plan_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/artifact-cleanup/execute": {
+      "post": {
+        "summary": "Execute Artifact Cleanup",
+        "operationId": "execute_artifact_cleanup_api_system_artifact_cleanup_execute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactCleanupExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/system/artifact-cleanup/tasks/{task_id}": {
+      "get": {
+        "summary": "Artifact Cleanup Task Status",
+        "operationId": "artifact_cleanup_task_status_api_system_artifact_cleanup_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/datasets/tasks/{task_id}": {
       "get": {
         "summary": "Task Status",
@@ -1738,6 +1843,30 @@
   },
   "components": {
     "schemas": {
+      "ArtifactCleanupExecuteRequest": {
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Plan Id"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "quarantine",
+              "delete"
+            ],
+            "title": "Mode",
+            "default": "quarantine"
+          }
+        },
+        "type": "object",
+        "required": [
+          "plan_id"
+        ],
+        "title": "ArtifactCleanupExecuteRequest"
+      },
       "AuditRequest": {
         "properties": {
           "exchange": {

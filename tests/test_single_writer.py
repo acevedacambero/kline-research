@@ -142,6 +142,7 @@ def test_durable_queued_import_status_preserves_ui_fields(tmp_path):
         "total": 1, "done": 0, "rows": 0,
         "errors": [], "currentSecurity": None, "stage": "queued", "speed": 0.0,
         "etaSeconds": None, "directAvailable": None,
+        "errorCategories": {}, "retryableErrors": 0,
     }
 
 
@@ -341,6 +342,9 @@ def test_hung_import_fetch_times_out_and_releases_coordinator(tmp_path, monkeypa
             assert task["status"] == "completed_with_errors"
             assert len(task["errors"]) == 2
             assert all("timed out after 1s" in error["message"] for error in task["errors"])
+            assert all(error["category"] == "timeout" for error in task["errors"])
+            assert task["errorCategories"] == {"timeout": 2}
+            assert task["retryableErrors"] == 2
             follow_up = client.post("/api/features/build", json={"scope": "all"})
             assert follow_up.status_code == 202
     finally:

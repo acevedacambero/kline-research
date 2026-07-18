@@ -63,7 +63,7 @@ describe("App", () => {
       kind: "p6-scan",
       createdAt: "2026-07-16T12:00:00Z",
       codeVersion: "release-1",
-      parameters: { min_score: 70 },
+      parameters: { min_score: 82, exchange: "sz", as_of_date: "2026-06-30" },
       dependencies: { scoreDefinitionVersion: "score-v1" },
       dataSnapshot: { manifestHash: "abcdef123456", securityCount: 5200 },
       summary: { scannedCount: 12 },
@@ -94,6 +94,8 @@ describe("App", () => {
     expect(screen.getByText(/5200 只/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "重新载入" }));
     expect(await screen.findByText("已重新载入实验 aaaaaaaa")).toBeInTheDocument();
+    expect(screen.getByLabelText("最低分")).toHaveValue(82);
+    expect(screen.getByLabelText("市场")).toHaveValue("sz");
   });
   it("shows data status and P1 audit workspace", async () => {
     vi.stubGlobal(
