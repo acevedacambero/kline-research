@@ -100,6 +100,12 @@ def test_batch_builder_skips_feature_computation_for_existing_output(tmp_path, m
             AssertionError("existing P2 output must be reused before computation")
         ),
     )
+    monkeypatch.setattr(
+        "kline.features.batch.pd.read_parquet",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("existing P2 output must be reused before reading bars")
+        ),
+    )
 
     report = BatchFeatureBuilder(store).build_security(
         {

@@ -53,6 +53,32 @@ class FeatureDatasetStore:
             / feature_definition_version / identity / exchange / f"{code}.parquet"
         )
 
+    def reuse_current(
+        self,
+        exchange: str,
+        code: str,
+        *,
+        snapshot_version: str,
+        limit_rule_version: str,
+        feature_definition_version: str,
+    ) -> FeatureStoreReport | None:
+        root = self.output_root / "data-foundation-v1" / "features"
+        pattern = (
+            f"{feature_definition_version}/{snapshot_version}__*__"
+            f"{limit_rule_version}/{exchange}/{code}.parquet"
+        )
+        matches = list(root.glob(pattern))
+        if len(matches) != 1:
+            return None
+        path = matches[0]
+        manifest_path = path.parent / f"{code}.manifest.json"
+        if not manifest_path.exists():
+            return None
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return FeatureStoreReport(
+            "reused", str(path), str(manifest_path), int(manifest.get("rows", 0))
+        )
+
     def write(
         self,
         exchange: str,
@@ -110,6 +136,15 @@ class BatchFeatureBuilder:
         self.workers = max(1, int(workers))
 
     def build_security(self, security: dict[str, Any]) -> FeatureStoreReport:
+        reused = self.store.reuse_current(
+            security["exchange"],
+            security["code"],
+            snapshot_version=security["snapshot_version"],
+            limit_rule_version=VERSIONS["limitRuleVersion"],
+            feature_definition_version=FEATURE_DEFINITION_VERSION,
+        )
+        if reused is not None:
+            return reused
         frame = pd.read_parquet(security["derived_path"])
         factor_version = (
             str(frame["factor_version"].dropna().iloc[0])

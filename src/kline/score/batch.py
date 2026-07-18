@@ -108,6 +108,34 @@ class ScoreDatasetStore:
         )
         return root / f"{code}.parquet", root / f"{code}.manifest.json"
 
+    def reuse_current(
+        self,
+        exchange: str,
+        code: str,
+        *,
+        snapshot_version: str,
+        limit_rule_version: str,
+        feature_definition_version: str,
+        score_definition_version: str,
+    ) -> ScoreStoreReport | None:
+        root = self.output_root / "data-foundation-v1" / "scores"
+        pattern = (
+            f"{score_definition_version}/{snapshot_version}__*__"
+            f"{limit_rule_version}__{feature_definition_version}/"
+            f"{exchange}/{code}.parquet"
+        )
+        matches = list(root.glob(pattern))
+        if len(matches) != 1:
+            return None
+        path = matches[0]
+        manifest_path = path.parent / f"{code}.manifest.json"
+        if not manifest_path.exists():
+            return None
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return ScoreStoreReport(
+            "reused", str(path), str(manifest_path), int(manifest.get("rows", 0))
+        )
+
     def write(
         self,
         exchange: str,
@@ -165,6 +193,16 @@ class BatchScoreBuilder:
         self.workers = max(1, int(workers))
 
     def build_security(self, security: dict[str, Any]) -> ScoreStoreReport:
+        reused = self.store.reuse_current(
+            security["exchange"],
+            security["code"],
+            snapshot_version=security["snapshot_version"],
+            limit_rule_version=VERSIONS["limitRuleVersion"],
+            feature_definition_version=FEATURE_DEFINITION_VERSION,
+            score_definition_version=SCORE_DEFINITION_VERSION,
+        )
+        if reused is not None:
+            return reused
         frame = pd.read_parquet(security["derived_path"])
         factor_version = (
             str(frame["factor_version"].dropna().iloc[0])

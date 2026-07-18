@@ -173,6 +173,12 @@ def test_score_builder_skips_score_computation_when_output_exists(tmp_path, monk
         raise AssertionError("existing P3 output must be reused before score computation")
 
     monkeypatch.setattr("kline.score.batch.compute_score_frame_from_features", should_not_compute)
+    monkeypatch.setattr(
+        "kline.score.batch.pd.read_parquet",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("existing P3 output must be reused before reading bars")
+        ),
+    )
     report = BatchScoreBuilder(store).build_security(
         {
             "exchange": "sh",
