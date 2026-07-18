@@ -10,7 +10,8 @@ from kline.api import create_app
 from kline.config import Settings
 
 
-TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+SUCCESS_STATUSES = {"completed", "completed_with_errors"}
+TERMINAL_STATUSES = {*SUCCESS_STATUSES, "failed", "cancelled"}
 
 
 def run_task(
@@ -54,7 +55,7 @@ def run_task(
             )
             last_marker = marker
         if task["status"] in TERMINAL_STATUSES:
-            if task["status"] != "completed":
+            if task["status"] not in SUCCESS_STATUSES:
                 raise RuntimeError(json.dumps(task, ensure_ascii=False, default=str))
             return task
         time.sleep(poll_seconds)
