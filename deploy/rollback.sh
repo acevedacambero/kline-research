@@ -35,12 +35,12 @@ ln -sfn "${target}" "${root}/current.next"
 mv -Tf "${root}/current.next" "${current}"
 printf '%s\n' "${target}/src" > "${pth}"
 systemctl --user restart kline.service
-if ! "${target}/deploy/healthcheck.sh"; then
+if ! bash "${target}/deploy/healthcheck.sh"; then
   ln -sfn "${old}" "${root}/current.next"
   mv -Tf "${root}/current.next" "${current}"
   printf '%s\n' "${old}/src" > "${pth}"
   systemctl --user restart kline.service
-  "${old}/deploy/healthcheck.sh" || true
+  bash "${old}/deploy/healthcheck.sh" || true
   echo "Rollback target failed health checks; restored the original release." >&2
   exit 4
 fi
