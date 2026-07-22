@@ -2,7 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from kline.data.artifact_cleanup import ArtifactCleanupService
+from kline.data.artifact_cleanup import (
+    ArtifactCleanupService,
+    referenced_snapshot_versions,
+)
 
 
 def write(path: Path, value: bytes = b"artifact") -> Path:
@@ -126,3 +129,61 @@ def test_quarantine_execution_can_resume_after_partial_move(tmp_path):
     assert statuses[first_key] == "already_quarantined"
     assert statuses[second_key] == "quarantined"
     assert not second.exists()
+
+
+def test_plan_removes_superseded_snapshot_files_only_with_current_replacement(tmp_path):
+    root = tmp_path / "data"
+    foundation = root / "data-foundation-v1"
+    old_root = foundation / "snapshots/snapshot-0000000000000001"
+    new_root = foundation / "snapshots/snapshot-0000000000000002"
+    old_files = [
+        write(old_root / "derived/sh/600000.parquet", b"old-derived"),
+        write(old_root / "facts/raw_bars/sh/600000.parquet", b"old-raw"),
+        write(old_root / "facts/adjustment_factors/sh/600000.parquet", b"old-factor"),
+    ]
+    current = write(new_root / "derived/sh/600000.parquet", b"current")
+    orphan = write(old_root / "derived/sh/603124.parquet", b"orphan")
+    cleanup = ArtifactCleanupService(
+        root,
+        {("sh", "600000"): "snapshot-0000000000000002"},
+        feature_version="daily-features-v1",
+        score_version="p3-rule-score-v1",
+    )
+
+    plan = cleanup.plan()
+    planned = {item.path for item in plan.files}
+
+    assert all(str(path.relative_to(root)).replace("\\", "/") in planned for path in old_files)
+    assert str(current.relative_to(root)).replace("\\", "/") not in planned
+    assert str(orphan.relative_to(root)).replace("\\", "/") not in planned
+
+
+def test_referenced_snapshot_versions_protect_snapshot_and_layer_artifacts(tmp_path):
+    root = tmp_path / "data"
+    foundation = root / "data-foundation-v1"
+    old_version = "snapshot-0000000000000001"
+    new_version = "snapshot-0000000000000002"
+    old_snapshot = write(foundation / f"snapshots/{old_version}/derived/sh/600000.parquet")
+    write(foundation / f"snapshots/{new_version}/derived/sh/600000.parquet")
+    old_label = write(foundation / f"labels/{old_version}/sh/600000.parquet")
+    write(foundation / f"labels/{new_version}/sh/600000.parquet")
+    registry = foundation / "research-runs/p4/run.json"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(
+        '{"dataSnapshot":{"snapshotVersions":["snapshot-0000000000000001"]}}',
+        encoding="utf-8",
+    )
+    protected = referenced_snapshot_versions(root)
+    cleanup = ArtifactCleanupService(
+        root,
+        {("sh", "600000"): new_version},
+        feature_version="daily-features-v1",
+        score_version="p3-rule-score-v1",
+        protected_snapshot_versions=protected,
+    )
+
+    planned = {item.path for item in cleanup.plan().files}
+
+    assert protected == {old_version}
+    assert str(old_snapshot.relative_to(root)).replace("\\", "/") not in planned
+    assert str(old_label.relative_to(root)).replace("\\", "/") not in planned

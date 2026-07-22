@@ -6,12 +6,43 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 from typing import Any, Callable, Literal, Mapping
 
 from kline.artifact_lineage import artifact_security_key, artifact_snapshot_version
 
 
 CleanupMode = Literal["quarantine", "delete"]
+_SNAPSHOT_VERSION = re.compile(r"^snapshot-[0-9a-f]{16}$")
+
+
+def referenced_snapshot_versions(data_root: Path) -> set[str]:
+    """Return snapshot versions explicitly referenced by research/model artifacts."""
+    foundation = Path(data_root) / "data-foundation-v1"
+    versions: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+        elif isinstance(value, str) and _SNAPSHOT_VERSION.fullmatch(value):
+            versions.add(value)
+
+    for root_name in ("research-runs", "models"):
+        for path in foundation.glob(f"{root_name}/**/*.json"):
+            try:
+                raw = path.read_text(encoding="utf-8")
+                visit(json.loads(raw))
+            except (OSError, ValueError, TypeError):
+                # Preserve any explicit version still recoverable from a malformed entry.
+                try:
+                    versions.update(re.findall(r"snapshot-[0-9a-f]{16}", raw))
+                except (OSError, UnboundLocalError):
+                    continue
+    return versions
 
 
 @dataclass(frozen=True)
@@ -50,7 +81,7 @@ class ArtifactCleanupPlan:
 
 
 class ArtifactCleanupService:
-    VERSION = "artifact-cleanup-v1"
+    VERSION = "artifact-cleanup-v2"
 
     def __init__(
         self,
@@ -59,15 +90,18 @@ class ArtifactCleanupService:
         *,
         feature_version: str,
         score_version: str,
+        protected_snapshot_versions: set[str] | None = None,
     ) -> None:
         self.root = Path(data_root).resolve()
         self.foundation = self.root / "data-foundation-v1"
         self.current_snapshots = dict(current_snapshots)
         self.feature_version = feature_version
         self.score_version = score_version
+        self.protected_snapshot_versions = set(protected_snapshot_versions or ())
 
     def plan(self) -> ArtifactCleanupPlan:
         candidates: dict[Path, tuple[str, str]] = {}
+        self._collect_snapshots(candidates)
         self._collect_layer(
             "labels",
             self.foundation.glob("labels/*/*/*.parquet"),
@@ -126,6 +160,44 @@ class ArtifactCleanupService:
             total_bytes=sum(entry.size for entry in entries),
             created_at=datetime.now(timezone.utc).isoformat(),
         )
+
+    def _collect_snapshots(
+        self,
+        candidates: dict[Path, tuple[str, str]],
+    ) -> None:
+        """Collect obsolete raw/factor/derived files only when a current replacement exists."""
+        for derived in self.foundation.glob("snapshots/*/derived/*/*.parquet"):
+            version = derived.parents[2].name
+            key = (derived.parent.name, derived.stem)
+            current_version = self.current_snapshots.get(key)
+            if (
+                not current_version
+                or version == current_version
+                or version in self.protected_snapshot_versions
+            ):
+                continue
+            replacement = (
+                self.foundation
+                / "snapshots"
+                / current_version
+                / "derived"
+                / key[0]
+                / f"{key[1]}.parquet"
+            )
+            if not replacement.exists():
+                continue
+            snapshot_root = self.foundation / "snapshots" / version
+            for candidate in (
+                derived,
+                snapshot_root / "facts" / "raw_bars" / key[0] / f"{key[1]}.parquet",
+                snapshot_root
+                / "facts"
+                / "adjustment_factors"
+                / key[0]
+                / f"{key[1]}.parquet",
+            ):
+                if candidate.exists():
+                    candidates[candidate.resolve()] = ("snapshots", "superseded-snapshot")
 
     def execute(
         self,
@@ -225,7 +297,11 @@ class ArtifactCleanupService:
                 continue
             keep = max(usable, key=lambda path: path.stat().st_mtime_ns)
             for path in artifacts:
-                if path != keep:
+                if (
+                    path != keep
+                    and artifact_snapshot_version(path)
+                    not in self.protected_snapshot_versions
+                ):
                     candidates[path] = (layer, "superseded")
 
     def _is_current(self, layer: str, key: tuple[str, str], path: Path) -> bool:

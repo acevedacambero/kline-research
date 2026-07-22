@@ -25,7 +25,11 @@ from pydantic import BaseModel, Field
 from .config import Settings, VERSIONS
 from .access import AccessDenied, CloudflareAccessVerifier
 from .data.akshare_source import AkShareSource
-from .data.artifact_cleanup import ArtifactCleanupPlan, ArtifactCleanupService
+from .data.artifact_cleanup import (
+    ArtifactCleanupPlan,
+    ArtifactCleanupService,
+    referenced_snapshot_versions,
+)
 from .data.history_backfill import (
     BackfillCandidate,
     BackfillCoverageError,
@@ -1441,6 +1445,7 @@ def create_app(
             current_snapshot_versions(),
             feature_version=FEATURE_DEFINITION_VERSION,
             score_version=SCORE_DEFINITION_VERSION,
+            protected_snapshot_versions=referenced_snapshot_versions(settings.data_path),
         )
 
     def artifact_cleanup_plan_response(plan: ArtifactCleanupPlan) -> dict:
@@ -1569,14 +1574,67 @@ def create_app(
         with score_status_lock:
             score_status_cache.update(value=None, expires=0.0)
 
-    label_tasks.on_finish = invalidate_label_status
-    feature_tasks.on_finish = invalidate_feature_catalog
-    score_tasks.on_finish = invalidate_score_status
+    def enforce_artifact_retention() -> None:
+        if not settings.artifact_retention_auto_enabled:
+            return
+        try:
+            service = artifact_cleanup_service()
+            plan = service.plan()
+            atomic_write_text(
+                json.dumps(plan.to_dict(), ensure_ascii=False, indent=2),
+                artifact_cleanup_plan_path,
+            )
+            if not plan.files:
+                return
+            receipt = service.execute(plan, "delete")
+            artifact_cleanup_receipt_root.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(
+                json.dumps(receipt, ensure_ascii=False, indent=2),
+                artifact_cleanup_receipt_root / f"{plan.plan_id}.json",
+            )
+            next_plan = service.plan()
+            atomic_write_text(
+                json.dumps(next_plan.to_dict(), ensure_ascii=False, indent=2),
+                artifact_cleanup_plan_path,
+            )
+            management_audit.record(
+                "artifact_retention_completed",
+                target=plan.plan_id,
+                details={
+                    "files": len(plan.files),
+                    "releasedBytes": receipt["releasedBytes"],
+                },
+            )
+        except Exception as exc:
+            # Retention failure is operationally visible but must not turn a successful
+            # market/research build into a failed build.
+            management_audit.record(
+                "artifact_retention_failed",
+                details={"error": str(exc)},
+            )
+
+    def finish_labels():
+        invalidate_label_status()
+        enforce_artifact_retention()
+
+    def finish_features():
+        invalidate_feature_catalog()
+        enforce_artifact_retention()
+
+    def finish_scores():
+        invalidate_score_status()
+        enforce_artifact_retention()
+
+    tasks.on_finish = enforce_artifact_retention
+    label_tasks.on_finish = finish_labels
+    feature_tasks.on_finish = finish_features
+    score_tasks.on_finish = finish_scores
 
     def invalidate_research_pipeline_status():
         invalidate_label_status()
         invalidate_feature_catalog()
         invalidate_score_status()
+        enforce_artifact_retention()
 
     research_pipeline_tasks.on_finish = invalidate_research_pipeline_status
     daily_pipeline_tasks.on_finish = invalidate_research_pipeline_status
@@ -2878,6 +2936,9 @@ def create_app(
         return {
             "manifestHash": hashlib.sha256(encoded).hexdigest(),
             "securityCount": len(identity),
+            "snapshotVersions": sorted(
+                {item["snapshotVersion"] for item in identity if item["snapshotVersion"]}
+            ),
             "coverageReportVersion": (coverage_service.load() or {}).get("version"),
             "coverageGeneratedAt": (coverage_service.load() or {}).get("generatedAt"),
         }

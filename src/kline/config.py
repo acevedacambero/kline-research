@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     maintenance_auto_enabled: bool = False
     maintenance_hour: int = Field(default=18, ge=0, le=23)
     maintenance_minute: int = Field(default=30, ge=0, le=59)
+    artifact_retention_auto_enabled: bool = False
     backup_path: Path | None = None
     frontend_dist_path: Path | None = None
     cloudflare_access_required: bool = False
